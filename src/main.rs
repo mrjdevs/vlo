@@ -23,17 +23,16 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{mpsc::channel, Arc, Mutex},
+    time::Instant,
 };
 use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
-
 #[derive(Parser)]
 #[command(name = "vlo", version, about = "VLO Web Framework")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
-
 #[derive(Subcommand)]
 enum Commands {
     Dev,
@@ -43,7 +42,6 @@ enum Commands {
         provider: String,
     },
 }
-
 #[tokio::main]
 async fn main() {
     match Cli::parse().command {
@@ -52,7 +50,6 @@ async fn main() {
         Commands::Deploy { provider } => deploy(&provider).await,
     }
 }
-
 fn get_project_root() -> PathBuf {
     let mut starts = Vec::new();
     if let Ok(dir) = std::env::current_dir() {
@@ -77,14 +74,10 @@ fn get_project_root() -> PathBuf {
     }
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
-
 fn get_db_conn() -> Result<Connection> {
     let root = get_project_root();
     let conn = Connection::open(root.join("vlo_app.db"))?;
-    conn.execute_batch(
-        "PRAGMA foreign_keys = ON;
-         PRAGMA journal_mode = WAL;",
-    )?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
     let schema = root.join("schema.sql");
     if schema.exists() {
         let sql = fs::read_to_string(schema)
@@ -101,14 +94,12 @@ fn get_db_conn() -> Result<Connection> {
     }
     Ok(conn)
 }
-
 fn extract_server_block(content: &str) -> Option<String> {
     let start = content.find("<script server>")?;
     let rest = &content[start + 15..];
     let end = rest.find("</script>")?;
     Some(rest[..end].trim().to_string())
 }
-
 fn strip_server_block(content: &str) -> String {
     if let Some(start) = content.find("<script server>") {
         if let Some(end) = content[start..].find("</script>") {
@@ -118,10 +109,8 @@ fn strip_server_block(content: &str) -> String {
     }
     content.to_string()
 }
-
 fn load_api_actions() -> Result<HashMap<String, String>, String> {
-    let root = get_project_root();
-    let file = root.join("pages").join("api").join("api.vlo");
+    let file = get_project_root().join("pages/api/api.vlo");
     println!("🔎 [VLO API] Loading: {}", file.display());
     if !file.exists() {
         return Err(format!("API file not found: {}", file.display()));
@@ -148,7 +137,6 @@ fn load_api_actions() -> Result<HashMap<String, String>, String> {
     println!("✅ [VLO API] Loaded {} actions", actions.len());
     Ok(actions)
 }
-
 async fn dev() {
     let root = get_project_root();
     let pages_path = root.join("pages");
@@ -156,7 +144,7 @@ async fn dev() {
     let public_path2 = public_path.clone();
     let (tx, _) = broadcast::channel::<()>(16);
     let tx_watcher = tx.clone();
-    let last_reload = Arc::new(Mutex::new(std::time::Instant::now()));
+    let last_reload = Arc::new(Mutex::new(Instant::now()));
     std::thread::spawn(move || {
         let _ = watch_files(pages_path, public_path, tx_watcher, last_reload);
     });
@@ -200,14 +188,12 @@ async fn dev() {
         .await
         .expect("Server error");
 }
-
 async fn shutdown_signal() {
     tokio::signal::ctrl_c()
         .await
         .expect("Failed to listen for Ctrl+C");
     println!("\n⚡ Shutting down VLO dev server...");
 }
-
 async fn hmr_handler(
     tx: broadcast::Sender<()>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
@@ -219,7 +205,6 @@ async fn hmr_handler(
     };
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
-
 fn build() {
     println!("⚡ Building production site...");
     let root = get_project_root();
@@ -254,7 +239,6 @@ fn build() {
     }
     println!("⚡ Build completed successfully!");
 }
-
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
@@ -268,7 +252,6 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
     Ok(())
 }
-
 async fn deploy(provider: &str) {
     let root = get_project_root();
     let dist = root.join("dist");
@@ -316,7 +299,6 @@ async fn deploy(provider: &str) {
         Err(e) => eprintln!("❌ Failed to execute deployment command: {}", e),
     }
 }
-
 async fn api_handler_root(
     method: Method,
     Query(query): Query<HashMap<String, String>>,
@@ -324,7 +306,6 @@ async fn api_handler_root(
 ) -> impl IntoResponse {
     api_route_handler(None, None, method, query, payload).await
 }
-
 async fn api_handler_path(
     AxumPath(resource): AxumPath<String>,
     method: Method,
@@ -333,7 +314,6 @@ async fn api_handler_path(
 ) -> impl IntoResponse {
     api_route_handler(Some(resource), None, method, query, payload).await
 }
-
 async fn api_handler_id(
     AxumPath((resource, id)): AxumPath<(String, String)>,
     method: Method,
@@ -342,7 +322,6 @@ async fn api_handler_id(
 ) -> impl IntoResponse {
     api_route_handler(Some(resource), Some(id), method, query, payload).await
 }
-
 fn crud_operation(method: &Method) -> Option<&'static str> {
     match *method {
         Method::GET => Some("get"),
@@ -353,7 +332,6 @@ fn crud_operation(method: &Method) -> Option<&'static str> {
         _ => None,
     }
 }
-
 fn normalize_resource(endpoint: &str) -> String {
     let value = endpoint.trim().trim_matches('/');
     for prefix in ["get_", "post_", "put_", "patch_", "delete_"] {
@@ -363,11 +341,9 @@ fn normalize_resource(endpoint: &str) -> String {
     }
     value.to_string()
 }
-
 fn valid_identifier(value: &str) -> bool {
     !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
-
 async fn api_route_handler(
     mut endpoint: Option<String>,
     id: Option<String>,
@@ -539,7 +515,6 @@ async fn api_route_handler(
         }
     }
 }
-
 fn value_to_sql_value(value: &Value) -> rusqlite::types::Value {
     match value {
         Value::Null => rusqlite::types::Value::Null,
@@ -563,7 +538,6 @@ fn value_to_sql_value(value: &Value) -> rusqlite::types::Value {
         _ => rusqlite::types::Value::Text(value.to_string()),
     }
 }
-
 fn prepare_sql(
     sql: &str,
     params: &serde_json::Map<String, Value>,
@@ -585,7 +559,6 @@ fn prepare_sql(
         .into_owned();
     Ok((prepared, values))
 }
-
 fn value_to_sql(value: &Value) -> String {
     match value {
         Value::Null => "NULL".to_string(),
@@ -601,7 +574,6 @@ fn value_to_sql(value: &Value) -> String {
         _ => format!("'{}'", value.to_string().replace('\'', "''")),
     }
 }
-
 fn add_id_filter(sql: &str, params: &serde_json::Map<String, Value>) -> String {
     let id = match params.get("id") {
         Some(value) => value_to_sql(value),
@@ -625,18 +597,6 @@ fn add_id_filter(sql: &str, params: &serde_json::Map<String, Value>) -> String {
         }
     }
 }
-/*
-fn extract_select(sql: &str) -> Option<String> {
-    let mut result = None;
-    for statement in sql.split(';') {
-        let s = statement.trim();
-        if s.to_uppercase().starts_with("SELECT ") {
-            result = Some(s.to_string());
-        }
-    }
-    result
-}
-*/
 fn row_to_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let mut map = serde_json::Map::new();
     for i in 0..row.as_ref().column_count() {
@@ -654,7 +614,6 @@ fn row_to_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     }
     Ok(Value::Object(map))
 }
-
 fn execute_api_sql(
     conn: &mut Connection,
     sql: &str,
@@ -703,7 +662,6 @@ fn execute_api_sql(
         }))
     }
 }
-
 fn value_to_query_string(value: &Value) -> String {
     match value {
         Value::String(v) => v.clone(),
@@ -713,7 +671,6 @@ fn value_to_query_string(value: &Value) -> String {
         _ => value.to_string(),
     }
 }
-
 fn query_string_to_value(value: &str) -> Value {
     if value.is_empty() {
         return Value::String(value.to_string());
@@ -734,19 +691,15 @@ fn query_string_to_value(value: &str) -> Value {
     }
     Value::String(value.to_string())
 }
-
 async fn home_handler() -> impl IntoResponse {
     render_page("home".to_string(), true).await
 }
-
 async fn page_handler(AxumPath(path): AxumPath<String>) -> impl IntoResponse {
     render_page(path, true).await
 }
-
 async fn not_found_handler() -> impl IntoResponse {
     render_404(true).await
 }
-
 async fn render_404(dev: bool) -> impl IntoResponse {
     tokio::task::spawn_blocking(move || {
         let file = get_project_root().join("pages").join("404.vlo");
@@ -757,24 +710,11 @@ async fn render_404(dev: bool) -> impl IntoResponse {
             )
         } else {
             let fallback = r#"
-<div style="
-text-align:center;
-padding:100px 20px;
-font-family:sans-serif;
-background:#0a0a0c;
-color:#fff;
-min-height:80vh">
+<div style="text-align:center;padding:100px 20px;font-family:sans-serif;background:#0a0a0c;color:#fff;min-height:80vh">
 <h1 style="font-size:7rem;color:#00f5ff">404</h1>
 <h2>Page Not Found</h2>
 <p style="color:#888">The requested page does not exist.</p>
-<a href="/" style="
-background:#00f5ff;
-color:#000;
-padding:12px 28px;
-text-decoration:none;
-border-radius:8px">
-Back to Home
-</a>
+<a href="/" style="background:#00f5ff;color:#000;padding:12px 28px;text-decoration:none;border-radius:8px">Back to Home</a>
 </div>
 "#;
             (
@@ -789,15 +729,16 @@ Back to Home
         Html("Server Error".to_string()),
     ))
 }
-
 async fn render_page(path: String, dev: bool) -> impl IntoResponse {
-    let p = path.clone();
+    let page = path.clone();
     match tokio::task::spawn_blocking(move || {
-        let file = get_project_root().join("pages").join(format!("{}.vlo", p));
+        let file = get_project_root()
+            .join("pages")
+            .join(format!("{}.vlo", page));
         fs::read_to_string(file).ok().map(|content| {
             (
                 StatusCode::OK,
-                Html(wrap_html(&p, &render_vlo(content), dev)),
+                Html(wrap_html(&page, &render_vlo(content), dev)),
             )
         })
     })
@@ -807,7 +748,6 @@ async fn render_page(path: String, dev: bool) -> impl IntoResponse {
         _ => render_404(dev).await.into_response(),
     }
 }
-
 fn render_vlo(mut source: String) -> String {
     source = strip_server_block(&source);
     for _ in 0..20 {
@@ -820,7 +760,6 @@ fn render_vlo(mut source: String) -> String {
     }
     source
 }
-
 fn render_tag(source: &str, tag: &str) -> String {
     if let Some((start, end, props, children)) = find_tag(source, tag) {
         return format!(
@@ -832,7 +771,6 @@ fn render_tag(source: &str, tag: &str) -> String {
     }
     source.to_string()
 }
-
 fn render_components(source: &str) -> String {
     let mut output = String::new();
     let mut last = 0;
@@ -847,14 +785,16 @@ fn render_components(source: &str) -> String {
                 end += 1;
             }
             let tag = &source[chars[i + 1].0..chars[end].0];
-            if let Some((_, tag_end, props, children)) = find_tag(&source[pos..], tag) {
-                output.push_str(&source[last..pos]);
-                output.push_str(&render_component_file(tag, &props, &children));
-                last = pos + tag_end;
-                while i < chars.len() && chars[i].0 < last {
-                    i += 1;
+            if component_exists(tag) {
+                if let Some((_, tag_end, props, children)) = find_tag(&source[pos..], tag) {
+                    output.push_str(&source[last..pos]);
+                    output.push_str(&render_component_file(tag, &props, &children));
+                    last = pos + tag_end;
+                    while i < chars.len() && chars[i].0 < last {
+                        i += 1;
+                    }
+                    continue;
                 }
-                continue;
             }
         }
         i += 1;
@@ -862,40 +802,58 @@ fn render_components(source: &str) -> String {
     output.push_str(&source[last..]);
     output
 }
-
+fn component_exists(name: &str) -> bool {
+    let root = get_project_root();
+    root.join("components")
+        .join(format!("{}.vlo", name))
+        .exists()
+        || root.join("layouts").join(format!("{}.vlo", name)).exists()
+}
 fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> {
     let open = format!("<{}", name);
     let start = source.find(&open)?;
     let mut i = start + open.len();
+    let next = source[i..].chars().next()?;
+    if !(next.is_whitespace() || next == '/' || next == '>') {
+        return None;
+    }
     let props_start = i;
     let mut quote = None;
+    let mut open_end = None;
     for (offset, ch) in source[i..].char_indices() {
         match quote {
             Some(q) if ch == q => quote = None,
             None if ch == '"' || ch == '\'' => quote = Some(ch),
             None if ch == '>' => {
-                i += offset;
+                open_end = Some(i + offset);
                 break;
             }
             _ => {}
         }
     }
-    if i >= source.len() {
-        return None;
-    }
-    let props = source[props_start..i].to_string();
-    let self_close = props.trim_end().ends_with('/');
-    i += 1;
-    if self_close {
+    let open_end = open_end?;
+    let props = source[props_start..open_end].to_string();
+    let self_closing = props.trim_end().ends_with('/');
+    i = open_end + 1;
+    if self_closing {
         return Some((start, i, props, String::new()));
     }
     let close = format!("</{}>", name);
     let children_start = i;
     let mut depth = 1;
     while i < source.len() {
-        if source[i..].starts_with(&open) {
-            depth += 1;
-        } else if source[i..].starts_with(&close) {
+        let remaining = &source[i..];
+        if remaining.starts_with(&open) {
+            let after = i + open.len();
+            let valid = source[after..]
+                .chars()
+                .next()
+                .map(|c| c.is_whitespace() || c == '/' || c == '>')
+                .unwrap_or(false);
+            if valid {
+                depth += 1;
+            }
+        } else if remaining.starts_with(&close) {
             depth -= 1;
             if depth == 0 {
                 return Some((
@@ -906,54 +864,61 @@ fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> 
                 ));
             }
         }
-        i += source[i..]
-            .chars()
-            .next()
-            .map(|c| c.len_utf8())
-            .unwrap_or(1);
+        i += remaining.chars().next().map(|c| c.len_utf8()).unwrap_or(1);
     }
     None
 }
-
 fn render_component_file(name: &str, props_str: &str, children: &str) -> String {
     let root = get_project_root();
-    for path in [
+    let paths = [
         root.join("layouts").join(format!("{}.vlo", name)),
         root.join("components").join(format!("{}.vlo", name)),
-    ] {
-        if let Ok(template) = fs::read_to_string(path) {
-            let mut props = parse_props(props_str);
-            props.insert("children".to_string(), render_vlo(children.to_string()));
-            let regex = Regex::new(r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}").unwrap();
-            return regex
-                .replace_all(&template, |caps: &regex::Captures| {
-                    props.get(&caps[1]).cloned().unwrap_or_default()
-                })
-                .into_owned();
+    ];
+    let template = match paths.iter().find_map(|path| fs::read_to_string(path).ok()) {
+        Some(template) => template,
+        None => {
+            eprintln!("⚠️ [VLO] Component not found: <{}>", name);
+            return format!("<!-- VLO component '{}' not found -->", name);
         }
-    }
-    format!("<!-- {} not found -->", name)
+    };
+    let mut props = parse_props(props_str);
+    props.insert("children".to_string(), render_vlo(children.to_string()));
+    let interpolation =
+        Regex::new(r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}").expect("Invalid VLO interpolation regex");
+    interpolation
+        .replace_all(&template, |caps: &regex::Captures| {
+            props.get(&caps[1]).cloned().unwrap_or_default()
+        })
+        .into_owned()
 }
-
 fn parse_props(raw: &str) -> HashMap<String, String> {
     let chars: Vec<char> = raw
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
         .chars()
         .collect();
-    let mut map = HashMap::new();
+    let mut props = HashMap::new();
     let mut i = 0;
     while i < chars.len() {
         while i < chars.len() && chars[i].is_whitespace() {
             i += 1;
         }
-        if i >= chars.len() {
+        if i >= chars.len() || chars[i] == '/' {
             break;
         }
         let mut key = String::new();
-        while i < chars.len() && chars[i] != '=' && !chars[i].is_whitespace() {
+        while i < chars.len()
+            && !chars[i].is_whitespace()
+            && chars[i] != '='
+            && chars[i] != '>'
+            && chars[i] != '/'
+        {
             key.push(chars[i]);
             i += 1;
+        }
+        if key.is_empty() {
+            i += 1;
+            continue;
         }
         while i < chars.len() && chars[i].is_whitespace() {
             i += 1;
@@ -964,13 +929,14 @@ fn parse_props(raw: &str) -> HashMap<String, String> {
                 i += 1;
             }
             if i >= chars.len() {
+                props.insert(key, String::new());
                 break;
             }
-            let q = chars[i];
             let mut value = String::new();
-            if q == '"' || q == '\'' {
+            if chars[i] == '"' || chars[i] == '\'' {
+                let quote = chars[i];
                 i += 1;
-                while i < chars.len() && chars[i] != q {
+                while i < chars.len() && chars[i] != quote {
                     value.push(chars[i]);
                     i += 1;
                 }
@@ -978,19 +944,22 @@ fn parse_props(raw: &str) -> HashMap<String, String> {
                     i += 1;
                 }
             } else {
-                while i < chars.len() && !chars[i].is_whitespace() && chars[i] != '>' {
+                while i < chars.len()
+                    && !chars[i].is_whitespace()
+                    && chars[i] != '>'
+                    && chars[i] != '/'
+                {
                     value.push(chars[i]);
                     i += 1;
                 }
             }
-            map.insert(key, value);
+            props.insert(key, value);
         } else {
-            map.insert(key, "true".to_string());
+            props.insert(key, "true".to_string());
         }
     }
-    map
+    props
 }
-
 fn wrap_html(title: &str, content: &str, dev: bool) -> String {
     let hmr = if dev {
         r#"<script>
@@ -1015,12 +984,11 @@ window.addEventListener("beforeunload",()=>es.close());
         title, hmr, content
     )
 }
-
 fn watch_files(
     pages: PathBuf,
     public: PathBuf,
     tx: broadcast::Sender<()>,
-    last: Arc<Mutex<std::time::Instant>>,
+    last: Arc<Mutex<Instant>>,
 ) -> notify::Result<()> {
     let (tx_notify, rx) = channel();
     let mut watcher = RecommendedWatcher::new(tx_notify, Config::default())?;
@@ -1040,7 +1008,7 @@ fn watch_files(
             }
             if let Ok(mut timestamp) = last.try_lock() {
                 if timestamp.elapsed().as_millis() > 200 {
-                    *timestamp = std::time::Instant::now();
+                    *timestamp = Instant::now();
                     let _ = tx.send(());
                     println!("⚡ Reload");
                 }
