@@ -1,0 +1,515 @@
+﻿<BaseLayout
+    title="About VLO"
+    navbar='
+        <Navbar brand="VLO">
+            <a href="/">Home</a>
+            <a href="/components">Components</a>
+            <a href="/pricing">Pricing</a>
+            <a href="/about" class="active">About</a>
+            <a href="/docs">Docs</a>
+        </Navbar>'
+    footer='<Footer />'
+>
+    <main class="about-page">
+
+        <!-- HERO -->
+        <section class="about-hero">
+            <div class="eyebrow">ABOUT VLO</div>
+            <h1>Build better.<br><span>Build with VLO.</span></h1>
+            <p>
+                VLO is a simple, component-first platform for building
+                modern web interfaces with reusable <code>.vlo</code>
+                components.
+            </p>
+
+            <div class="hero-actions">
+                <a href="/components" class="btn primary">Explore Components →</a>
+                <a href="#contact" class="btn secondary">Contact Us</a>
+            </div>
+        </section>
+
+
+        <!-- ABOUT -->
+        <section class="section">
+            <div class="section-label">01 — WHAT IS VLO?</div>
+
+            <div class="two-col">
+                <div>
+                    <h2>A better way to build interfaces.</h2>
+                </div>
+
+                <div>
+                    <p>
+                        VLO is built around a simple idea: interfaces should
+                        be easy to create, reuse and maintain.
+                    </p>
+
+                    <p>
+                        Instead of repeatedly writing the same UI, developers
+                        can create reusable components and customize them
+                        through props.
+                    </p>
+
+                    <p>
+                        The result is cleaner code, consistent design and
+                        faster development.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- VALUES -->
+        <section class="section">
+            <div class="section-label">02 — OUR APPROACH</div>
+
+            <div class="values">
+
+                <article>
+                    <span>✦</span>
+                    <h3>Simple</h3>
+                    <p>
+                        Keep the developer experience clear without
+                        unnecessary complexity.
+                    </p>
+                </article>
+
+                <article>
+                    <span>◈</span>
+                    <h3>Reusable</h3>
+                    <p>
+                        Build once and use the same component wherever
+                        your project needs it.
+                    </p>
+                </article>
+
+                <article>
+                    <span>◇</span>
+                    <h3>Consistent</h3>
+                    <p>
+                        A shared component system creates a consistent
+                        experience across the entire application.
+                    </p>
+                </article>
+
+                <article>
+                    <span>⌘</span>
+                    <h3>Developer First</h3>
+                    <p>
+                        VLO focuses on making everyday development
+                        faster and more enjoyable.
+                    </p>
+                </article>
+
+            </div>
+        </section>
+
+
+        <!-- VLO PHILOSOPHY -->
+        <section class="quote-section">
+            <div class="quote-mark">"</div>
+
+            <blockquote>
+                Build small. Compose freely. Ship confidently.
+            </blockquote>
+
+            <p>
+                The VLO philosophy
+            </p>
+        </section>
+
+
+        <!-- FEATURES -->
+        <section class="section">
+            <div class="section-label">03 — WHY VLO?</div>
+
+            <div class="feature-list">
+
+                <div>
+                    <strong>Component-first</strong>
+                    <span>Reusable UI is at the center of the project.</span>
+                </div>
+
+                <div>
+                    <strong>Props-based</strong>
+                    <span>Customize components without rewriting them.</span>
+                </div>
+
+                <div>
+                    <strong>Modern design</strong>
+                    <span>A clean visual system with a distinctive VLO identity.</span>
+                </div>
+
+                <div>
+                    <strong>Maintainable</strong>
+                    <span>Clear structure makes projects easier to evolve.</span>
+                </div>
+
+            </div>
+        </section>
+
+
+        <!-- CONTACT -->
+        <section class="contact-section" id="contact">
+
+            <div class="contact-content">
+                <div class="section-label">04 — CONTACT US</div>
+
+                <h2>Have a question?</h2>
+
+                <p>
+                    Whether you have a question about VLO, found an issue,
+                    or simply want to get in touch, we'd love to hear from you.
+                </p>
+
+                <div class="contact-actions">
+                    <a href="/contact" class="contact-btn">
+                        Contact Us →
+                    </a>
+
+                    <a href="mailto:hello@vlo.dev" class="email-link">
+                        hello@vlo.dev
+                    </a>
+                </div>
+            </div>
+
+            <div class="contact-glow">
+                VLO
+            </div>
+
+        </section>
+
+
+        <!-- FINAL -->
+        <section class="final-section">
+            <div class="vlo-symbol">VLO</div>
+
+            <h2>Ready to build?</h2>
+
+            <p>
+                Explore the components and start building your next
+                interface with VLO.
+            </p>
+
+            <a href="/components" class="btn primary">
+                Explore Components →
+            </a>
+        </section>
+
+    </main>
+</BaseLayout>
+
+
+<style>
+.about-page {
+    max-width: 1100px;
+    margin: auto;
+    padding: 0 22px 90px;
+}
+
+.about-hero {
+    padding: 90px 0 100px;
+}
+
+.eyebrow,
+.section-label {
+    color: #00f5ff;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+}
+
+.about-hero h1 {
+    margin: 20px 0;
+    color: #fff;
+    font-size: clamp(3.2rem,8vw,6rem);
+    line-height: .95;
+    letter-spacing: -.065em;
+}
+
+.about-hero h1 span {
+    color: #00f5ff;
+}
+
+.about-hero > p {
+    max-width: 650px;
+    color: #888;
+    font-size: 1.05rem;
+    line-height: 1.7;
+}
+
+.about-hero code {
+    color: #00f5ff;
+}
+
+.hero-actions,
+.contact-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 28px;
+}
+
+.btn,
+.contact-btn {
+    display: inline-flex;
+    padding: 11px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-size: .78rem;
+    font-weight: 700;
+    transition: .2s;
+}
+
+.btn.primary,
+.contact-btn {
+    background: #00f5ff;
+    color: #000;
+}
+
+.btn.secondary {
+    border: 1px solid #333;
+    color: #aaa;
+}
+
+.btn:hover,
+.contact-btn:hover {
+    transform: translateY(-2px);
+}
+
+.section {
+    padding: 75px 0;
+    border-top: 1px solid #222;
+}
+
+.two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 70px;
+    margin-top: 28px;
+}
+
+.two-col h2 {
+    margin: 0;
+    color: #fff;
+    font-size: 2.3rem;
+    line-height: 1.1;
+    letter-spacing: -.04em;
+}
+
+.two-col p {
+    margin: 0 0 15px;
+    color: #777;
+    font-size: .85rem;
+    line-height: 1.75;
+}
+
+.values {
+    display: grid;
+    grid-template-columns: repeat(4,1fr);
+    gap: 10px;
+    margin-top: 28px;
+}
+
+.values article {
+    padding: 22px;
+    border: 1px solid #292929;
+    border-radius: 11px;
+    background: rgba(255,255,255,.015);
+}
+
+.values span {
+    color: #00f5ff;
+    font-size: 1.2rem;
+}
+
+.values h3 {
+    margin: 14px 0 7px;
+    color: #ddd;
+    font-size: .85rem;
+}
+
+.values p {
+    margin: 0;
+    color: #707070;
+    font-size: .72rem;
+    line-height: 1.6;
+}
+
+.quote-section {
+    padding: 85px 20px;
+    text-align: center;
+    border-top: 1px solid #222;
+    border-bottom: 1px solid #222;
+}
+
+.quote-mark {
+    color: #00f5ff;
+    font-size: 3rem;
+    line-height: 1;
+}
+
+blockquote {
+    max-width: 700px;
+    margin: 10px auto 15px;
+    color: #fff;
+    font-size: clamp(1.5rem,4vw,2.5rem);
+    font-weight: 600;
+    letter-spacing: -.04em;
+}
+
+.quote-section p {
+    margin: 0;
+    color: #555;
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+}
+
+.feature-list {
+    margin-top: 28px;
+    border-top: 1px solid #292929;
+}
+
+.feature-list div {
+    display: grid;
+    grid-template-columns: 190px 1fr;
+    gap: 20px;
+    padding: 18px 0;
+    border-bottom: 1px solid #292929;
+}
+
+.feature-list strong {
+    color: #ddd;
+    font-size: .8rem;
+}
+
+.feature-list span {
+    color: #707070;
+    font-size: .78rem;
+}
+
+.contact-section {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 30px;
+    margin-top: 75px;
+    padding: 55px;
+    border: 1px solid rgba(0,245,255,.18);
+    border-radius: 15px;
+    background:
+        radial-gradient(
+            circle at 90% 50%,
+            rgba(0,245,255,.08),
+            transparent 35%
+        );
+}
+
+.contact-content {
+    position: relative;
+    z-index: 1;
+    max-width: 600px;
+}
+
+.contact-section h2 {
+    margin: 12px 0;
+    color: #fff;
+    font-size: 2rem;
+}
+
+.contact-section p {
+    margin: 0;
+    color: #777;
+    font-size: .82rem;
+    line-height: 1.7;
+}
+
+.email-link {
+    color: #777;
+    text-decoration: none;
+    font-size: .75rem;
+}
+
+.email-link:hover {
+    color: #00f5ff;
+}
+
+.contact-glow {
+    color: rgba(0,245,255,.08);
+    font-size: 7rem;
+    font-weight: 900;
+    letter-spacing: -.1em;
+    user-select: none;
+}
+
+.final-section {
+    padding: 90px 20px 20px;
+    text-align: center;
+}
+
+.vlo-symbol {
+    color: #00f5ff;
+    font-size: 1.8rem;
+    font-weight: 900;
+    letter-spacing: -.08em;
+    text-shadow: 0 0 25px rgba(0,245,255,.25);
+}
+
+.final-section h2 {
+    margin: 15px 0 8px;
+    color: #fff;
+    font-size: 1.7rem;
+}
+
+.final-section p {
+    margin: 0 auto 24px;
+    color: #666;
+    font-size: .78rem;
+}
+
+@media (max-width: 800px) {
+    .two-col {
+        grid-template-columns: 1fr;
+        gap: 25px;
+    }
+
+    .values {
+        grid-template-columns: repeat(2,1fr);
+    }
+
+    .contact-section {
+        padding: 35px;
+    }
+
+    .contact-glow {
+        display: none;
+    }
+}
+
+@media (max-width: 550px) {
+    .about-page {
+        padding: 0 16px 60px;
+    }
+
+    .about-hero {
+        padding: 60px 0 70px;
+    }
+
+    .values {
+        grid-template-columns: 1fr;
+    }
+
+    .feature-list div {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+
+    .contact-section {
+        padding: 30px 22px;
+    }
+}
+</style>

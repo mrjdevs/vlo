@@ -1,0 +1,34 @@
+<div class="vlo-toast {{variant}} {{class}}">
+    <span class="icon">{{icon}}</span>
+    <div>
+        <strong>{{title}}</strong>
+        <p>{{description}}</p>
+    </div>
+</div>
+
+<style>
+.vlo-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--card, #111);
+    border: 1px solid var(--border, #333);
+    border-left: 4px solid #00f5ff;
+    padding: 16px 20px;
+    border-radius: 12px;
+    display: flex;
+    gap: 12px;
+    align-items: start;
+    min-width: 300px;
+    animation: slideIn 0.3s ease;
+    z-index: 999;
+}
+.vlo-toast.success { border-left-color: #00ff88; }
+.vlo-toast.error { border-left-color: #ff4444; }
+.vlo-toast .icon { font-size: 1.5rem; }
+
+@keyframes slideIn {
+    from { transform: translateX(400px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+</style>

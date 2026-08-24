@@ -1,0 +1,6 @@
+<footer class="footer">
+    <p>© 2026 VLO. Built with Rust + Cyan.</p>
+</footer>
+<style>
+.footer { text-align: center; padding: 40px 20px; border-top: 1px solid var(--border); color: #666; }
+</style>

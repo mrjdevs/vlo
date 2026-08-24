@@ -1,0 +1,41 @@
+<script server>
+SELECT id, name, role FROM users;
+</script>
+
+<BaseLayout title="Users Directory">
+  <div style="padding: 40px; max-width: 800px; margin: 0 auto; font-family: sans-serif;">
+    <h1 style="color: #00f5ff; margin-bottom: 20px;">⚡ User Directory</h1>
+    
+    <table border="1" cellpadding="12" style="width: 100%; border-collapse: collapse; border-color: #333; background: #111; color: #fff; border-radius: 8px; overflow: hidden;">
+      <thead>
+        <tr style="background: #222; text-align: left; color: #888;">
+          <th>ID</th>
+          <th>Name</th>
+          <th>Role</th>
+        </tr>
+      </thead>
+      <tbody id="user-rows">
+        <tr>
+          <td colspan="3" style="text-align: center; color: #666;">Loading users from database...</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    fetch('/api/users')
+      .then(res => res.json())
+      .then(res => {
+        const tbody = document.getElementById('user-rows');
+        if (res.data && res.data.length > 0) {
+          tbody.innerHTML = res.data.map(u => `
+            <tr style="border-bottom: 1px solid #222;">
+              <td><code style="color: #00ff88;">#${u.id}</code></td>
+              <td><strong>${u.name}</strong></td>
+              <td><span style="background: #222; padding: 4px 8px; border-radius: 4px; font-size: 0.85rem;">${u.role}</span></td>
+            </tr>
+          `).join('');
+        }
+      });
+  </script>
+</BaseLayout>

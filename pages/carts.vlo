@@ -1,0 +1,225 @@
+<BaseLayout title="Cart Management">
+  <div style="max-width: 900px; margin: 40px auto; padding: 0 20px; font-family: system-ui, sans-serif; color: #fff;">
+    <h1 style="color: #00f5ff; margin-bottom: 8px;">🛒 Cart Management</h1>
+    <p style="color: #888; margin-bottom: 25px;">Standard REST CRUD API: GET, POST, PUT, DELETE</p>
+
+    <div id="message" style="display:none; padding:12px 15px; margin-bottom:20px; border-radius:6px;"></div>
+
+    <div style="background:#111; border:1px solid #222; padding:20px; border-radius:8px; margin-bottom:20px;">
+      <form id="add-form" style="display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:10px;">
+        <input type="text" id="product_name" placeholder="Product Name" required style="background:#222; border:1px solid #333; color:#fff; padding:10px; border-radius:4px;">
+        <input type="number" id="price" placeholder="Price" min="0" step="0.01" required style="background:#222; border:1px solid #333; color:#fff; padding:10px; border-radius:4px;">
+        <input type="number" id="quantity" value="1" min="1" required style="background:#222; border:1px solid #333; color:#fff; padding:10px; border-radius:4px;">
+        <button type="submit" style="background:#00ff88; color:#000; font-weight:bold; border:none; border-radius:4px; padding:10px 16px; cursor:pointer;">+ Add Item</button>
+      </form>
+    </div>
+
+    <table style="width:100%; border-collapse:collapse; background:#111; border:1px solid #222;">
+      <thead>
+        <tr style="background:#1a1a1a; color:#888;">
+          <th style="padding:12px; text-align:left;">ID</th>
+          <th style="padding:12px; text-align:left;">Product</th>
+          <th style="padding:12px; text-align:left;">Price</th>
+          <th style="padding:12px; text-align:center;">Quantity</th>
+          <th style="padding:12px; text-align:left;">Total</th>
+          <th style="padding:12px; text-align:center;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="cart-rows"></tbody>
+    </table>
+
+    <div id="empty-cart" style="display:none; text-align:center; padding:40px; color:#666;">
+      Your cart is empty.
+    </div>
+  </div>
+
+  <script>
+    const API = '/api/cart';
+
+    function showMessage(text, error = false) {
+      const box = document.getElementById('message');
+      box.textContent = text;
+      box.style.display = 'block';
+      box.style.background = error ? '#3a1111' : '#113a25';
+      box.style.color = error ? '#ff7777' : '#00ff88';
+      box.style.border = error ? '1px solid #662222' : '1px solid #225533';
+
+      setTimeout(() => {
+        box.style.display = 'none';
+      }, 3000);
+    }
+
+    async function request(url, options = {}) {
+      try {
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data.error || `Request failed (${response.status})`);
+        }
+
+        return data;
+      } catch (error) {
+        showMessage(error.message, true);
+        throw error;
+      }
+    }
+
+    async function loadCart() {
+      try {
+        const response = await request(API);
+        renderCart(response.data || []);
+      } catch (error) {
+        renderCart([]);
+      }
+    }
+
+    function renderCart(items) {
+      const tbody = document.getElementById('cart-rows');
+      const empty = document.getElementById('empty-cart');
+
+      if (!items.length) {
+        tbody.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+      }
+
+      empty.style.display = 'none';
+
+      tbody.innerHTML = items.map(item => {
+        const price = Number(item.price) || 0;
+        const quantity = Number(item.quantity) || 0;
+        const total = price * quantity;
+
+        return `
+          <tr style="border-bottom:1px solid #222;">
+            <td style="padding:12px;">#${item.id}</td>
+            <td style="padding:12px;">
+              <strong>${escapeHtml(item.product_name)}</strong>
+            </td>
+            <td style="padding:12px;">
+              $${price.toFixed(2)}
+            </td>
+            <td style="padding:12px; text-align:center;">
+              <button onclick="updateQty(${item.id}, ${quantity - 1})"
+                style="background:#333; color:#fff; border:none; padding:3px 9px; border-radius:3px; cursor:pointer;">
+                −
+              </button>
+
+              <span style="display:inline-block; min-width:30px; margin:0 8px;">
+                ${quantity}
+              </span>
+
+              <button onclick="updateQty(${item.id}, ${quantity + 1})"
+                style="background:#333; color:#fff; border:none; padding:3px 9px; border-radius:3px; cursor:pointer;">
+                +
+              </button>
+            </td>
+            <td style="padding:12px; color:#00ff88;">
+              $${total.toFixed(2)}
+            </td>
+            <td style="padding:12px; text-align:center;">
+              <button onclick="deleteItem(${item.id})"
+                style="background:#ff4444; color:#fff; border:none; padding:5px 12px; border-radius:4px; cursor:pointer;">
+                Delete
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    document.getElementById('add-form').addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      const productName = document.getElementById('product_name').value.trim();
+      const price = parseFloat(document.getElementById('price').value);
+      const quantity = parseInt(document.getElementById('quantity').value, 10);
+
+      if (!productName || !Number.isFinite(price) || quantity < 1) {
+        showMessage('Please enter valid product information.', true);
+        return;
+      }
+
+      try {
+        const response = await request(API, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            product_name: productName,
+            price: price,
+            quantity: quantity
+          })
+        });
+
+        renderCart(response.data || []);
+        this.reset();
+        document.getElementById('quantity').value = 1;
+        showMessage('Item added successfully.');
+      } catch (error) {
+        // request() already displays the error
+      }
+    });
+
+    async function updateQty(id, newQuantity) {
+      if (newQuantity < 1) {
+        await deleteItem(id);
+        return;
+      }
+
+      try {
+        const response = await request(API, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            id: id,
+            quantity: newQuantity
+          })
+        });
+
+        renderCart(response.data || []);
+        showMessage('Quantity updated.');
+      } catch (error) {
+        // request() already displays the error
+      }
+    }
+
+    async function deleteItem(id) {
+      if (!confirm('Remove this item from the cart?')) {
+        return;
+      }
+
+      try {
+        const response = await request(API, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            id: id
+          })
+        });
+
+        renderCart(response.data || []);
+        showMessage('Item deleted.');
+      } catch (error) {
+        // request() already displays the error
+      }
+    }
+
+    loadCart();
+  </script>
+</BaseLayout>

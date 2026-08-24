@@ -1,0 +1,509 @@
+<BaseLayout
+    title="Pricing"
+    navbar='
+        <Navbar brand="VLO">
+            <a href="/">Home</a>
+            <a href="/components">Components</a>
+            <a href="/pricing" class="active">Pricing</a>
+            <a href="/about">About</a>
+            <a href="/docs">Docs</a>
+        </Navbar>'
+
+    hero='<HeroLayout
+        badge="Simple, Transparent Pricing"
+        title="Free While VLO Is in Beta"
+        subtitle="Build with VLO for free. The core framework stays free and open source, with paid plans planned for teams and advanced needs."
+        cta="<Button text='Start Building' href='/docs' variant='primary' />"
+    />'
+
+    footer='<Footer />'
+>
+
+    <section class="pricing-section">
+        <div class="pricing-grid">
+
+            <div class="pricing-card">
+                <div class="card-top">
+                    <span class="plan-label">FOR EVERYONE</span>
+                    <Card title="Free" description="Everything you need to start building with VLO">
+                        <div class="price">$0 <span>/ forever</span></div>
+                        <p class="price-description">
+                            No credit card. No time limit. No artificial restrictions.
+                        </p>
+
+                        <Button text="Get Started" href="/docs" variant="secondary" />
+
+                        <ul class="features-list">
+                            <li><span>✓</span> All Core Components</li>
+                            <li><span>✓</span> VLO CLI & Development Server</li>
+                            <li><span>✓</span> Smart Live Reload</li>
+                            <li><span>✓</span> Unlimited Projects</li>
+                            <li><span>✓</span> Community Support</li>
+                            <li><span>✓</span> Open Source</li>
+                        </ul>
+                    </Card>
+                </div>
+            </div>
+
+            <div class="pricing-card featured">
+                <div class="popular-badge">COMING SOON</div>
+                <div class="card-top">
+                    <span class="plan-label">FOR PROFESSIONALS</span>
+                    <Card title="Pro" description="More power for professional developers and teams">
+                        <div class="price">$19 <span>/ month</span></div>
+                        <p class="price-description">
+                            Everything in Free, plus tools designed for serious production work.
+                        </p>
+
+                        <Button text="Join the Waitlist" href="#" variant="primary" />
+
+                        <ul class="features-list">
+                            <li><span>✓</span> Everything in Free</li>
+                            <li><span>✓</span> Priority Support</li>
+                            <li><span>✓</span> Premium Component Templates</li>
+                            <li><span>✓</span> Team Collaboration</li>
+                            <li><span>✓</span> Analytics Dashboard</li>
+                            <li><span>✓</span> Advanced Developer Tools</li>
+                        </ul>
+                    </Card>
+                </div>
+            </div>
+
+            <div class="pricing-card">
+                <div class="card-top">
+                    <span class="plan-label">FOR ORGANIZATIONS</span>
+                    <Card title="Enterprise" description="Flexible solutions for larger engineering teams">
+                        <div class="price">Custom</div>
+                        <p class="price-description">
+                            Get the flexibility, support, and deployment options your organization needs.
+                        </p>
+
+                        <Button text="Contact Us" href="#" variant="ghost" />
+
+                        <ul class="features-list">
+                            <li><span>✓</span> Everything in Pro</li>
+                            <li><span>✓</span> Dedicated Engineering Support</li>
+                            <li><span>✓</span> SLA Options</li>
+                            <li><span>✓</span> Custom Component Development</li>
+                            <li><span>✓</span> On-Premise Deployment</li>
+                            <li><span>✓</span> Enterprise Support</li>
+                        </ul>
+                    </Card>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <section class="why-section">
+        <div class="section-heading">
+            <span class="section-badge">WHY VLO?</span>
+            <h2>Simple by design.</h2>
+            <p>VLO is built to keep development fast, predictable, and accessible.</p>
+        </div>
+
+        <div class="benefits-grid">
+            <div class="benefit">
+                <div class="benefit-icon">⚡</div>
+                <h3>Start instantly</h3>
+                <p>No complicated setup or expensive plans. Install VLO and start building.</p>
+            </div>
+
+            <div class="benefit">
+                <div class="benefit-icon">∞</div>
+                <h3>Build without limits</h3>
+                <p>Create as many projects as you need with the free tier.</p>
+            </div>
+
+            <div class="benefit">
+                <div class="benefit-icon">⌘</div>
+                <h3>Developer first</h3>
+                <p>Everything is designed around a fast and enjoyable development workflow.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="compare-section">
+        <div class="section-heading">
+            <span class="section-badge">COMPARE</span>
+            <h2>Choose what fits your workflow.</h2>
+            <p>Start free today and upgrade when your team needs more.</p>
+        </div>
+
+        <div class="comparison-table">
+            <div class="comparison-row comparison-header">
+                <div>Feature</div>
+                <div>Free</div>
+                <div>Pro</div>
+                <div>Enterprise</div>
+            </div>
+
+            <div class="comparison-row">
+                <div>Core Components</div>
+                <div>✓</div>
+                <div>✓</div>
+                <div>✓</div>
+            </div>
+
+            <div class="comparison-row">
+                <div>Live Reload</div>
+                <div>✓</div>
+                <div>✓</div>
+                <div>✓</div>
+            </div>
+
+            <div class="comparison-row">
+                <div>Unlimited Projects</div>
+                <div>✓</div>
+                <div>✓</div>
+                <div>✓</div>
+            </div>
+
+            <div class="comparison-row">
+                <div>Priority Support</div>
+                <div>—</div>
+                <div>✓</div>
+                <div>✓</div>
+            </div>
+
+            <div class="comparison-row">
+                <div>Team Collaboration</div>
+                <div>—</div>
+                <div>✓</div>
+                <div>✓</div>
+            </div>
+
+            <div class="comparison-row">
+                <div>Custom Development</div>
+                <div>—</div>
+                <div>—</div>
+                <div>✓</div>
+            </div>
+
+            <div class="comparison-row">
+                <div>On-Premise Deployment</div>
+                <div>—</div>
+                <div>—</div>
+                <div>✓</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="faq">
+        <div class="section-heading">
+            <span class="section-badge">FAQ</span>
+            <h2>Frequently Asked Questions</h2>
+            <p>Everything you need to know about VLO pricing.</p>
+        </div>
+
+        <div class="faq-grid">
+            <div class="faq-item">
+                <h3>Is VLO really free?</h3>
+                <p>
+                    Yes. The core VLO framework is intended to remain free and open source.
+                    The Pro and Enterprise plans are designed for teams and additional services.
+                </p>
+            </div>
+
+            <div class="faq-item">
+                <h3>Can I use VLO commercially?</h3>
+                <p>
+                    Yes. VLO can be used to build personal, commercial, and open-source projects.
+                </p>
+            </div>
+
+            <div class="faq-item">
+                <h3>Do I need a credit card?</h3>
+                <p>
+                    No. You can start using the free tier without entering payment information.
+                </p>
+            </div>
+
+            <div class="faq-item">
+                <h3>When will Pro launch?</h3>
+                <p>
+                    Pro is planned for a future release. Join the waitlist to stay informed
+                    when availability is announced.
+                </p>
+            </div>
+
+            <div class="faq-item">
+                <h3>Can I upgrade later?</h3>
+                <p>
+                    Yes. Start with the free tier and move to a paid plan when your project or
+                    team needs additional capabilities.
+                </p>
+            </div>
+
+            <div class="faq-item">
+                <h3>Where can I learn VLO?</h3>
+                <p>
+                    Visit the documentation to learn how to install VLO, create components,
+                    and build your first project.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="bottom-cta">
+        <div>
+            <span class="section-badge">START TODAY</span>
+            <h2>Build something with VLO.</h2>
+            <p>The fastest way to see what VLO can do is to start building.</p>
+            <Button text="Read the Docs" href="/docs" variant="primary" />
+        </div>
+    </section>
+
+</BaseLayout>
+
+<style>
+.pricing-section {
+    max-width: 1250px;
+    margin: -55px auto 80px;
+    padding: 0 20px;
+    position: relative;
+    z-index: 2;
+}
+.pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    align-items: stretch;
+}
+.pricing-card {
+    position: relative;
+    display: flex;
+}
+.pricing-card .card-top {
+    width: 100%;
+}
+.pricing-card .card-top > Card {
+    display: block;
+}
+.pricing-card.featured {
+    transform: translateY(-12px);
+}
+.popular-badge {
+    position: absolute;
+    top: -13px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    padding: 6px 14px;
+    border: 1px solid var(--primary);
+    border-radius: 999px;
+    background: #0b0b0d;
+    color: var(--primary);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+}
+.plan-label {
+    display: block;
+    margin-bottom: 12px;
+    color: #777;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+}
+.price {
+    margin: 22px 0 8px;
+    color: var(--primary);
+    font-size: 2.8rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+}
+.price span {
+    color: #777;
+    font-size: 0.95rem;
+    font-weight: 400;
+    letter-spacing: 0;
+}
+.price-description {
+    min-height: 48px;
+    margin: 0 0 24px;
+    color: #888;
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+.features-list {
+    list-style: none;
+    padding: 0;
+    margin: 30px 0 0;
+    text-align: left;
+    border-top: 1px solid #222;
+}
+.features-list li {
+    padding: 11px 0;
+    color: #c8c8c8;
+    font-size: 0.9rem;
+    border-bottom: 1px solid #1d1d1d;
+}
+.features-list li span {
+    display: inline-block;
+    width: 24px;
+    color: var(--primary);
+    font-weight: 800;
+}
+.why-section {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 80px 20px;
+}
+.section-heading {
+    max-width: 680px;
+    margin: 0 auto 45px;
+    text-align: center;
+}
+.section-badge {
+    color: var(--primary);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+}
+.section-heading h2 {
+    margin: 10px 0;
+    font-size: 2.2rem;
+    letter-spacing: -0.03em;
+}
+.section-heading p {
+    margin: 0;
+    color: #888;
+    line-height: 1.7;
+}
+.benefits-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+}
+.benefit {
+    padding: 28px;
+    border: 1px solid #222;
+    border-radius: 12px;
+    background: #111;
+}
+.benefit-icon {
+    margin-bottom: 18px;
+    color: var(--primary);
+    font-size: 1.7rem;
+}
+.benefit h3 {
+    margin: 0 0 8px;
+}
+.benefit p {
+    margin: 0;
+    color: #888;
+    line-height: 1.6;
+    font-size: 0.9rem;
+}
+.compare-section {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 70px 20px 100px;
+}
+.comparison-table {
+    overflow: hidden;
+    border: 1px solid #242424;
+    border-radius: 12px;
+    background: #111;
+}
+.comparison-row {
+    display: grid;
+    grid-template-columns: 2fr repeat(3, 1fr);
+    border-bottom: 1px solid #222;
+}
+.comparison-row:last-child {
+    border-bottom: 0;
+}
+.comparison-row > div {
+    padding: 16px 18px;
+    color: #aaa;
+    font-size: 0.9rem;
+    text-align: center;
+}
+.comparison-row > div:first-child {
+    color: #ddd;
+    text-align: left;
+}
+.comparison-header {
+    background: #181818;
+}
+.comparison-header > div {
+    color: #fff;
+    font-weight: 700;
+}
+.comparison-row:not(.comparison-header) > div:not(:first-child) {
+    color: var(--primary);
+    font-weight: 700;
+}
+.faq {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 70px 20px 100px;
+}
+.faq-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 18px;
+}
+.faq-item {
+    padding: 25px;
+    border: 1px solid #222;
+    border-radius: 10px;
+    background: #111;
+}
+.faq-item h3 {
+    margin: 0 0 10px;
+    font-size: 1rem;
+}
+.faq-item p {
+    margin: 0;
+    color: #888;
+    line-height: 1.65;
+    font-size: 0.9rem;
+}
+.bottom-cta {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 80px 20px 120px;
+    text-align: center;
+}
+.bottom-cta > div {
+    padding: 55px 25px;
+    border: 1px solid #222;
+    border-radius: 16px;
+    background: #111;
+}
+.bottom-cta h2 {
+    margin: 12px 0 8px;
+    font-size: 2.2rem;
+}
+.bottom-cta p {
+    margin: 0 auto 25px;
+    color: #888;
+}
+@media (max-width: 900px) {
+    .pricing-grid,
+    .benefits-grid {
+        grid-template-columns: 1fr;
+    }
+    .pricing-card.featured {
+        transform: none;
+    }
+}
+@media (max-width: 650px) {
+    .comparison-table {
+        overflow-x: auto;
+    }
+    .comparison-row {
+        min-width: 650px;
+    }
+    .faq-grid {
+        grid-template-columns: 1fr;
+    }
+    .section-heading h2 {
+        font-size: 1.8rem;
+    }
+}
+</style>

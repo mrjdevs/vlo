@@ -1,0 +1,14 @@
+<div class="vlo-alert {{variant}} {{class}}">
+    <strong>{{title}}</strong>
+    <p>{{description}}</p>
+</div>
+
+<style>
+.vlo-alert {
+    padding: 16px 20px;
+    border-radius: 12px;
+    border-left: 4px solid;
+}
+.vlo-alert.info { background: rgba(0,245,255,0.1); border-color: #00f5ff; }
+.vlo-alert.success { background: rgba(0,255,136,0.1); border-color: #00ff88; }
+</style>

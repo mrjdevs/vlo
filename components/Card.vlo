@@ -1,0 +1,28 @@
+<div class="card">
+    <h3>{{title}}</h3>
+    <p class="card-desc">{{description}}</p>
+    {{children}}
+</div>
+
+<style>
+.card {
+    background: #0d0d0d;
+    border: 1px solid var(--border, #222);
+    border-radius: 12px;
+    padding: 30px;
+    display: flex;
+    flex-direction: column;
+}
+
+.card h3 {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+    color: #fff;
+}
+
+.card-desc {
+    color: #888;
+    font-size: 0.95rem;
+    margin-bottom: 20px;
+}
+</style>

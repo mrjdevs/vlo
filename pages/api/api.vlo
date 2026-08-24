@@ -1,0 +1,22 @@
+<script server>
+{
+  "get_users": "SELECT * FROM users ORDER BY id DESC;",
+  "post_users": "INSERT INTO users (name, email, role) VALUES ({{name}}, {{email}}, {{role}}); SELECT * FROM users ORDER BY id DESC;",
+  "put_users": "UPDATE users SET name = {{name}}, email = {{email}}, role = {{role}} WHERE id = {{id}}; SELECT * FROM users ORDER BY id DESC;",
+  "patch_users": "UPDATE users SET name = {{name}}, email = {{email}}, role = {{role}} WHERE id = {{id}}; SELECT * FROM users ORDER BY id DESC;",
+  "delete_users": "DELETE FROM users WHERE id = {{id}}; SELECT * FROM users ORDER BY id DESC;",
+
+  "get_products": "SELECT * FROM products ORDER BY id DESC;",
+  "post_products": "INSERT INTO products (title, description, price, stock) VALUES ({{title}}, {{description}}, {{price}}, {{stock}}); SELECT * FROM products ORDER BY id DESC;",
+  "put_products": "UPDATE products SET title = {{title}}, description = {{description}}, price = {{price}}, stock = {{stock}} WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",
+  "patch_products": "UPDATE products SET title = {{title}}, description = {{description}}, price = {{price}}, stock = {{stock}} WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",
+  "delete_products": "DELETE FROM products WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",
+
+  "get_cart": "SELECT * FROM cart ORDER BY id DESC;",
+  "post_cart": "INSERT INTO cart (product_name, price, quantity) VALUES ({{product_name}}, {{price}}, {{quantity}}); SELECT * FROM cart ORDER BY id DESC;",
+  "put_cart": "UPDATE cart SET quantity = {{quantity}} WHERE id = {{id}}; SELECT * FROM cart ORDER BY id DESC;",
+  "patch_cart": "UPDATE cart SET quantity = {{quantity}} WHERE id = {{id}}; SELECT * FROM cart ORDER BY id DESC;",
+  "delete_cart": "DELETE FROM cart WHERE id = {{id}}; SELECT * FROM cart ORDER BY id DESC;",
+  "get_cart_by_id": "SELECT * FROM cart WHERE id = {{id}};"
+}
+</script>

@@ -1,0 +1,2774 @@
+<BaseLayout
+    title="Project Guidelines"
+    navbar='
+        <Navbar brand="VLO">
+            <a href="/">Home</a>
+            <a href="/components">Components</a>
+            <a href="/pricing">Pricing</a>
+            <a href="/about">About</a>
+            <a href="/docs" class="active">Docs</a>
+        </Navbar>'
+    footer='<Footer />'
+>
+
+    <div class="guidelines-page">
+
+        <!-- HERO -->
+        <header class="guidelines-hero">
+
+            <div class="hero-badge">
+                <span class="pulse"></span>
+                VLO PROJECT GUIDELINES
+            </div>
+
+            <h1>
+                Build with <span>VLO</span>.
+            </h1>
+
+            <p>
+                A practical guide for building, maintaining and extending
+                VLO projects while keeping the codebase consistent,
+                reusable and unmistakably VLO.
+            </p>
+
+            <div class="hero-meta">
+                <span>✦ Architecture</span>
+                <span>✦ Components</span>
+                <span>✦ Branding</span>
+                <span>✦ Standards</span>
+            </div>
+
+        </header>
+
+
+        <div class="docs-layout">
+
+            <!-- SIDEBAR -->
+            <aside class="docs-sidebar">
+
+                <div class="sidebar-title">
+                    On this page
+                </div>
+
+                <nav class="docs-nav">
+
+                    <a href="#principles" class="active">
+                        <span>01</span>
+                        Core Principles
+                    </a>
+
+                    <a href="#structure">
+                        <span>02</span>
+                        Project Structure
+                    </a>
+
+                    <a href="#vlo-files">
+                        <span>03</span>
+                        .vlo Files
+                    </a>
+
+                    <a href="#components">
+                        <span>04</span>
+                        Components
+                    </a>
+
+                    <a href="#props">
+                        <span>05</span>
+                        Props
+                    </a>
+
+                    <a href="#pages">
+                        <span>06</span>
+                        Pages
+                    </a>
+
+                    <a href="#styling">
+                        <span>07</span>
+                        Styling
+                    </a>
+
+                    <a href="#branding">
+                        <span>08</span>
+                        Branding
+                    </a>
+
+                    <a href="#accessibility">
+                        <span>09</span>
+                        Accessibility
+                    </a>
+
+                    <a href="#security">
+                        <span>10</span>
+                        Security
+                    </a>
+
+                    <a href="#workflow">
+                        <span>11</span>
+                        Development Workflow
+                    </a>
+
+                    <a href="#checklist">
+                        <span>12</span>
+                        Checklist
+                    </a>
+
+                </nav>
+
+                <div class="sidebar-card">
+
+                    <div class="sidebar-icon">
+                        ✦
+                    </div>
+
+                    <strong>VLO philosophy</strong>
+
+                    <p>
+                        Simple code. Reusable components.
+                        Consistent experiences.
+                    </p>
+
+                </div>
+
+            </aside>
+
+
+            <!-- CONTENT -->
+            <main class="docs-content">
+
+
+                <!-- INTRO -->
+                <section class="intro-card">
+
+                    <div class="intro-icon">
+                        V
+                    </div>
+
+                    <div>
+                        <strong>
+                            VLO is a component-first framework.
+                        </strong>
+
+                        <p>
+                            Build interfaces from small reusable
+                            components instead of repeating markup
+                            and styles throughout the project.
+                        </p>
+                    </div>
+
+                </section>
+
+
+                <!-- 01 -->
+                <section class="doc-section" id="principles">
+
+                    <div class="section-number">01</div>
+
+                    <h2>Core Principles</h2>
+
+                    <p class="section-lead">
+                        Every VLO project should follow a small set
+                        of principles. These principles matter more
+                        than any individual implementation.
+                    </p>
+
+
+                    <div class="principles-grid">
+
+                        <article>
+                            <div class="principle-icon">◈</div>
+                            <h3>Reusable</h3>
+                            <p>
+                                Build components once and reuse them
+                                everywhere they are needed.
+                            </p>
+                        </article>
+
+                        <article>
+                            <div class="principle-icon">⌘</div>
+                            <h3>Simple</h3>
+                            <p>
+                                Prefer straightforward implementations
+                                over unnecessary abstraction.
+                            </p>
+                        </article>
+
+                        <article>
+                            <div class="principle-icon">◇</div>
+                            <h3>Consistent</h3>
+                            <p>
+                                Similar problems should have similar
+                                solutions throughout the project.
+                            </p>
+                        </article>
+
+                        <article>
+                            <div class="principle-icon">✦</div>
+                            <h3>Maintainable</h3>
+                            <p>
+                                Write code that another developer can
+                                understand and modify quickly.
+                            </p>
+                        </article>
+
+                    </div>
+
+
+                    <div class="rule-card">
+
+                        <strong>
+                            Golden Rule
+                        </strong>
+
+                        <p>
+                            If you have written the same UI pattern
+                            more than once, consider turning it into
+                            a component.
+                        </p>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 02 -->
+                <section class="doc-section" id="structure">
+
+                    <div class="section-number">02</div>
+
+                    <h2>Project Structure</h2>
+
+                    <p class="section-lead">
+                        Keep project files organized by responsibility.
+                        Avoid putting unrelated functionality into one
+                        large file.
+                    </p>
+
+
+                    <div class="code-card">
+
+                        <div class="code-header">
+                            <span>Recommended structure</span>
+                            <span>VLO</span>
+                        </div>
+
+                        <pre><code>project/
+│
+├── pages/
+│   ├── index.vlo
+│   ├── components.vlo
+│   ├── pricing.vlo
+│   └── docs.vlo
+│
+├── components/
+│   ├── Button.vlo
+│   ├── Badge.vlo
+│   ├── Alert.vlo
+│   ├── Card.vlo
+│   ├── Input.vlo
+│   └── Toast.vlo
+│
+├── layouts/
+│   └── BaseLayout.vlo
+│
+├── styles/
+│   ├── variables.css
+│   └── global.css
+│
+└── assets/
+    ├── images/
+    └── icons/</code></pre>
+
+                    </div>
+
+
+                    <div class="info-grid">
+
+                        <div>
+                            <strong>pages/</strong>
+                            <p>
+                                Application routes and complete pages.
+                            </p>
+                        </div>
+
+                        <div>
+                            <strong>components/</strong>
+                            <p>
+                                Reusable UI building blocks.
+                            </p>
+                        </div>
+
+                        <div>
+                            <strong>layouts/</strong>
+                            <p>
+                                Shared page structures.
+                            </p>
+                        </div>
+
+                        <div>
+                            <strong>styles/</strong>
+                            <p>
+                                Shared design tokens and global styles.
+                            </p>
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 03 -->
+                <section class="doc-section" id="vlo-files">
+
+                    <div class="section-number">03</div>
+
+                    <h2>.vlo Files</h2>
+
+                    <p class="section-lead">
+                        A VLO file should have one clear responsibility.
+                        Keep markup, styling and behavior close to the
+                        component they belong to.
+                    </p>
+
+
+                    <h3>Basic structure</h3>
+
+                    <div class="code-card">
+
+                        <div class="code-header">
+                            <span>ExampleComponent.vlo</span>
+                            <span>.vlo</span>
+                        </div>
+
+                        <pre><code>&lt;div class="example"&gt;
+
+    &lt;h2&gt;{title}&lt;/h2&gt;
+
+    &lt;p&gt;{description}&lt;/p&gt;
+
+&lt;/div&gt;
+
+&lt;style&gt;
+
+.example {
+    padding: 20px;
+}
+
+&lt;/style&gt;</code></pre>
+
+                    </div>
+
+
+                    <div class="do-grid">
+
+                        <div class="do-card good">
+
+                            <div class="do-title">
+                                <span>✓</span>
+                                Do
+                            </div>
+
+                            <ul>
+                                <li>Keep components focused.</li>
+                                <li>Use meaningful names.</li>
+                                <li>Keep styles scoped when possible.</li>
+                                <li>Document unusual behavior.</li>
+                            </ul>
+
+                        </div>
+
+
+                        <div class="do-card avoid">
+
+                            <div class="do-title">
+                                <span>×</span>
+                                Avoid
+                            </div>
+
+                            <ul>
+                                <li>Huge monolithic components.</li>
+                                <li>Duplicated markup.</li>
+                                <li>Unused props.</li>
+                                <li>Unexplained magic values.</li>
+                            </ul>
+
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 04 -->
+                <section class="doc-section" id="components">
+
+                    <div class="section-number">04</div>
+
+                    <h2>Components</h2>
+
+                    <p class="section-lead">
+                        Components are the foundation of VLO.
+                        A component should represent a reusable
+                        piece of interface or behavior.
+                    </p>
+
+
+                    <h3>Component naming</h3>
+
+                    <div class="naming-table">
+
+                        <div class="naming-row header">
+                            <span>Type</span>
+                            <span>Recommended</span>
+                            <span>Avoid</span>
+                        </div>
+
+                        <div class="naming-row">
+                            <span>Button</span>
+                            <span>Button.vlo</span>
+                            <span>button.vlo</span>
+                        </div>
+
+                        <div class="naming-row">
+                            <span>Navigation</span>
+                            <span>Navbar.vlo</span>
+                            <span>navthing.vlo</span>
+                        </div>
+
+                        <div class="naming-row">
+                            <span>Form</span>
+                            <span>Input.vlo</span>
+                            <span>inputThing.vlo</span>
+                        </div>
+
+                    </div>
+
+
+                    <h3>Component responsibilities</h3>
+
+                    <div class="number-list">
+
+                        <div>
+                            <b>01</b>
+                            <p>
+                                A component owns its own presentation.
+                            </p>
+                        </div>
+
+                        <div>
+                            <b>02</b>
+                            <p>
+                                Props control configurable behavior.
+                            </p>
+                        </div>
+
+                        <div>
+                            <b>03</b>
+                            <p>
+                                Children should be used for flexible content.
+                            </p>
+                        </div>
+
+                        <div>
+                            <b>04</b>
+                            <p>
+                                Avoid coupling components to specific pages.
+                            </p>
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 05 -->
+                <section class="doc-section" id="props">
+
+                    <div class="section-number">05</div>
+
+                    <h2>Props</h2>
+
+                    <p class="section-lead">
+                        Props are the primary way to customize reusable
+                        VLO components.
+                    </p>
+
+
+                    <div class="code-card">
+
+                        <div class="code-header">
+                            <span>Props example</span>
+                            <span>VLO</span>
+                        </div>
+
+                        <pre><code>&lt;Button
+    text="Save Changes"
+    href="/save"
+    variant="primary"
+/&gt;</code></pre>
+
+                    </div>
+
+
+                    <h3>Prop rules</h3>
+
+                    <div class="rules-list">
+
+                        <div>
+                            <span>01</span>
+                            <p>
+                                Use clear, descriptive prop names.
+                            </p>
+                        </div>
+
+                        <div>
+                            <span>02</span>
+                            <p>
+                                Provide sensible defaults when possible.
+                            </p>
+                        </div>
+
+                        <div>
+                            <span>03</span>
+                            <p>
+                                Avoid props that only make sense for one page.
+                            </p>
+                        </div>
+
+                        <div>
+                            <span>04</span>
+                            <p>
+                                Keep variant names predictable.
+                            </p>
+                        </div>
+
+                    </div>
+
+
+                    <div class="rule-card">
+
+                        <strong>
+                            Good example
+                        </strong>
+
+                        <p>
+                            <code>variant="primary"</code>,
+                            <code>variant="secondary"</code>,
+                            <code>variant="ghost"</code>
+                        </p>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 06 -->
+                <section class="doc-section" id="pages">
+
+                    <div class="section-number">06</div>
+
+                    <h2>Pages</h2>
+
+                    <p class="section-lead">
+                        Pages compose components. They should not
+                        duplicate component implementations.
+                    </p>
+
+
+                    <div class="architecture-flow">
+
+                        <div>
+                            <span>01</span>
+                            <strong>Layout</strong>
+                            <small>BaseLayout</small>
+                        </div>
+
+                        <i>→</i>
+
+                        <div>
+                            <span>02</span>
+                            <strong>Page</strong>
+                            <small>Home.vlo</small>
+                        </div>
+
+                        <i>→</i>
+
+                        <div>
+                            <span>03</span>
+                            <strong>Components</strong>
+                            <small>Button / Card / Badge</small>
+                        </div>
+
+                    </div>
+
+
+                    <div class="info-box">
+
+                        <strong>
+                            Keep pages readable.
+                        </strong>
+
+                        <p>
+                            If a page contains a large block of repeated
+                            UI, move that UI into a reusable component.
+                        </p>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 07 -->
+                <section class="doc-section" id="styling">
+
+                    <div class="section-number">07</div>
+
+                    <h2>Styling</h2>
+
+                    <p class="section-lead">
+                        VLO uses a dark, modern visual language with
+                        cyan accents. Styles should reinforce that identity.
+                    </p>
+
+
+                    <h3>Design tokens</h3>
+
+                    <div class="tokens-grid">
+
+                        <div class="token">
+                            <span class="token-dot primary"></span>
+                            <div>
+                                <strong>Primary</strong>
+                                <small>#00f5ff</small>
+                            </div>
+                        </div>
+
+                        <div class="token">
+                            <span class="token-dot success"></span>
+                            <div>
+                                <strong>Success</strong>
+                                <small>#00ff88</small>
+                            </div>
+                        </div>
+
+                        <div class="token">
+                            <span class="token-dot background"></span>
+                            <div>
+                                <strong>Background</strong>
+                                <small>#080808</small>
+                            </div>
+                        </div>
+
+                        <div class="token">
+                            <span class="token-dot card"></span>
+                            <div>
+                                <strong>Card</strong>
+                                <small>#111111</small>
+                            </div>
+                        </div>
+
+                    </div>
+
+
+                    <h3>Styling rules</h3>
+
+                    <ul class="styled-list">
+                        <li>
+                            Prefer existing design variables.
+                        </li>
+
+                        <li>
+                            Avoid introducing random colors.
+                        </li>
+
+                        <li>
+                            Keep spacing consistent.
+                        </li>
+
+                        <li>
+                            Use responsive layouts by default.
+                        </li>
+
+                        <li>
+                            Avoid excessive shadows and gradients.
+                        </li>
+
+                        <li>
+                            Keep borders subtle and purposeful.
+                        </li>
+                    </ul>
+
+                </section>
+
+
+                <!-- 08 -->
+                <section class="doc-section" id="branding">
+
+                    <div class="section-number">08</div>
+
+                    <h2>VLO Branding</h2>
+
+                    <p class="section-lead">
+                        Every VLO page should feel like part of the
+                        same product. Branding consistency is not optional.
+                    </p>
+
+
+                    <div class="brand-showcase">
+
+                        <div class="brand-logo">
+                            VLO
+                        </div>
+
+                        <p>
+                            Visual Language & Objects
+                        </p>
+
+                    </div>
+
+
+                    <h3>Brand identity</h3>
+
+                    <div class="brand-grid">
+
+                        <div>
+                            <strong>Primary color</strong>
+                            <span>#00F5FF</span>
+                        </div>
+
+                        <div>
+                            <strong>Accent</strong>
+                            <span>#00FF88</span>
+                        </div>
+
+                        <div>
+                            <strong>Background</strong>
+                            <span>#080808</span>
+                        </div>
+
+                        <div>
+                            <strong>Surface</strong>
+                            <span>#111111</span>
+                        </div>
+
+                    </div>
+
+
+                    <h3>Brand rules</h3>
+
+                    <div class="brand-rules">
+
+                        <div>
+                            <span>01</span>
+                            <strong>Use VLO consistently.</strong>
+                            <p>
+                                Always use the official VLO name and
+                                capitalization.
+                            </p>
+                        </div>
+
+                        <div>
+                            <span>02</span>
+                            <strong>Protect the visual language.</strong>
+                            <p>
+                                Avoid unrelated color systems or
+                                visual styles.
+                            </p>
+                        </div>
+
+                        <div>
+                            <span>03</span>
+                            <strong>Keep interfaces clean.</strong>
+                            <p>
+                                VLO should feel modern, focused and
+                                technically polished.
+                            </p>
+                        </div>
+
+                        <div>
+                            <span>04</span>
+                            <strong>Don't over-brand.</strong>
+                            <p>
+                                Branding should support the interface,
+                                not overpower it.
+                            </p>
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 09 -->
+                <section class="doc-section" id="accessibility">
+
+                    <div class="section-number">09</div>
+
+                    <h2>Accessibility</h2>
+
+                    <p class="section-lead">
+                        Components should be usable by as many people
+                        as possible.
+                    </p>
+
+
+                    <div class="access-grid">
+
+                        <div>
+                            <span>01</span>
+                            <h3>Keyboard</h3>
+                            <p>
+                                Interactive elements should be reachable
+                                and usable with a keyboard.
+                            </p>
+                        </div>
+
+                        <div>
+                            <span>02</span>
+                            <h3>Contrast</h3>
+                            <p>
+                                Text and interactive elements should have
+                                sufficient contrast.
+                            </p>
+                        </div>
+
+                        <div>
+                            <span>03</span>
+                            <h3>Labels</h3>
+                            <p>
+                                Form controls should have clear labels
+                                or meaningful placeholders.
+                            </p>
+                        </div>
+
+                        <div>
+                            <span>04</span>
+                            <h3>Semantics</h3>
+                            <p>
+                                Use appropriate HTML elements instead of
+                                relying entirely on generic containers.
+                            </p>
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 10 -->
+                <section class="doc-section" id="security">
+
+                    <div class="section-number">10</div>
+
+                    <h2>Security</h2>
+
+                    <p class="section-lead">
+                        VLO projects should treat security as part of
+                        normal development rather than an afterthought.
+                    </p>
+
+
+                    <div class="security-list">
+
+                        <div>
+                            <span>!</span>
+                            <div>
+                                <strong>Never expose secrets.</strong>
+                                <p>
+                                    API keys, passwords and private
+                                    credentials must not be committed
+                                    into project files.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div>
+                            <span>!</span>
+                            <div>
+                                <strong>Validate user input.</strong>
+                                <p>
+                                    Never assume data coming from users
+                                    is safe or correctly formatted.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div>
+                            <span>!</span>
+                            <div>
+                                <strong>Keep dependencies controlled.</strong>
+                                <p>
+                                    Only add dependencies when they solve
+                                    a real project requirement.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div>
+                            <span>!</span>
+                            <div>
+                                <strong>Don't bypass security checks.</strong>
+                                <p>
+                                    Development convenience should never
+                                    become a production security risk.
+                                </p>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 11 -->
+                <section class="doc-section" id="workflow">
+
+                    <div class="section-number">11</div>
+
+                    <h2>Development Workflow</h2>
+
+                    <p class="section-lead">
+                        Keep changes small, understandable and easy
+                        to review.
+                    </p>
+
+
+                    <div class="workflow">
+
+                        <div class="workflow-step">
+                            <span>01</span>
+                            <div>
+                                <strong>Plan</strong>
+                                <p>
+                                    Understand what needs to change
+                                    before writing code.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="workflow-line"></div>
+
+                        <div class="workflow-step">
+                            <span>02</span>
+                            <div>
+                                <strong>Build</strong>
+                                <p>
+                                    Reuse existing VLO components before
+                                    creating new ones.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="workflow-line"></div>
+
+                        <div class="workflow-step">
+                            <span>03</span>
+                            <div>
+                                <strong>Test</strong>
+                                <p>
+                                    Check desktop, mobile and interactive
+                                    states.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="workflow-line"></div>
+
+                        <div class="workflow-step">
+                            <span>04</span>
+                            <div>
+                                <strong>Review</strong>
+                                <p>
+                                    Remove duplication and unnecessary
+                                    complexity.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="workflow-line"></div>
+
+                        <div class="workflow-step">
+                            <span>05</span>
+                            <div>
+                                <strong>Document</strong>
+                                <p>
+                                    Update documentation when public
+                                    behavior changes.
+                                </p>
+                            </div>
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                <!-- 12 -->
+                <section class="doc-section" id="checklist">
+
+                    <div class="section-number">12</div>
+
+                    <h2>Pre-Release Checklist</h2>
+
+                    <p class="section-lead">
+                        Before considering a feature complete, verify
+                        the following.
+                    </p>
+
+
+                    <div class="checklist">
+
+                        <label>
+                            <span>✓</span>
+                            Component is reusable where appropriate
+                        </label>
+
+                        <label>
+                            <span>✓</span>
+                            Props have clear names and defaults
+                        </label>
+
+                        <label>
+                            <span>✓</span>
+                            No unnecessary duplicated markup
+                        </label>
+
+                        <label>
+                            <span>✓</span>
+                            Styling follows VLO design language
+                        </label>
+
+                        <label>
+                            <span>✓</span>
+                            Mobile layout has been considered
+                        </label>
+
+                        <label>
+                            <span>✓</span>
+                            Interactive elements are accessible
+                        </label>
+
+                        <label>
+                            <span>✓</span>
+                            No secrets or sensitive configuration committed
+                        </label>
+
+                        <label>
+                            <span>✓</span>
+                            Documentation reflects the current behavior
+                        </label>
+
+                    </div>
+
+                </section>
+
+
+                <!-- FINAL -->
+                <section class="final-card">
+
+                    <div class="final-mark">
+                        VLO
+                    </div>
+
+                    <h2>
+                        Build once. Reuse everywhere.
+                    </h2>
+
+                    <p>
+                        VLO is more than a collection of components.
+                        It is a shared language for building consistent,
+                        maintainable interfaces.
+                    </p>
+
+                    <div class="final-links">
+                        <a href="/components">
+                            Explore Components →
+                        </a>
+
+                        <a href="/">
+                            Back to VLO →
+                        </a>
+                    </div>
+
+                </section>
+
+            </main>
+
+        </div>
+
+    </div>
+
+
+    <button id="backTop" class="back-top">
+        ↑
+    </button>
+
+</BaseLayout>
+
+
+<style>
+
+/* =========================================
+   ROOT
+========================================= */
+
+.guidelines-page {
+    min-height: 100vh;
+
+    background:
+        radial-gradient(
+            circle at 50% -10%,
+            rgba(0,245,255,.08),
+            transparent 34%
+        );
+}
+
+
+/* =========================================
+   HERO
+========================================= */
+
+.guidelines-hero {
+    max-width: 1120px;
+    margin: auto;
+    padding: 85px 24px 65px;
+}
+
+.hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+
+    padding: 7px 13px;
+
+    border: 1px solid rgba(0,245,255,.25);
+    border-radius: 999px;
+
+    background: rgba(0,245,255,.05);
+
+    color: #00f5ff;
+
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+}
+
+.pulse {
+    width: 7px;
+    height: 7px;
+
+    border-radius: 50%;
+
+    background: #00f5ff;
+
+    box-shadow:
+        0 0 12px #00f5ff;
+}
+
+.guidelines-hero h1 {
+    margin: 24px 0 18px;
+
+    font-size: clamp(
+        3.2rem,
+        8vw,
+        5.7rem
+    );
+
+    line-height: .95;
+
+    letter-spacing: -.065em;
+
+    color: #fff;
+}
+
+.guidelines-hero h1 span {
+    color: #00f5ff;
+
+    text-shadow:
+        0 0 30px rgba(0,245,255,.25);
+}
+
+.guidelines-hero > p {
+    max-width: 720px;
+
+    margin: 0;
+
+    color: #8d8d8d;
+
+    font-size: 1.12rem;
+
+    line-height: 1.75;
+}
+
+.hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 22px;
+
+    margin-top: 30px;
+
+    color: #666;
+
+    font-size: .8rem;
+}
+
+
+/* =========================================
+   LAYOUT
+========================================= */
+
+.docs-layout {
+    max-width: 1220px;
+
+    margin: auto;
+
+    padding:
+        0 24px
+        100px;
+
+    display: grid;
+
+    grid-template-columns:
+        225px
+        minmax(0,1fr);
+
+    gap: 65px;
+}
+
+
+/* =========================================
+   SIDEBAR
+========================================= */
+
+.docs-sidebar {
+    position: sticky;
+    top: 90px;
+
+    height: max-content;
+}
+
+.sidebar-title {
+    margin-bottom: 15px;
+
+    color: #fff;
+
+    font-size: .85rem;
+    font-weight: 700;
+}
+
+.docs-nav {
+    display: flex;
+    flex-direction: column;
+
+    gap: 2px;
+}
+
+.docs-nav a {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+
+    padding: 8px 10px;
+
+    border-radius: 7px;
+
+    color: #777;
+
+    text-decoration: none;
+
+    font-size: .78rem;
+
+    transition:
+        color .2s ease,
+        background .2s ease;
+}
+
+.docs-nav a span {
+    width: 20px;
+
+    color: #444;
+
+    font-family: monospace;
+
+    font-size: .65rem;
+}
+
+.docs-nav a:hover {
+    color: #fff;
+
+    background:
+        rgba(255,255,255,.035);
+}
+
+.docs-nav a.active {
+    color: #00f5ff;
+
+    background:
+        rgba(0,245,255,.07);
+}
+
+.docs-nav a.active span {
+    color: #00f5ff;
+}
+
+.sidebar-card {
+    margin-top: 35px;
+
+    padding: 17px;
+
+    border:
+        1px solid
+        var(--border,#292929);
+
+    border-radius: 12px;
+
+    background:
+        rgba(255,255,255,.02);
+}
+
+.sidebar-icon {
+    margin-bottom: 9px;
+
+    color: #00f5ff;
+
+    font-size: 1.3rem;
+}
+
+.sidebar-card strong {
+    color: #ddd;
+
+    font-size: .8rem;
+}
+
+.sidebar-card p {
+    margin: 7px 0 0;
+
+    color: #686868;
+
+    font-size: .72rem;
+
+    line-height: 1.55;
+}
+
+
+/* =========================================
+   CONTENT
+========================================= */
+
+.docs-content {
+    min-width: 0;
+}
+
+.intro-card {
+    display: flex;
+    gap: 18px;
+
+    padding: 20px;
+
+    margin-bottom: 80px;
+
+    border:
+        1px solid
+        rgba(0,245,255,.18);
+
+    border-radius: 13px;
+
+    background:
+        rgba(0,245,255,.035);
+}
+
+.intro-icon {
+    flex-shrink: 0;
+
+    width: 42px;
+    height: 42px;
+
+    display: grid;
+    place-items: center;
+
+    border-radius: 10px;
+
+    background: #00f5ff;
+
+    color: #000;
+
+    font-weight: 900;
+}
+
+.intro-card strong {
+    color: #fff;
+
+    font-size: .9rem;
+}
+
+.intro-card p {
+    margin: 6px 0 0;
+
+    color: #777;
+
+    font-size: .8rem;
+
+    line-height: 1.55;
+}
+
+
+/* =========================================
+   SECTIONS
+========================================= */
+
+.doc-section {
+    margin-bottom: 110px;
+
+    scroll-margin-top: 90px;
+}
+
+.section-number {
+    margin-bottom: 8px;
+
+    color: #00f5ff;
+
+    font-family: monospace;
+
+    font-size: .7rem;
+
+    letter-spacing: .08em;
+}
+
+.doc-section h2 {
+    margin: 0 0 13px;
+
+    color: #fff;
+
+    font-size: 2.15rem;
+
+    letter-spacing: -.035em;
+}
+
+.section-lead {
+    max-width: 720px;
+
+    margin: 0 0 30px;
+
+    color: #858585;
+
+    font-size: .95rem;
+
+    line-height: 1.75;
+}
+
+.doc-section h3 {
+    margin: 35px 0 14px;
+
+    color: #ccc;
+
+    font-size: .95rem;
+}
+
+
+/* =========================================
+   PRINCIPLES
+========================================= */
+
+.principles-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(2,minmax(0,1fr));
+
+    gap: 12px;
+}
+
+.principles-grid article {
+    padding: 21px;
+
+    border:
+        1px solid
+        var(--border,#292929);
+
+    border-radius: 11px;
+
+    background:
+        rgba(255,255,255,.018);
+}
+
+.principle-icon {
+    margin-bottom: 13px;
+
+    color: #00f5ff;
+
+    font-size: 1.2rem;
+}
+
+.principles-grid h3 {
+    margin: 0 0 7px;
+
+    color: #eee;
+
+    font-size: .9rem;
+}
+
+.principles-grid p {
+    margin: 0;
+
+    color: #707070;
+
+    font-size: .76rem;
+
+    line-height: 1.6;
+}
+
+
+/* =========================================
+   RULE
+========================================= */
+
+.rule-card {
+    margin-top: 20px;
+
+    padding: 19px;
+
+    border-left:
+        2px solid
+        #00f5ff;
+
+    background:
+        rgba(0,245,255,.035);
+}
+
+.rule-card strong {
+    color: #00f5ff;
+
+    font-size: .8rem;
+}
+
+.rule-card p {
+    margin: 6px 0 0;
+
+    color: #888;
+
+    font-size: .8rem;
+
+    line-height: 1.6;
+}
+
+
+/* =========================================
+   CODE
+========================================= */
+
+.code-card {
+    overflow: hidden;
+
+    border:
+        1px solid
+        var(--border,#292929);
+
+    border-radius: 11px;
+
+    background: #090909;
+}
+
+.code-header {
+    display: flex;
+
+    align-items: center;
+    justify-content: space-between;
+
+    padding: 10px 14px;
+
+    border-bottom:
+        1px solid
+        #292929;
+
+    color: #707070;
+
+    font-size: .7rem;
+}
+
+.code-header span:last-child {
+    color: #00f5ff;
+}
+
+.code-card pre {
+    margin: 0;
+
+    padding: 20px;
+
+    overflow-x: auto;
+}
+
+.code-card code {
+    color: #b9f8ff;
+
+    font-family:
+        "SFMono-Regular",
+        Consolas,
+        monospace;
+
+    font-size: .78rem;
+
+    line-height: 1.7;
+}
+
+
+/* =========================================
+   INFO GRID
+========================================= */
+
+.info-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(2,1fr);
+
+    gap: 10px;
+
+    margin-top: 15px;
+}
+
+.info-grid > div {
+    padding: 16px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 9px;
+}
+
+.info-grid strong {
+    color: #00f5ff;
+
+    font-family: monospace;
+
+    font-size: .78rem;
+}
+
+.info-grid p {
+    margin: 6px 0 0;
+
+    color: #707070;
+
+    font-size: .72rem;
+}
+
+
+/* =========================================
+   DO / AVOID
+========================================= */
+
+.do-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(2,1fr);
+
+    gap: 12px;
+
+    margin-top: 20px;
+}
+
+.do-card {
+    padding: 18px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 10px;
+}
+
+.do-title {
+    margin-bottom: 12px;
+
+    color: #eee;
+
+    font-size: .8rem;
+    font-weight: 700;
+}
+
+.do-title span {
+    margin-right: 6px;
+
+    color: #00ff88;
+}
+
+.avoid .do-title span {
+    color: #ff5c7a;
+}
+
+.do-card ul {
+    margin: 0;
+
+    padding-left: 18px;
+}
+
+.do-card li {
+    margin: 7px 0;
+
+    color: #707070;
+
+    font-size: .73rem;
+}
+
+
+/* =========================================
+   NAMING
+========================================= */
+
+.naming-table {
+    overflow: hidden;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 10px;
+}
+
+.naming-row {
+    display: grid;
+
+    grid-template-columns:
+        1fr
+        1.3fr
+        1.3fr;
+
+    border-bottom:
+        1px solid
+        #292929;
+}
+
+.naming-row:last-child {
+    border-bottom: 0;
+}
+
+.naming-row span {
+    padding: 12px 14px;
+
+    color: #777;
+
+    font-family: monospace;
+
+    font-size: .72rem;
+}
+
+.naming-row.header span {
+    color: #555;
+
+    background:
+        rgba(255,255,255,.025);
+
+    font-family: inherit;
+
+    font-size: .65rem;
+
+    text-transform: uppercase;
+}
+
+.naming-row span:nth-child(2) {
+    color: #00ff88;
+}
+
+.naming-row span:nth-child(3) {
+    color: #ff6680;
+}
+
+
+/* =========================================
+   NUMBER LIST
+========================================= */
+
+.number-list {
+    display: flex;
+    flex-direction: column;
+
+    gap: 1px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 10px;
+
+    overflow: hidden;
+}
+
+.number-list div {
+    display: flex;
+    gap: 15px;
+
+    padding: 15px;
+
+    background:
+        rgba(255,255,255,.015);
+}
+
+.number-list b {
+    color: #00f5ff;
+
+    font-family: monospace;
+
+    font-size: .7rem;
+}
+
+.number-list p {
+    margin: 0;
+
+    color: #888;
+
+    font-size: .78rem;
+}
+
+
+/* =========================================
+   RULES
+========================================= */
+
+.rules-list {
+    display: flex;
+    flex-direction: column;
+
+    gap: 8px;
+}
+
+.rules-list div {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+
+    padding: 12px 14px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 8px;
+}
+
+.rules-list span {
+    color: #00f5ff;
+
+    font-family: monospace;
+
+    font-size: .68rem;
+}
+
+.rules-list p {
+    margin: 0;
+
+    color: #888;
+
+    font-size: .75rem;
+}
+
+
+/* =========================================
+   ARCHITECTURE
+========================================= */
+
+.architecture-flow {
+    display: flex;
+    align-items: center;
+
+    gap: 12px;
+
+    overflow-x: auto;
+
+    padding: 10px 0;
+}
+
+.architecture-flow > div {
+    min-width: 145px;
+
+    padding: 17px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 10px;
+
+    background:
+        rgba(255,255,255,.018);
+}
+
+.architecture-flow span {
+    display: block;
+
+    margin-bottom: 8px;
+
+    color: #00f5ff;
+
+    font-family: monospace;
+
+    font-size: .65rem;
+}
+
+.architecture-flow strong {
+    display: block;
+
+    color: #eee;
+
+    font-size: .8rem;
+}
+
+.architecture-flow small {
+    display: block;
+
+    margin-top: 4px;
+
+    color: #666;
+
+    font-size: .65rem;
+}
+
+.architecture-flow i {
+    color: #444;
+
+    font-style: normal;
+}
+
+
+/* =========================================
+   INFO BOX
+========================================= */
+
+.info-box {
+    margin-top: 20px;
+
+    padding: 19px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 10px;
+}
+
+.info-box strong {
+    color: #00f5ff;
+
+    font-size: .8rem;
+}
+
+.info-box p {
+    margin: 7px 0 0;
+
+    color: #777;
+
+    font-size: .75rem;
+
+    line-height: 1.6;
+}
+
+
+/* =========================================
+   BRAND
+========================================= */
+
+.brand-showcase {
+    padding: 50px 20px;
+
+    text-align: center;
+
+    border:
+        1px solid
+        rgba(0,245,255,.15);
+
+    border-radius: 13px;
+
+    background:
+        radial-gradient(
+            circle,
+            rgba(0,245,255,.06),
+            transparent 65%
+        );
+}
+
+.brand-logo {
+    color: #00f5ff;
+
+    font-size: 4rem;
+
+    font-weight: 900;
+
+    letter-spacing: -.08em;
+
+    text-shadow:
+        0 0 35px
+        rgba(0,245,255,.25);
+}
+
+.brand-showcase p {
+    margin: 7px 0 0;
+
+    color: #666;
+
+    font-size: .75rem;
+}
+
+.brand-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(4,1fr);
+
+    gap: 10px;
+
+    margin-top: 15px;
+}
+
+.brand-grid div {
+    padding: 15px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 9px;
+}
+
+.brand-grid strong,
+.brand-grid span {
+    display: block;
+}
+
+.brand-grid strong {
+    color: #777;
+
+    font-size: .7rem;
+}
+
+.brand-grid span {
+    margin-top: 7px;
+
+    color: #00f5ff;
+
+    font-family: monospace;
+
+    font-size: .72rem;
+}
+
+.brand-rules {
+    display: grid;
+
+    grid-template-columns:
+        repeat(2,1fr);
+
+    gap: 10px;
+}
+
+.brand-rules > div {
+    padding: 18px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 10px;
+}
+
+.brand-rules span {
+    color: #00f5ff;
+
+    font-family: monospace;
+
+    font-size: .65rem;
+}
+
+.brand-rules strong {
+    display: block;
+
+    margin-top: 10px;
+
+    color: #ddd;
+
+    font-size: .8rem;
+}
+
+.brand-rules p {
+    margin: 6px 0 0;
+
+    color: #707070;
+
+    font-size: .72rem;
+
+    line-height: 1.55;
+}
+
+
+/* =========================================
+   TOKENS
+========================================= */
+
+.tokens-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(2,1fr);
+
+    gap: 10px;
+}
+
+.token {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    padding: 15px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 9px;
+}
+
+.token-dot {
+    width: 28px;
+    height: 28px;
+
+    border-radius: 7px;
+}
+
+.token-dot.primary {
+    background: #00f5ff;
+}
+
+.token-dot.success {
+    background: #00ff88;
+}
+
+.token-dot.background {
+    background: #080808;
+
+    border: 1px solid #333;
+}
+
+.token-dot.card {
+    background: #111;
+
+    border: 1px solid #333;
+}
+
+.token strong,
+.token small {
+    display: block;
+}
+
+.token strong {
+    color: #ddd;
+
+    font-size: .75rem;
+}
+
+.token small {
+    margin-top: 3px;
+
+    color: #666;
+
+    font-family: monospace;
+
+    font-size: .65rem;
+}
+
+
+/* =========================================
+   STYLED LIST
+========================================= */
+
+.styled-list {
+    margin: 0;
+
+    padding: 0;
+
+    list-style: none;
+}
+
+.styled-list li {
+    position: relative;
+
+    padding: 11px 0 11px 22px;
+
+    border-bottom:
+        1px solid
+        #222;
+
+    color: #777;
+
+    font-size: .78rem;
+}
+
+.styled-list li::before {
+    content: "✦";
+
+    position: absolute;
+    left: 0;
+
+    color: #00f5ff;
+}
+
+
+/* =========================================
+   ACCESSIBILITY
+========================================= */
+
+.access-grid {
+    display: grid;
+
+    grid-template-columns:
+        repeat(2,1fr);
+
+    gap: 10px;
+}
+
+.access-grid > div {
+    padding: 19px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 10px;
+}
+
+.access-grid span {
+    color: #00f5ff;
+
+    font-family: monospace;
+
+    font-size: .65rem;
+}
+
+.access-grid h3 {
+    margin: 10px 0 6px;
+
+    color: #ddd;
+}
+
+.access-grid p {
+    margin: 0;
+
+    color: #707070;
+
+    font-size: .72rem;
+
+    line-height: 1.55;
+}
+
+
+/* =========================================
+   SECURITY
+========================================= */
+
+.security-list {
+    display: flex;
+    flex-direction: column;
+
+    gap: 9px;
+}
+
+.security-list > div {
+    display: flex;
+    gap: 14px;
+
+    padding: 16px;
+
+    border:
+        1px solid
+        rgba(255,92,122,.15);
+
+    border-radius: 10px;
+
+    background:
+        rgba(255,92,122,.025);
+}
+
+.security-list > div > span {
+    width: 25px;
+    height: 25px;
+
+    display: grid;
+    place-items: center;
+
+    flex-shrink: 0;
+
+    border-radius: 7px;
+
+    background:
+        rgba(255,92,122,.08);
+
+    color: #ff6680;
+
+    font-weight: 700;
+}
+
+.security-list strong {
+    color: #ddd;
+
+    font-size: .78rem;
+}
+
+.security-list p {
+    margin: 5px 0 0;
+
+    color: #707070;
+
+    font-size: .72rem;
+
+    line-height: 1.55;
+}
+
+
+/* =========================================
+   WORKFLOW
+========================================= */
+
+.workflow {
+    display: flex;
+    flex-direction: column;
+}
+
+.workflow-step {
+    display: flex;
+    gap: 16px;
+
+    padding: 5px 0;
+}
+
+.workflow-step > span {
+    width: 34px;
+    height: 34px;
+
+    display: grid;
+    place-items: center;
+
+    flex-shrink: 0;
+
+    border:
+        1px solid
+        rgba(0,245,255,.2);
+
+    border-radius: 8px;
+
+    color: #00f5ff;
+
+    font-family: monospace;
+
+    font-size: .65rem;
+}
+
+.workflow-step strong {
+    color: #ddd;
+
+    font-size: .8rem;
+}
+
+.workflow-step p {
+    margin: 4px 0 0;
+
+    color: #707070;
+
+    font-size: .72rem;
+
+    line-height: 1.5;
+}
+
+.workflow-line {
+    width: 1px;
+    height: 18px;
+
+    margin-left: 17px;
+
+    background: #292929;
+}
+
+
+/* =========================================
+   CHECKLIST
+========================================= */
+
+.checklist {
+    display: flex;
+    flex-direction: column;
+
+    gap: 7px;
+}
+
+.checklist label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    padding: 13px 15px;
+
+    border:
+        1px solid
+        #292929;
+
+    border-radius: 8px;
+
+    color: #777;
+
+    font-size: .75rem;
+}
+
+.checklist label span {
+    color: #00ff88;
+
+    font-weight: 700;
+}
+
+
+/* =========================================
+   FINAL
+========================================= */
+
+.final-card {
+    padding: 70px 30px;
+
+    text-align: center;
+
+    border:
+        1px solid
+        rgba(0,245,255,.16);
+
+    border-radius: 15px;
+
+    background:
+        radial-gradient(
+            circle at center,
+            rgba(0,245,255,.06),
+            transparent 65%
+        );
+}
+
+.final-mark {
+    margin-bottom: 20px;
+
+    color: #00f5ff;
+
+    font-size: 2rem;
+
+    font-weight: 900;
+
+    letter-spacing: -.07em;
+}
+
+.final-card h2 {
+    margin: 0 0 12px;
+
+    color: #fff;
+
+    font-size: 1.7rem;
+
+    letter-spacing: -.03em;
+}
+
+.final-card > p {
+    max-width: 570px;
+
+    margin: 0 auto;
+
+    color: #707070;
+
+    font-size: .8rem;
+
+    line-height: 1.7;
+}
+
+.final-links {
+    display: flex;
+    justify-content: center;
+
+    flex-wrap: wrap;
+
+    gap: 10px;
+
+    margin-top: 25px;
+}
+
+.final-links a {
+    padding: 9px 14px;
+
+    border:
+        1px solid
+        #333;
+
+    border-radius: 7px;
+
+    color: #aaa;
+
+    text-decoration: none;
+
+    font-size: .72rem;
+
+    transition: .2s;
+}
+
+.final-links a:hover {
+    border-color: #00f5ff;
+
+    color: #00f5ff;
+}
+
+
+/* =========================================
+   BACK TOP
+========================================= */
+
+.back-top {
+    position: fixed;
+
+    right: 24px;
+    bottom: 24px;
+
+    width: 42px;
+    height: 42px;
+
+    border:
+        1px solid
+        #333;
+
+    border-radius: 9px;
+
+    background: #111;
+
+    color: #00f5ff;
+
+    cursor: pointer;
+
+    opacity: 0;
+
+    pointer-events: none;
+
+    transition: .25s;
+}
+
+.back-top.visible {
+    opacity: 1;
+
+    pointer-events: auto;
+}
+
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media (max-width: 900px) {
+
+    .docs-layout {
+        grid-template-columns: 1fr;
+
+        gap: 30px;
+    }
+
+    .docs-sidebar {
+        position: static;
+    }
+
+    .docs-nav {
+        display: grid;
+
+        grid-template-columns:
+            repeat(3,1fr);
+    }
+
+    .sidebar-card {
+        display: none;
+    }
+
+    .brand-grid {
+        grid-template-columns:
+            repeat(2,1fr);
+    }
+
+}
+
+
+@media (max-width: 650px) {
+
+    .guidelines-hero {
+        padding:
+            55px 18px
+            45px;
+    }
+
+    .guidelines-hero h1 {
+        font-size: 3.2rem;
+    }
+
+    .docs-layout {
+        padding:
+            0 15px
+            70px;
+    }
+
+    .docs-nav {
+        grid-template-columns:
+            repeat(2,1fr);
+    }
+
+    .principles-grid,
+    .do-grid,
+    .info-grid,
+    .brand-rules,
+    .access-grid,
+    .tokens-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .brand-grid {
+        grid-template-columns:
+            repeat(2,1fr);
+    }
+
+    .architecture-flow {
+        align-items: stretch;
+
+        flex-direction: column;
+    }
+
+    .architecture-flow i {
+        text-align: center;
+
+        transform: rotate(90deg);
+    }
+
+    .naming-row {
+        grid-template-columns:
+            1fr 1fr 1fr;
+    }
+
+    .naming-row span {
+        padding: 10px 8px;
+
+        font-size: .62rem;
+    }
+
+}
+
+</style>
+
+
+<script>
+
+/* =========================================
+   ACTIVE DOCUMENTATION SECTION
+========================================= */
+
+const docSections =
+    document.querySelectorAll(".doc-section");
+
+const docLinks =
+    document.querySelectorAll(".docs-nav a");
+
+
+const docObserver =
+    new IntersectionObserver(
+        entries => {
+
+            entries.forEach(entry => {
+
+                if (!entry.isIntersecting) return;
+
+                docLinks.forEach(link => {
+                    link.classList.remove("active");
+                });
+
+                const active =
+                    document.querySelector(
+                        `.docs-nav a[href="#${entry.target.id}"]`
+                    );
+
+                active?.classList.add("active");
+
+            });
+
+        },
+        {
+            rootMargin:
+                "-20% 0px -65% 0px"
+        }
+    );
+
+
+docSections.forEach(section => {
+    docObserver.observe(section);
+});
+
+
+/* =========================================
+   BACK TO TOP
+========================================= */
+
+const backTop =
+    document.getElementById("backTop");
+
+
+window.addEventListener(
+    "scroll",
+    () => {
+
+        if (window.scrollY > 500) {
+            backTop.classList.add("visible");
+        } else {
+            backTop.classList.remove("visible");
+        }
+
+    }
+);
+
+
+backTop?.addEventListener(
+    "click",
+    () => {
+
+        window.scrollTo({
+            top: 0,
+            behavior: "smooth"
+        });
+
+    }
+);
+
+
+/* =========================================
+   SMOOTH DOCUMENT NAVIGATION
+========================================= */
+
+document
+    .querySelectorAll(".docs-nav a")
+    .forEach(link => {
+
+        link.addEventListener(
+            "click",
+            event => {
+
+                const target =
+                    document.querySelector(
+                        link.getAttribute("href")
+                    );
+
+                if (!target) return;
+
+                event.preventDefault();
+
+                target.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start"
+                });
+
+                history.replaceState(
+                    null,
+                    "",
+                    link.getAttribute("href")
+                );
+
+            }
+        );
+
+    });
+
+</script>

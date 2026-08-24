@@ -1,0 +1,73 @@
+<nav class="navbar">
+    <div class="brand">{{brand}}</div>
+    <div class="nav-links">{{children}}</div>
+</nav>
+
+<style>
+.navbar { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    padding: 1rem 2rem; 
+    border-bottom: 1px solid var(--border); 
+    background-color: var(--background);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.brand { 
+    font-weight: 700; 
+    font-size: 1.5rem; 
+    color: var(--primary); 
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+}
+
+.brand:hover {
+    opacity: 0.8;
+}
+
+.nav-links { 
+    display: flex; 
+    gap: 1rem; 
+    align-items: center;
+}
+
+/* --- Base State: Inactive --- */
+.nav-links a {
+    color: #a0a0a0; /* muted gray for inactive */
+    text-decoration: none;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 2px solid transparent; /* reserve space for outline */
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-block;
+}
+
+/* --- Hover State: Smooth Lift + Glow --- */
+.nav-links a:hover {
+    transform: translateY(-2px);
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* --- Active State: Docs Style Outline + Glow --- */
+.nav-links a.active {
+    background: transparent;
+    color: #00f5ff;
+    border: 2px solid #00f5ff;
+    box-shadow: 0 0 12px rgba(0, 245, 255, 0.25),
+                0 0 25px rgba(0, 245, 255, 0.15);
+}
+
+.nav-links a.active:hover {
+    box-shadow: 0 0 20px rgba(0, 245, 255, 0.4),
+                0 0 40px rgba(0, 245, 255, 0.2);
+}
+
+/* Remove the old .vlo-btn.secondary rule - not needed here */
+</style>

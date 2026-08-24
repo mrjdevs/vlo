@@ -1,0 +1,13 @@
+<span class="vlo-badge {{variant}} {{class}}">{{text}}</span>
+
+<style>
+.vlo-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+.vlo-badge.primary { background: #00f5ff; color: #000; }
+.vlo-badge.success { background: #00ff88; color: #000; }
+.vlo-badge.warning { background: #ffaa00; color: #000; }
+</style>

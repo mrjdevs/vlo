@@ -1,0 +1,46 @@
+<BaseLayout 
+    title="404 - Page Not Found"
+    navbar='
+        <Navbar brand="VLO">
+            <a href="/">Home</a>
+            <a href="/components">Components</a>
+            <a href="/pricing">Pricing</a>
+            <a href="/docs">Docs</a>
+        </Navbar>'
+>
+    <div class="not-found-container">
+        <h1 class="glow-code">404</h1>
+        <h2>Page Not Found</h2>
+        <p>The route you are looking for doesn't exist, has been removed, or is under construction.</p>
+        <Button text="Back to Home" href="/" variant="primary" />
+    </div>
+</BaseLayout>
+
+<style>
+.not-found-container {
+    text-align: center;
+    padding: 100px 20px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+.glow-code {
+    font-size: 7.5rem;
+    font-weight: 800;
+    line-height: 1;
+    background: linear-gradient(135deg, #00f5ff, #00ff88);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1rem;
+    filter: drop-shadow(0 0 25px rgba(0, 245, 255, 0.3));
+}
+.not-found-container h2 {
+    font-size: 2rem;
+    color: #fff;
+    margin-bottom: 12px;
+}
+.not-found-container p {
+    color: #888;
+    margin-bottom: 30px;
+    font-size: 1.1rem;
+}
+</style>

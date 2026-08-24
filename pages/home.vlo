@@ -1,0 +1,526 @@
+﻿<BaseLayout
+    title="Home"
+    navbar='
+        <Navbar brand="VLO">
+            <a href="/" class="active">Home</a>
+            <a href="/components">Components</a>
+            <a href="/pricing">Pricing</a>
+            <a href="/about">About</a>
+            <a href="/docs">Docs</a>
+        </Navbar>'
+
+    hero='<HeroLayout
+        badge="v0.5.1 • Built in Rust"
+        title="Build Web Apps Without the Framework Overhead"
+        subtitle="VLO is a lightweight Rust-powered web framework with real components, server-side rendering, APIs, live reload, and a simple developer experience."
+        cta="<Button text=&quot;Start Building&quot; href=&quot;/docs&quot; variant=&quot;primary&quot; /><Button text=&quot;Explore Components&quot; href=&quot;/components&quot; variant=&quot;ghost&quot; />"
+    />'
+
+    footer="<Footer />"
+    toasts='<Toast title="VLO Dev Server" description="Ready on http://localhost:3000" icon="⚡" variant="success" />'
+>
+
+    <section class="intro">
+        <div class="intro-inner">
+            <span class="section-badge">A MODERN RUST WEB FRAMEWORK</span>
+            <h2>Simple enough to learn.<br><span>Powerful enough to ship.</span></h2>
+            <p>
+                VLO brings the pieces of modern web development together without
+                forcing you through layers of configuration and complexity.
+            </p>
+        </div>
+    </section>
+
+    <section class="stats">
+        <div class="stat">
+            <strong>Rust</strong>
+            <span>Powered runtime</span>
+        </div>
+        <div class="stat">
+            <strong>SSR</strong>
+            <span>Server-rendered pages</span>
+        </div>
+        <div class="stat">
+            <strong>API</strong>
+            <span>Built-in REST routing</span>
+        </div>
+        <div class="stat">
+            <strong>HMR</strong>
+            <span>Fast development reload</span>
+        </div>
+    </section>
+
+    <section class="features">
+        <div class="section-heading">
+            <span class="section-badge">WHY VLO</span>
+            <h2>Everything you need to build.</h2>
+            <p>
+                VLO focuses on the parts that make web development productive
+                while keeping the underlying architecture straightforward.
+            </p>
+        </div>
+
+        <div class="feature-grid">
+            <div class="feature">
+                <div class="icon">⚡</div>
+                <h3>Smart Live Reload</h3>
+                <p>
+                    Change your VLO pages or components and see the result
+                    immediately during development.
+                </p>
+            </div>
+
+            <div class="feature">
+                <div class="icon">🧩</div>
+                <h3>Real Components</h3>
+                <p>
+                    Build reusable components with props, children, nesting,
+                    layouts, and composable page structures.
+                </p>
+            </div>
+
+            <div class="feature">
+                <div class="icon">🦀</div>
+                <h3>Rust Powered</h3>
+                <p>
+                    VLO is built in Rust for a fast development server and
+                    lightweight production runtime.
+                </p>
+            </div>
+
+            <div class="feature">
+                <div class="icon">🔌</div>
+                <h3>Built-in APIs</h3>
+                <p>
+                    Define your API operations alongside your application and
+                    expose GET, POST, PUT, and DELETE endpoints.
+                </p>
+            </div>
+
+            <div class="feature">
+                <div class="icon">🎨</div>
+                <h3>Composable UI</h3>
+                <p>
+                    Create layouts, buttons, cards, navigation, forms, and
+                    other reusable pieces instead of repeating markup.
+                </p>
+            </div>
+
+            <div class="feature">
+                <div class="icon">📦</div>
+                <h3>Single Binary</h3>
+                <p>
+                    Develop and run VLO through one CLI instead of managing a
+                    large collection of separate development tools.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="workflow">
+        <div class="workflow-content">
+            <div class="workflow-copy">
+                <span class="section-badge">THE VLO WORKFLOW</span>
+                <h2>Write less configuration. Build more.</h2>
+                <p>
+                    Pages, layouts, components, and APIs live inside one
+                    straightforward project structure. Start the development
+                    server and VLO handles the rest.
+                </p>
+
+                <div class="workflow-points">
+                    <div>
+                        <span>01</span>
+                        <strong>Create a page</strong>
+                    </div>
+                    <div>
+                        <span>02</span>
+                        <strong>Compose components</strong>
+                    </div>
+                    <div>
+                        <span>03</span>
+                        <strong>Connect your API</strong>
+                    </div>
+                    <div>
+                        <span>04</span>
+                        <strong>Ship your application</strong>
+                    </div>
+                </div>
+            </div>
+
+            <div class="code-window">
+                <div class="window-bar">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <label>pages/home.vlo</label>
+                </div>
+
+                <pre><code>&lt;BaseLayout title="My App"&gt;
+
+    &lt;HeroLayout
+        badge="VLO"
+        title="Hello World"
+        subtitle="Built with Rust."
+    /&gt;
+
+    &lt;Card title="Welcome"&gt;
+        &lt;p&gt;Build something amazing.&lt;/p&gt;
+    &lt;/Card&gt;
+
+&lt;/BaseLayout&gt;</code></pre>
+            </div>
+        </div>
+    </section>
+
+    <section class="architecture">
+        <div class="section-heading">
+            <span class="section-badge">ONE PROJECT</span>
+            <h2>Everything has a place.</h2>
+            <p>
+                Keep your pages, components, layouts, APIs, and static assets
+                organized in a structure that's easy to understand.
+            </p>
+        </div>
+
+        <div class="architecture-grid">
+            <div class="architecture-card">
+                <span class="architecture-icon">📄</span>
+                <h3>Pages</h3>
+                <p>Build application pages using simple VLO markup.</p>
+                <code>pages/*.vlo</code>
+            </div>
+
+            <div class="architecture-card">
+                <span class="architecture-icon">🧩</span>
+                <h3>Components</h3>
+                <p>Reuse UI pieces throughout your application.</p>
+                <code>components/*.vlo</code>
+            </div>
+
+            <div class="architecture-card">
+                <span class="architecture-icon">🔌</span>
+                <h3>APIs</h3>
+                <p>Define REST operations for your application.</p>
+                <code>pages/api/api.vlo</code>
+            </div>
+
+            <div class="architecture-card">
+                <span class="architecture-icon">🎨</span>
+                <h3>Layouts</h3>
+                <p>Share common structures across multiple pages.</p>
+                <code>layouts/*.vlo</code>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta-section">
+        <span class="section-badge">READY WHEN YOU ARE</span>
+        <h2>Start building with VLO.</h2>
+        <p>
+            Install VLO, create your first page, and experience a simpler
+            Rust-powered web development workflow.
+        </p>
+
+        <div class="cta-buttons">
+            <Button text="Read the Docs" href="/docs" variant="primary" />
+            <Button text="Explore Components" href="/components" variant="secondary" />
+        </div>
+
+        <div class="cta-note">
+            Free during beta • Open source • Built with Rust
+        </div>
+    </section>
+
+</BaseLayout>
+
+<style>
+.intro {
+    padding: 85px 20px 55px;
+    text-align: center;
+}
+.intro-inner {
+    max-width: 760px;
+    margin: 0 auto;
+}
+.section-badge {
+    color: var(--primary);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+}
+.intro h2 {
+    margin: 14px 0;
+    font-size: 2.8rem;
+    line-height: 1.12;
+    letter-spacing: -0.04em;
+}
+.intro h2 span {
+    color: var(--primary);
+}
+.intro p {
+    max-width: 650px;
+    margin: 0 auto;
+    color: #888;
+    line-height: 1.75;
+    font-size: 1rem;
+}
+.stats {
+    max-width: 1050px;
+    margin: 0 auto;
+    padding: 30px 20px 80px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+}
+.stat {
+    padding: 25px 15px;
+    background: var(--card);
+    text-align: center;
+}
+.stat strong {
+    display: block;
+    color: var(--primary);
+    font-size: 1.4rem;
+    margin-bottom: 5px;
+}
+.stat span {
+    color: #777;
+    font-size: 0.8rem;
+}
+.features {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 90px 20px;
+}
+.section-heading {
+    max-width: 700px;
+    margin: 0 auto 50px;
+    text-align: center;
+}
+.section-heading h2 {
+    margin: 12px 0;
+    font-size: 2.3rem;
+    letter-spacing: -0.035em;
+}
+.section-heading p {
+    margin: 0;
+    color: #888;
+    line-height: 1.7;
+}
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+.feature {
+    min-height: 190px;
+    padding: 28px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.feature:hover {
+    transform: translateY(-4px);
+    border-color: var(--primary);
+}
+.icon {
+    margin-bottom: 20px;
+    font-size: 1.7rem;
+}
+.feature h3 {
+    margin: 0 0 9px;
+    font-size: 1.05rem;
+}
+.feature p {
+    margin: 0;
+    color: #888;
+    line-height: 1.65;
+    font-size: 0.9rem;
+}
+.workflow {
+    padding: 100px 20px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: #0d0d0f;
+}
+.workflow-content {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 70px;
+    align-items: center;
+}
+.workflow-copy h2 {
+    margin: 12px 0;
+    font-size: 2.3rem;
+    letter-spacing: -0.035em;
+}
+.workflow-copy > p {
+    color: #888;
+    line-height: 1.75;
+}
+.workflow-points {
+    margin-top: 35px;
+    display: grid;
+    gap: 13px;
+}
+.workflow-points div {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+}
+.workflow-points span {
+    color: var(--primary);
+    font-family: monospace;
+    font-size: 0.8rem;
+}
+.workflow-points strong {
+    font-size: 0.9rem;
+}
+.code-window {
+    overflow: hidden;
+    border: 1px solid #292929;
+    border-radius: 12px;
+    background: #09090a;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+}
+.window-bar {
+    height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 14px;
+    border-bottom: 1px solid #222;
+    background: #111;
+}
+.window-bar > span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #444;
+}
+.window-bar label {
+    margin-left: 10px;
+    color: #666;
+    font-family: monospace;
+    font-size: 0.72rem;
+}
+.code-window pre {
+    margin: 0;
+    padding: 28px;
+    overflow-x: auto;
+}
+.code-window code {
+    color: #ccc;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.8;
+}
+.architecture {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 100px 20px;
+}
+.architecture-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+}
+.architecture-card {
+    padding: 25px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card);
+}
+.architecture-icon {
+    display: block;
+    margin-bottom: 18px;
+    font-size: 1.5rem;
+}
+.architecture-card h3 {
+    margin: 0 0 8px;
+}
+.architecture-card p {
+    min-height: 48px;
+    margin: 0 0 18px;
+    color: #888;
+    font-size: 0.85rem;
+    line-height: 1.55;
+}
+.architecture-card code {
+    display: block;
+    color: var(--primary);
+    font-size: 0.72rem;
+    word-break: break-all;
+}
+.cta-section {
+    padding: 110px 20px 130px;
+    text-align: center;
+}
+.cta-section h2 {
+    margin: 12px 0;
+    font-size: 2.7rem;
+    letter-spacing: -0.04em;
+}
+.cta-section > p {
+    max-width: 600px;
+    margin: 0 auto;
+    color: #888;
+    line-height: 1.7;
+}
+.cta-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 28px;
+}
+.cta-note {
+    margin-top: 22px;
+    color: #555;
+    font-size: 0.75rem;
+}
+@media (max-width: 900px) {
+    .feature-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .architecture-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .workflow-content {
+        grid-template-columns: 1fr;
+        gap: 45px;
+    }
+}
+@media (max-width: 650px) {
+    .intro h2,
+    .cta-section h2 {
+        font-size: 2rem;
+    }
+    .stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .feature-grid,
+    .architecture-grid {
+        grid-template-columns: 1fr;
+    }
+    .features,
+    .architecture,
+    .workflow {
+        padding-top: 70px;
+        padding-bottom: 70px;
+    }
+    .cta-buttons {
+        flex-direction: column;
+        align-items: center;
+    }
+}
+</style>

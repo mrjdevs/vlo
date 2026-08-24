@@ -1,0 +1,31 @@
+<a href="{{href}}" class="vlo-btn {{variant}}">{{text}}</a>
+
+<style>
+.vlo-btn {
+    background: #00f5ff;
+    color: #000;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: bold;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.vlo-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 245, 255, 0.3);
+}
+
+.vlo-btn.secondary {
+    background: transparent;
+    color: #00f5ff;
+    border: 2px solid #00f5ff;
+}
+
+.vlo-btn.ghost {
+    background: transparent;
+    color: #aaa;
+}
+</style>
