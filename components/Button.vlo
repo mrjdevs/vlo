@@ -1,4 +1,4 @@
-<button type="{{type}}" class="vlo-btn {{variant}} {{class}}" onclick="{{onclick}}">{{text}}</button>
+<button type="{{type}}" class="vlo-btn {{variant}} {{class}}" {{attributes}}>{{text}}</button>
 <style>
 .vlo-btn{background:#00f5ff;color:#000;padding:12px 24px;border-radius:8px;font-weight:bold;border:none;display:inline-block;text-align:center;cursor:pointer;transition:all 0.2s}.vlo-btn:hover{transform:translateY(-2px);box-shadow:0 4px 15px rgba(0,245,255,.3)}.vlo-btn.secondary{background:transparent;color:#00f5ff;border:2px solid #00f5ff}.vlo-btn.ghost{background:transparent;color:#aaa}
 </style>

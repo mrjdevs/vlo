@@ -223,7 +223,8 @@ fn build() {
             }
             let stem = path.file_stem().unwrap().to_string_lossy().to_string();
             let content = fs::read_to_string(&path).unwrap_or_default();
-            let html = wrap_html(&stem, &render_vlo(content), false);
+            let rendered = render_vlo(content);
+            let html = wrap_html(&stem, &rendered, false);
             let output = if stem == "home" || stem == "index" {
                 dist.join("index.html")
             } else {
@@ -702,24 +703,54 @@ async fn not_found_handler() -> impl IntoResponse {
 }
 async fn render_404(dev: bool) -> impl IntoResponse {
     tokio::task::spawn_blocking(move || {
-        let file = get_project_root().join("pages").join("404.vlo");
+        let file = get_project_root()
+            .join("pages")
+            .join("404.vlo");
+
         if let Ok(content) = fs::read_to_string(file) {
+            let rendered = render_vlo(content);
+
             (
                 StatusCode::NOT_FOUND,
-                Html(wrap_html("404 - Page Not Found", &render_vlo(content), dev)),
+                Html(wrap_html(
+                    "404 - Page Not Found",
+                    &rendered,
+                    dev,
+                )),
             )
         } else {
             let fallback = r#"
-<div style="text-align:center;padding:100px 20px;font-family:sans-serif;background:#0a0a0c;color:#fff;min-height:80vh">
+<div style="
+text-align:center;
+padding:100px 20px;
+font-family:sans-serif;
+background:#0a0a0c;
+color:#fff;
+min-height:80vh">
 <h1 style="font-size:7rem;color:#00f5ff">404</h1>
 <h2>Page Not Found</h2>
 <p style="color:#888">The requested page does not exist.</p>
-<a href="/" style="background:#00f5ff;color:#000;padding:12px 28px;text-decoration:none;border-radius:8px">Back to Home</a>
+<a href="/" style="
+background:#00f5ff;
+color:#000;
+padding:12px 28px;
+text-decoration:none;
+border-radius:8px">
+Back to Home
+</a>
 </div>
 "#;
+
             (
                 StatusCode::NOT_FOUND,
-                Html(wrap_html("404 - Page Not Found", fallback, dev)),
+                Html(wrap_html(
+                    "404 - Page Not Found",
+                    &RenderedPage {
+                        html: fallback.to_string(),
+                        ..Default::default()
+                    },
+                    dev,
+                )),
             )
         }
     })
@@ -729,16 +760,51 @@ async fn render_404(dev: bool) -> impl IntoResponse {
         Html("Server Error".to_string()),
     ))
 }
+
+fn render_vlo(source: String) -> RenderedPage {
+    let mut context = RenderedPage::default();
+    let mut source = strip_server_block(&source);
+
+    for _ in 0..20 {
+        let previous = source.clone();
+
+        source = render_tag(&source, "BaseLayout", &mut context);
+        source = render_components(&source, &mut context);
+
+        if source == previous {
+            break;
+        }
+    }
+
+    context.html = source;
+    context
+}
+fn render_tag(source: &str, tag: &str, context: &mut RenderedPage) -> String {
+    if let Some((start, end, props, children)) = find_tag(source, tag) {
+        return format!(
+            "{}{}{}",
+            &source[..start],
+            render_component_file(tag, &props, &children, context),
+            &source[end..]
+        );
+    }
+
+    source.to_string()
+}
 async fn render_page(path: String, dev: bool) -> impl IntoResponse {
-    let page = path.clone();
+    let p = path.clone();
+
     match tokio::task::spawn_blocking(move || {
         let file = get_project_root()
             .join("pages")
-            .join(format!("{}.vlo", page));
+            .join(format!("{}.vlo", p));
+
         fs::read_to_string(file).ok().map(|content| {
+            let rendered = render_vlo(content);
+
             (
                 StatusCode::OK,
-                Html(wrap_html(&page, &render_vlo(content), dev)),
+                Html(wrap_html(&p, &rendered, dev)),
             )
         })
     })
@@ -748,58 +814,74 @@ async fn render_page(path: String, dev: bool) -> impl IntoResponse {
         _ => render_404(dev).await.into_response(),
     }
 }
-fn render_vlo(mut source: String) -> String {
-    source = strip_server_block(&source);
-    for _ in 0..20 {
-        let previous = source.clone();
-        source = render_tag(&source, "BaseLayout");
-        source = render_components(&source);
-        if source == previous {
-            break;
+#[derive(Default)]
+struct RenderedPage {
+    html: String,
+    styles: Vec<String>,
+}
+
+impl RenderedPage {
+    fn add_style(&mut self, name: &str, css: &str) {
+        let marker = format!("/* VLO:{} */", name);
+
+        if self.styles.iter().any(|style| style.contains(&marker)) {
+            return;
         }
+
+        self.styles
+            .push(format!("{}\n{}", marker, css));
     }
-    source
 }
-fn render_tag(source: &str, tag: &str) -> String {
-    if let Some((start, end, props, children)) = find_tag(source, tag) {
-        return format!(
-            "{}{}{}",
-            &source[..start],
-            render_component_file(tag, &props, &children),
-            &source[end..]
-        );
-    }
-    source.to_string()
-}
-fn render_components(source: &str) -> String {
+fn render_components(source: &str, context: &mut RenderedPage) -> String {
     let mut output = String::new();
     let mut last = 0;
     let chars: Vec<(usize, char)> = source.char_indices().collect();
     let mut i = 0;
+
     while i < chars.len() {
         let (pos, ch) = chars[i];
-        if ch == '<' && i + 1 < chars.len() && chars[i + 1].1.is_ascii_uppercase() {
+
+        if ch == '<'
+            && i + 1 < chars.len()
+            && chars[i + 1].1.is_ascii_uppercase()
+        {
             let mut end = i + 1;
-            while end < chars.len() && (chars[end].1.is_ascii_alphanumeric() || chars[end].1 == '_')
+
+            while end < chars.len()
+                && (chars[end].1.is_ascii_alphanumeric() || chars[end].1 == '_')
             {
                 end += 1;
             }
+
             let tag = &source[chars[i + 1].0..chars[end].0];
-            if component_exists(tag) {
-                if let Some((_, tag_end, props, children)) = find_tag(&source[pos..], tag) {
-                    output.push_str(&source[last..pos]);
-                    output.push_str(&render_component_file(tag, &props, &children));
-                    last = pos + tag_end;
-                    while i < chars.len() && chars[i].0 < last {
-                        i += 1;
-                    }
-                    continue;
+
+            if let Some((_, tag_end, props, children)) =
+                find_tag(&source[pos..], tag)
+            {
+                output.push_str(&source[last..pos]);
+
+                output.push_str(&render_component_file(
+                    tag,
+                    &props,
+                    &children,
+                    context,
+                ));
+
+                last = pos + tag_end;
+
+                while i < chars.len() && chars[i].0 < last {
+                    i += 1;
                 }
+
+                continue;
             }
         }
+
         i += 1;
     }
+
     output.push_str(&source[last..]);
+
     output
 }
 fn component_exists(name: &str) -> bool {
@@ -868,99 +950,334 @@ fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> 
     }
     None
 }
-fn render_component_file(name: &str, props_str: &str, children: &str) -> String {
+
+fn render_component_file(
+    name: &str,
+    props_str: &str,
+    children: &str,
+    context: &mut RenderedPage,
+) -> String {
     let root = get_project_root();
-    let paths = [
+
+    let component_path = [
         root.join("layouts").join(format!("{}.vlo", name)),
         root.join("components").join(format!("{}.vlo", name)),
-    ];
-    let template = match paths.iter().find_map(|path| fs::read_to_string(path).ok()) {
-        Some(template) => template,
-        None => {
-            eprintln!("⚠️ [VLO] Component not found: <{}>", name);
-            return format!("<!-- VLO component '{}' not found -->", name);
-        }
+    ]
+    .into_iter()
+    .find(|path| path.exists());
+
+    let path = match component_path {
+        Some(path) => path,
+        None => return format!("<!-- {} not found -->", name),
     };
+
+    let template = match fs::read_to_string(path) {
+        Ok(template) => template,
+        Err(_) => return format!("<!-- {} could not be read -->", name),
+    };
+
+    /*
+     * ---------------------------------------------------------
+     * 1. Collect component styles
+     * ---------------------------------------------------------
+     */
+
+    let style_re =
+        Regex::new(r"(?is)<style[^>]*>(.*?)</style>").unwrap();
+
+    let mut css = String::new();
+
+    for caps in style_re.captures_iter(&template) {
+        if let Some(style) = caps.get(1) {
+            css.push_str(style.as_str());
+            css.push('\n');
+        }
+    }
+
+    if !css.trim().is_empty() {
+        context.add_style(name, css.trim());
+    }
+
+    /*
+     * Remove component <style> blocks from rendered HTML.
+     */
+
+    let template = style_re
+        .replace_all(&template, "")
+        .into_owned();
+
+    /*
+     * ---------------------------------------------------------
+     * 2. Render nested children
+     * ---------------------------------------------------------
+     */
+
+    let children_html = {
+        let mut children_source = strip_server_block(children);
+
+        for _ in 0..20 {
+            let previous = children_source.clone();
+
+            children_source =
+                render_tag(&children_source, "BaseLayout", context);
+
+            children_source =
+                render_components(&children_source, context);
+
+            if children_source == previous {
+                break;
+            }
+        }
+
+        children_source
+    };
+
+    /*
+     * ---------------------------------------------------------
+     * 3. Parse component properties
+     * ---------------------------------------------------------
+     */
+
     let mut props = parse_props(props_str);
-    props.insert("children".to_string(), render_vlo(children.to_string()));
-    let interpolation =
-        Regex::new(r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}").expect("Invalid VLO interpolation regex");
-    interpolation
-        .replace_all(&template, |caps: &regex::Captures| {
+
+    props.insert(
+        "children".to_string(),
+        children_html,
+    );
+
+    /*
+     * ---------------------------------------------------------
+     * 4. Replace {{property}} values
+     * ---------------------------------------------------------
+     */
+
+    let rendered = render_component_template(
+        &template,
+        &props,
+    );
+
+    /*
+     * ---------------------------------------------------------
+     * 5. Forward unused attributes
+     *
+     * Example:
+     *
+     * <Button
+     *     text="GET Products"
+     *     onclick="testapi('products')"
+     *     id="api-button"
+     * />
+     *
+     * If Button.vlo doesn't explicitly contain {{id}},
+     * the id is still forwarded to the final HTML element.
+     * ---------------------------------------------------------
+     */
+
+    let attributes =
+        build_component_attributes(&template, &props);
+
+    if attributes.is_empty() {
+        return rendered;
+    }
+
+    /*
+     * Add forwarded attributes to the first HTML element
+     * generated by the component.
+     */
+
+    let element_re =
+        Regex::new(r"(?s)<([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>")
+            .unwrap();
+
+    if let Some(caps) = element_re.captures(&rendered) {
+        let full_match = caps.get(0).unwrap();
+        let tag_name = caps.get(1).unwrap().as_str();
+
+        let existing_attributes = caps
+            .get(2)
+            .map(|m| m.as_str())
+            .unwrap_or("");
+
+        let replacement = if existing_attributes.trim().is_empty() {
+            format!(
+                "<{} {}>",
+                tag_name,
+                attributes
+            )
+        } else {
+            format!(
+                "<{}{} {}>",
+                tag_name,
+                existing_attributes,
+                attributes
+            )
+        };
+
+        return format!(
+            "{}{}{}",
+            &rendered[..full_match.start()],
+            replacement,
+            &rendered[full_match.end()..]
+        );
+    }
+
+    rendered
+}
+
+fn render_component_template(template: &str, props: &HashMap<String, String>) -> String {
+    let regex = Regex::new(r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}").unwrap();
+
+    regex
+        .replace_all(template, |caps: &regex::Captures| {
             props.get(&caps[1]).cloned().unwrap_or_default()
         })
         .into_owned()
 }
+
+fn build_component_attributes(
+    template: &str,
+    props: &HashMap<String, String>,
+) -> String {
+    let regex = Regex::new(r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}").unwrap();
+    let mut used = std::collections::HashSet::new();
+
+    for caps in regex.captures_iter(template) {
+        used.insert(caps[1].to_string());
+    }
+
+    let mut attributes = Vec::new();
+
+    for (key, value) in props {
+        if key == "children" || key == "attributes" || used.contains(key) {
+            continue;
+        }
+
+        if is_boolean_attribute(key) {
+            if value.eq_ignore_ascii_case("true") {
+                attributes.push(key.clone());
+            }
+            continue;
+        }
+
+        attributes.push(format!(
+            "{}=\"{}\"",
+            key,
+            escape_html_attribute(value)
+        ));
+    }
+
+    attributes.join(" ")
+}
+
+fn is_boolean_attribute(name: &str) -> bool {
+    matches!(
+        name,
+        "disabled"
+            | "required"
+            | "checked"
+            | "readonly"
+            | "multiple"
+            | "autofocus"
+            | "selected"
+            | "hidden"
+            | "open"
+            | "novalidate"
+    )
+}
+
+fn escape_html_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
 fn parse_props(raw: &str) -> HashMap<String, String> {
     let chars: Vec<char> = raw
         .replace("&quot;", "\"")
         .replace("&apos;", "'")
         .chars()
         .collect();
-    let mut props = HashMap::new();
+
+    let mut map = HashMap::new();
     let mut i = 0;
+
     while i < chars.len() {
         while i < chars.len() && chars[i].is_whitespace() {
             i += 1;
         }
+
         if i >= chars.len() || chars[i] == '/' {
             break;
         }
+
         let mut key = String::new();
+
         while i < chars.len()
-            && !chars[i].is_whitespace()
             && chars[i] != '='
-            && chars[i] != '>'
+            && !chars[i].is_whitespace()
             && chars[i] != '/'
         {
             key.push(chars[i]);
             i += 1;
         }
+
         if key.is_empty() {
             i += 1;
             continue;
         }
+
         while i < chars.len() && chars[i].is_whitespace() {
             i += 1;
         }
+
         if i < chars.len() && chars[i] == '=' {
             i += 1;
+
             while i < chars.len() && chars[i].is_whitespace() {
                 i += 1;
             }
+
             if i >= chars.len() {
-                props.insert(key, String::new());
+                map.insert(key, "true".to_string());
                 break;
             }
+
+            let quote = chars[i];
             let mut value = String::new();
-            if chars[i] == '"' || chars[i] == '\'' {
-                let quote = chars[i];
+
+            if quote == '"' || quote == '\'' {
                 i += 1;
+
                 while i < chars.len() && chars[i] != quote {
                     value.push(chars[i]);
                     i += 1;
                 }
+
                 if i < chars.len() {
                     i += 1;
                 }
             } else {
                 while i < chars.len()
                     && !chars[i].is_whitespace()
-                    && chars[i] != '>'
                     && chars[i] != '/'
                 {
                     value.push(chars[i]);
                     i += 1;
                 }
             }
-            props.insert(key, value);
+
+            map.insert(key, value);
         } else {
-            props.insert(key, "true".to_string());
+            map.insert(key, "true".to_string());
         }
     }
-    props
+
+    map
 }
-fn wrap_html(title: &str, content: &str, dev: bool) -> String {
+
+fn wrap_html(title: &str, rendered: &RenderedPage, dev: bool) -> String {
     let hmr = if dev {
         r#"<script>
 const es=new EventSource("/__vlo_hmr");
@@ -970,6 +1287,16 @@ window.addEventListener("beforeunload",()=>es.close());
     } else {
         ""
     };
+
+    let component_styles = if rendered.styles.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<style>\n{}\n</style>",
+            rendered.styles.join("\n")
+        )
+    };
+
     format!(
         r#"<!DOCTYPE html>
 <html>
@@ -978,12 +1305,17 @@ window.addEventListener("beforeunload",()=>es.close());
 <link rel="icon" href="/static/favicon.ico">
 <link rel="stylesheet" href="/static/style.css">
 {}
+{}
 </head>
 <body>{}</body>
 </html>"#,
-        title, hmr, content
+        title,
+        component_styles,
+        hmr,
+        rendered.html
     )
 }
+
 fn watch_files(
     pages: PathBuf,
     public: PathBuf,
