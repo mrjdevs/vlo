@@ -1,245 +1,387 @@
 <BaseLayout title="Product Management">
-  <div style="max-width: 1000px; margin: 40px auto; padding: 0 20px; font-family: system-ui, sans-serif; color: #fff;">
-    <h1 style="color: #00f5ff; margin-bottom: 8px;">🛒 Product Management</h1>
-    <p style="color: #888; margin-bottom: 25px;">Standard REST CRUD API: GET, POST, PUT, DELETE</p>
-
-    <div id="message" style="display:none; padding:8px 15px; margin-bottom:20px; border-radius:6px;"></div>
-
-    <div style="background:#111; border:1px solid #222; padding:20px; border-radius:8px; margin-bottom:20px;">
-      <form id="add-form" style="display:grid; grid-template-columns: 2fr 3fr 1fr 1fr auto; gap:10px; align-items: center;">
-        <input type="text" id="title" placeholder="Title" required style="background:#222; border:1px solid #333; color:#fff; padding:10px; border-radius:4px;">
-        <input type="text" id="description" placeholder="Description" style="background:#222; border:1px solid #333; color:#fff; padding:10px; border-radius:4px;">
-        <input type="number" id="price" placeholder="Price" min="0" step="0.01" required style="background:#222; border:1px solid #333; color:#fff; padding:10px; border-radius:4px;">
-        <input type="number" id="stock" placeholder="Stock" min="0" value="1" required style="background:#222; border:1px solid #333; color:#fff; padding:10px; border-radius:4px;">
-        <button type="submit" style="background:#00ff88; color:#000; font-weight:bold; border:none; border-radius:4px; padding:10px 16px; cursor:pointer;">+ Add Product</button>
-      </form>
+  <div class="products-page">
+    <div class="products-header">
+      <div>
+        <div class="products-eyebrow">VLO / API</div>
+        <h1>Product Management</h1>
+        <p>Manage your product catalog using the VLO REST CRUD API.</p>
+      </div>
+      <Badge variant="success" text="REST API" />
     </div>
 
-    <table style="width:100%; border-collapse:collapse; background:#111; border:1px solid #222;">
-      <thead>
-        <tr style="background:#1a1a1a; color:#888;">
-          <th style="padding:8px; text-align:left;">ID</th>
-          <th style="padding:8px; text-align:left;">Title</th>
-          <th style="padding:8px; text-align:left;">Description</th>
-          <th style="padding:8px; text-align:left;">Price</th>
-          <th style="padding:8px; text-align:center;">Stock Available</th>
-          <th style="padding:8px; text-align:left;">Created At</th>
-          <th style="padding:8px; text-align:center;">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="cart-rows"></tbody>
-    </table>
+    <div id="toast-container" class="products-toast">
+      <Toast variant="success" icon="✓" title="Success" description="Operation completed successfully." />
+    </div>
 
-    <div id="empty-cart" style="display:none; text-align:center; padding:40px; color:#666;">
-      No products found.
+    <Card title="Add Product" description="Create a new product and add it to your catalog.">
+      <div id="add-product-form" class="product-form">
+        <div class="form-field">
+          <label>Product Title</label>
+          <Input type="text" placeholder="e.g. Mechanical Keyboard" class="add-title" />
+        </div>
+        <div class="form-field">
+          <label>Description</label>
+          <Input type="text" placeholder="Product description" class="add-description" />
+        </div>
+        <div class="form-field">
+          <label>Price</label>
+          <Input type="number" placeholder="0.00" class="add-price" />
+        </div>
+        <div class="form-field">
+          <label>Stock</label>
+          <Input type="number" placeholder="0" class="add-stock" />
+        </div>
+        <div class="form-actions">
+          <Button href="#" variant="primary" class="add-product-btn" text="+ Add Product" />
+        </div>
+      </div>
+    </Card>
+
+    <div class="products-list-card">
+      <Card title="Products" description="All products currently stored in the database.">
+        <div class="products-toolbar">
+          <span id="product-count">0 products</span>
+          <Badge variant="success" text="Live Database" />
+        </div>
+        <div class="products-table-wrap">
+          <table class="products-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Product</th>
+                <th>Description</th>
+                <th>Price</th>
+                <th>Stock</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="product-rows"></tbody>
+          </table>
+        </div>
+        <div id="empty-products" class="empty-products">
+          <div class="empty-icon">📦</div>
+          <h3>No Products Found</h3>
+          <p>Add your first product using the form above.</p>
+        </div>
+      </Card>
     </div>
   </div>
 
+  <div id="edit-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <div class="modal-eyebrow">PRODUCT EDITOR</div>
+          <h2>Edit Product</h2>
+          <p id="edit-product-id">Product</p>
+        </div>
+        <Button href="#" variant="secondary" class="close-edit-btn" text="×" />
+      </div>
+      <div class="modal-body">
+        <div class="form-field">
+          <label>Product Title</label>
+          <Input type="text" placeholder="Product title" class="edit-title" />
+        </div>
+        <div class="form-field">
+          <label>Description</label>
+          <Input type="text" placeholder="Product description" class="edit-description" />
+        </div>
+        <div class="edit-grid">
+          <div class="form-field">
+            <label>Price</label>
+            <Input type="number" placeholder="0.00" class="edit-price" />
+          </div>
+          <div class="form-field">
+            <label>Stock</label>
+            <Input type="number" placeholder="0" class="edit-stock" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <Button href="#" variant="secondary" class="cancel-edit-btn" text="Cancel" />
+        <Button href="#" variant="primary" class="save-edit-btn" text="Save Changes" />
+      </div>
+    </div>
+  </div>
+
+  <div id="delete-modal" class="modal-overlay">
+    <div class="modal delete-modal">
+      <div class="modal-body delete-body">
+        <div class="delete-icon">!</div>
+        <div>
+          <div class="modal-eyebrow">CONFIRM ACTION</div>
+          <h2>Delete Product?</h2>
+          <p>Are you sure you want to delete <strong id="delete-product-name">this product</strong>? This action cannot be undone.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <Button href="#" variant="secondary" class="cancel-delete-btn" text="Cancel" />
+        <Button href="#" variant="danger" class="confirm-delete-btn" text="Delete Product" />
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .products-page{max-width:1150px;margin:0 auto;padding:45px 24px 70px;color:#fff}
+    .products-header{display:flex;align-items:flex-end;justify-content:space-between;gap:25px;margin-bottom:30px}
+    .products-eyebrow,.modal-eyebrow{font-size:11px;font-weight:700;letter-spacing:1.5px;color:#00f5ff;margin-bottom:7px}
+    .products-header h1{margin:0;font-size:34px;line-height:1.15}
+    .products-header p{margin:9px 0 0;color:#888;font-size:15px}
+    .products-toast{display:none;position:fixed;top:22px;right:22px;z-index:10000;min-width:320px;max-width:420px}
+    .product-form{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:20px}
+    .form-field{display:flex;flex-direction:column;gap:7px}
+    .form-field label{font-size:12px;font-weight:600;color:#aaa}
+    .form-actions{grid-column:1/-1;display:flex;justify-content:flex-end;padding-top:4px}
+    .products-list-card{margin-top:24px}
+    .products-toolbar{display:flex;justify-content:space-between;align-items:center;margin:20px 0 14px;color:#777;font-size:13px}
+    .products-table-wrap{overflow-x:auto}
+    .products-table{width:100%;border-collapse:collapse;min-width:900px}
+    .products-table th{padding:13px 14px;text-align:left;background:#171717;color:#777;font-size:11px;text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid #292929}
+    .products-table td{padding:15px 14px;border-bottom:1px solid #222;color:#ccc;font-size:13px;vertical-align:middle}
+    .products-table tbody tr{transition:background .15s}
+    .products-table tbody tr:hover{background:#161616}
+    .products-table th:nth-child(4),.products-table td:nth-child(4){text-align:right}
+    .products-table th:nth-child(5),.products-table td:nth-child(5),.products-table th:nth-child(7),.products-table td:nth-child(7){text-align:center}
+    .product-title{font-weight:600;color:#fff}
+    .product-description{max-width:240px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .product-price{font-weight:600;color:#00ff88}
+    .stock-good{color:#00ff88;font-weight:600}
+    .stock-empty{color:#ff6666;font-weight:600}
+    .product-actions{display:flex;justify-content:center;gap:6px}
+    .empty-products{display:none;text-align:center;padding:55px 20px;color:#666}
+    .empty-icon{font-size:35px;margin-bottom:10px}
+    .empty-products h3{margin:0 0 7px;color:#aaa}
+    .empty-products p{margin:0;font-size:13px}
+    .modal-overlay{display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.78);backdrop-filter:blur(5px);align-items:center;justify-content:center;padding:20px}
+    .modal{width:100%;max-width:600px;background:#111;border:1px solid #303030;border-radius:10px;box-shadow:0 25px 80px rgba(0,0,0,.6);overflow:hidden}
+    .modal-header{display:flex;justify-content:space-between;align-items:flex-start;padding:22px 24px;border-bottom:1px solid #252525}
+    .modal-header h2{margin:0;font-size:22px}
+    .modal-header p{margin:6px 0 0;color:#666;font-size:12px}
+    .modal-body{padding:24px;display:grid;gap:18px}
+    .edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    .modal-footer{display:flex;justify-content:flex-end;gap:10px;padding:18px 24px;border-top:1px solid #252525;background:#0d0d0d}
+    .delete-modal{max-width:500px}
+    .delete-body{display:flex;grid-template-columns:none;gap:18px;align-items:flex-start}
+    .delete-icon{width:42px;height:42px;flex:0 0 42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#351717;border:1px solid #652525;color:#ff6666;font-weight:800;font-size:20px}
+    .delete-body h2{margin:0;font-size:21px}
+    .delete-body p{margin:9px 0 0;color:#888;line-height:1.6;font-size:13px}
+    .delete-body strong{color:#ddd}
+    @media(max-width:700px){
+      .products-page{padding:30px 15px 50px}
+      .products-header{align-items:flex-start;flex-direction:column}
+      .products-header h1{font-size:28px}
+      .product-form,.edit-grid{grid-template-columns:1fr}
+      .form-actions{grid-column:auto;justify-content:stretch}
+      .form-actions .vlo-btn{width:100%;text-align:center}
+      .products-toast{left:15px;right:15px;min-width:0}
+    }
+  </style>
+
   <script>
-    const API = '/api/products';
-    let loadedProducts = [];
+    const API='/api/products';
+    let editingProductId=null;
+    let deletingProductId=null;
 
-    function showMessage(text, error = false) {
-      const box = document.getElementById('message');
-      box.textContent = text;
-      box.style.display = 'block';
-      box.style.background = error ? '#3a1111' : '#113a25';
-      box.style.color = error ? '#ff7777' : '#00ff88';
-      box.style.border = error ? '1px solid #662222' : '1px solid #225533';
-
-      setTimeout(() => {
-        box.style.display = 'none';
-      }, 3000);
+    async function request(url,options={}){
+      const response=await fetch(url,options);
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(data.error||data.details||`Request failed (${response.status})`);
+      return data;
     }
 
-    async function request(url, options = {}) {
-      try {
-        const response = await fetch(url, options);
-        const data = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          throw new Error(data.error || `Request failed (${response.status})`);
-        }
-
-        return data;
-      } catch (error) {
-        showMessage(error.message, true);
-        throw error;
-      }
+    function showToast(title,description,variant='success',icon='✓'){
+      const container=document.getElementById('toast-container');
+      const toast=container.querySelector('.vlo-toast');
+      if(!toast)return;
+      toast.className=`vlo-toast ${variant}`;
+      toast.querySelector('.icon').textContent=icon;
+      toast.querySelector('strong').textContent=title;
+      toast.querySelector('p').textContent=description;
+      container.style.display='block';
+      clearTimeout(window.vloToastTimer);
+      window.vloToastTimer=setTimeout(()=>container.style.display='none',3200);
     }
 
-    async function loadProducts() {
-      try {
-        const response = await request(API);
-        loadedProducts = response.data || [];
-        renderProducts(loadedProducts);
-      } catch (error) {
-        loadedProducts = [];
+    function escapeHtml(value){
+      return String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
+    }
+
+    function formatDate(value){
+      if(!value)return'—';
+      const date=new Date(value);
+      return Number.isNaN(date.getTime())?escapeHtml(value):date.toLocaleDateString();
+    }
+
+    async function loadProducts(){
+      try{
+        const response=await request(API);
+        renderProducts(response.data||[]);
+      }catch(error){
         renderProducts([]);
+        showToast('Request Failed',error.message,'error','!');
       }
     }
 
-    function renderProducts(items) {
-      const tbody = document.getElementById('cart-rows');
-      const empty = document.getElementById('empty-cart');
-
-      if (!items.length) {
-        tbody.innerHTML = '';
-        empty.style.display = 'block';
+    function renderProducts(products){
+      const tbody=document.getElementById('product-rows');
+      const empty=document.getElementById('empty-products');
+      document.getElementById('product-count').textContent=`${products.length} product${products.length===1?'':'s'}`;
+      if(!products.length){
+        tbody.innerHTML='';
+        empty.style.display='block';
         return;
       }
-
-      empty.style.display = 'none';
-
-      tbody.innerHTML = items.map(item => {
-        const title = item.title || item.product_name || item.name || 'Untitled';
-        const description = item.description || '';
-        const price = Number(item.price) || 0;
-        const stock = item.stock ?? item.quantity ?? 0;
-        const createdAt = item.created_at ? escapeHtml(item.created_at) : 'N/A';
-
-        return `
-          <tr style="border-bottom:1px solid #222;">
-            <td style="padding:8px;">#${item.id}</td>
-            <td style="padding:8px;">
-              <strong>${escapeHtml(title)}</strong>
+      empty.style.display='none';
+      tbody.innerHTML=products.map(product=>{
+        const id=Number(product.id);
+        const price=Number(product.price)||0;
+        const stock=Number(product.stock)||0;
+        return`
+          <tr>
+            <td>#${id}</td>
+            <td><div class="product-title">${escapeHtml(product.title)}</div></td>
+            <td><div class="product-description">${escapeHtml(product.description||'—')}</div></td>
+            <td><span class="product-price">$${price.toFixed(2)}</span></td>
+            <td><span class="${stock>0?'stock-good':'stock-empty'}">${stock}</span></td>
+            <td>${formatDate(product.created_at)}</td>
+            <td>
+              <div class="product-actions">
+                <Button href="#" variant="secondary" class="edit-product" text="Edit" />
+                <Button href="#" variant="danger" class="delete-product" text="Delete" />
+              </div>
             </td>
-            <td style="padding:8px; color:#aaa;">
-              ${escapeHtml(description)}
-            </td>
-            <td style="padding:8px; color:#00ff88;">
-              $${price.toFixed(2)}
-            </td>
-            <td style="padding:8px; text-align:center;">
-              <button onclick="updateStock(${item.id}, ${stock - 1})"
-                style="background:#333; color:#fff; border:none; padding:3px 9px; border-radius:3px; cursor:pointer;">
-                −
-              </button>
-
-              <span style="display:inline-block; min-width:30px; margin:0 8px;">
-                ${stock}
-              </span>
-
-              <button onclick="updateStock(${item.id}, ${stock + 1})"
-                style="background:#333; color:#fff; border:none; padding:3px 9px; border-radius:3px; cursor:pointer;">
-                +
-              </button>
-            </td>
-            <td style="padding:8px; color:#888; font-size:0.85em;">
-              ${createdAt}
-            </td>
-            <td style="padding:8px; text-align:center;">
-              <button onclick="deleteItem(${item.id})"
-                style="background:#ff4444; color:#fff; border:none; padding:5px 12px; border-radius:4px; cursor:pointer;">
-                Delete
-              </button>
-            </td>
-          </tr>
-        `;
+          </tr>`;
       }).join('');
+      const rows=tbody.querySelectorAll('tr');
+      products.forEach((product,index)=>{
+        rows[index].querySelector('.edit-product').dataset.id=product.id;
+        rows[index].querySelector('.delete-product').dataset.id=product.id;
+        rows[index].querySelector('.delete-product').dataset.name=product.title;
+      });
     }
 
-    function escapeHtml(value) {
-      return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-    }
-
-    document.getElementById('add-form').addEventListener('submit', async function(e) {
-      e.preventDefault();
-
-      const title = document.getElementById('title').value.trim();
-      const description = document.getElementById('description').value.trim();
-      const price = parseFloat(document.getElementById('price').value);
-      const stock = parseInt(document.getElementById('stock').value, 10);
-
-      if (!title || !Number.isFinite(price) || stock < 0) {
-        showMessage('Please enter valid product details.', true);
+    async function addProduct(){
+      const title=document.querySelector('.add-title')?.value.trim()||'';
+      const description=document.querySelector('.add-description')?.value.trim()||'';
+      const price=parseFloat(document.querySelector('.add-price')?.value);
+      const stock=parseInt(document.querySelector('.add-stock')?.value,10);
+      if(!title||!Number.isFinite(price)||price<0||!Number.isInteger(stock)||stock<0){
+        showToast('Invalid Product','Please enter a valid title, price and stock.','error','!');
         return;
       }
-
-      try {
-        const response = await request(API, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            title: title,
-            description: description,
-            price: price,
-            stock: stock
-          })
-        });
-
-        loadedProducts = response.data || [];
-        renderProducts(loadedProducts);
-        this.reset();
-        document.getElementById('stock').value = 1;
-        showMessage('Product added successfully.');
-      } catch (error) {
-        // request() handles displaying errors
+      try{
+        const response=await request(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,description,price,stock})});
+        renderProducts(response.data||[]);
+        document.querySelector('.add-title').value='';
+        document.querySelector('.add-description').value='';
+        document.querySelector('.add-price').value='';
+        document.querySelector('.add-stock').value='';
+        showToast('Product Added',`${title} was added successfully.`);
+      }catch(error){
+        showToast('Add Failed',error.message,'error','!');
       }
+    }
+
+    async function openEdit(id){
+      try{
+        const response=await request(`${API}/${id}`);
+        const product=Array.isArray(response.data)?response.data[0]:response.data;
+        if(!product)throw new Error('Product not found.');
+        editingProductId=Number(product.id);
+        document.getElementById('edit-product-id').textContent=`Product #${editingProductId}`;
+        document.querySelector('.edit-title').value=product.title||'';
+        document.querySelector('.edit-description').value=product.description||'';
+        document.querySelector('.edit-price').value=product.price??'';
+        document.querySelector('.edit-stock').value=product.stock??0;
+        document.getElementById('edit-modal').style.display='flex';
+      }catch(error){
+        showToast('Load Failed',error.message,'error','!');
+      }
+    }
+
+    function closeEdit(){
+      editingProductId=null;
+      document.getElementById('edit-modal').style.display='none';
+    }
+
+    async function saveEdit(){
+      if(!editingProductId)return;
+      const title=document.querySelector('.edit-title').value.trim();
+      const description=document.querySelector('.edit-description').value.trim();
+      const price=parseFloat(document.querySelector('.edit-price').value);
+      const stock=parseInt(document.querySelector('.edit-stock').value,10);
+      if(!title||!Number.isFinite(price)||price<0||!Number.isInteger(stock)||stock<0){
+        showToast('Invalid Product','Please enter valid product information.','error','!');
+        return;
+      }
+      try{
+        const response=await request(`${API}/${editingProductId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:editingProductId,title,description,price,stock})});
+        renderProducts(response.data||[]);
+        closeEdit();
+        showToast('Product Updated',`${title} was updated successfully.`);
+      }catch(error){
+        showToast('Update Failed',error.message,'error','!');
+      }
+    }
+
+    function openDelete(id,name){
+      deletingProductId=Number(id);
+      document.getElementById('delete-product-name').textContent=name||`Product #${id}`;
+      document.getElementById('delete-modal').style.display='flex';
+    }
+
+    function closeDelete(){
+      deletingProductId=null;
+      document.getElementById('delete-modal').style.display='none';
+    }
+
+    async function confirmDelete(){
+      if(!deletingProductId)return;
+      const id=deletingProductId;
+      try{
+        const response=await request(`${API}/${id}`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+        renderProducts(response.data||[]);
+        closeDelete();
+        showToast('Product Deleted',`Product #${id} was deleted.`);
+      }catch(error){
+        closeDelete();
+        showToast('Delete Failed',error.message,'error','!');
+      }
+    }
+
+    document.addEventListener('click',event=>{
+      const add=event.target.closest('.add-product-btn');
+      const edit=event.target.closest('.edit-product');
+      const remove=event.target.closest('.delete-product');
+      const save=event.target.closest('.save-edit-btn');
+      const cancelEdit=event.target.closest('.cancel-edit-btn');
+      const closeEditButton=event.target.closest('.close-edit-btn');
+      const cancelDelete=event.target.closest('.cancel-delete-btn');
+      const confirmDeleteButton=event.target.closest('.confirm-delete-btn');
+      if(add){event.preventDefault();addProduct()}
+      if(edit){event.preventDefault();openEdit(Number(edit.dataset.id))}
+      if(remove){event.preventDefault();openDelete(Number(remove.dataset.id),remove.dataset.name)}
+      if(save){event.preventDefault();saveEdit()}
+      if(cancelEdit||closeEditButton){event.preventDefault();closeEdit()}
+      if(cancelDelete){event.preventDefault();closeDelete()}
+      if(confirmDeleteButton){event.preventDefault();confirmDelete()}
     });
 
-    async function updateStock(id, newStock) {
-      if (newStock < 0) {
-        showMessage('Stock cannot be negative.', true);
-        return;
+    document.getElementById('edit-modal').addEventListener('click',event=>{
+      if(event.target===event.currentTarget)closeEdit();
+    });
+
+    document.getElementById('delete-modal').addEventListener('click',event=>{
+      if(event.target===event.currentTarget)closeDelete();
+    });
+
+    document.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){
+        closeEdit();
+        closeDelete();
       }
-
-      const existingItem = loadedProducts.find(p => p.id === id);
-      if (!existingItem) return;
-
-      try {
-        const response = await request(API, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            id: id,
-            title: existingItem.title || '',
-            description: existingItem.description || '',
-            price: existingItem.price || 0,
-            stock: newStock
-          })
-        });
-
-        loadedProducts = response.data || [];
-        renderProducts(loadedProducts);
-        showMessage('Stock updated.');
-      } catch (error) {
-        // request() handles displaying errors
-      }
-    }
-
-    async function deleteItem(id) {
-      if (!confirm('Remove this product?')) {
-        return;
-      }
-
-      try {
-        const response = await request(API, {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            id: id
-          })
-        });
-
-        loadedProducts = response.data || [];
-        renderProducts(loadedProducts);
-        showMessage('Product deleted.');
-      } catch (error) {
-        // request() handles displaying errors
-      }
-    }
+    });
 
     loadProducts();
   </script>

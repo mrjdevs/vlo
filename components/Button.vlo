@@ -1,4 +1,4 @@
-<a href="{{href}}" class="vlo-btn {{variant}}">{{text}}</a>
+<a href="{{href}}" class="vlo-btn {{variant}} {{class}}">{{text}}</a>
 
 <style>
 .vlo-btn {
