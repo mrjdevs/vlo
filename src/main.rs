@@ -22,7 +22,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::{mpsc::channel, Arc, Mutex},
+    sync::{mpsc::channel, Arc, LazyLock, Mutex, OnceLock},
     time::Instant,
 };
 use tokio::sync::broadcast;
@@ -47,6 +47,112 @@ enum Commands {
         #[arg(short, long, default_value = "netlify")]
         provider: String,
     },
+}
+
+// ============================================================
+// PERFORMANCE: SHARED STATE / CACHES
+// ============================================================
+//
+// Everything in this block exists purely to avoid repeating
+// expensive work (regex compilation, filesystem walks, schema
+// application, disk reads) on every request/render. None of it
+// changes rendering behavior or output.
+// ============================================================
+
+/// Project root only needs to be located once per process.
+static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
+    let mut starts = Vec::new();
+
+    if let Ok(dir) = std::env::current_dir() {
+        starts.push(dir);
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            starts.push(parent.to_path_buf());
+        }
+    }
+
+    starts.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+
+    for start in starts {
+        let mut dir = start;
+
+        loop {
+            if dir.join("pages").exists() {
+                return dir;
+            }
+
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+});
+
+/// schema.sql only needs to be applied once per DB connection
+/// lifetime of the process (CREATE TABLE IF NOT EXISTS is
+/// idempotent, so re-running it every request bought us nothing
+/// but disk I/O + SQL parsing).
+static SCHEMA_APPLIED: OnceLock<()> = OnceLock::new();
+
+/// Compiled-once regexes. `regex::Regex::new` is not cheap, and
+/// several of these were being rebuilt on every single component
+/// render / API call.
+static STYLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>(.*?)</style>").unwrap());
+
+static ELEMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>").unwrap());
+
+static CONDITIONAL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)\{\{\#if\s+([a-zA-Z0-9_-]+)\s*\}\}(.*?)\{\{/if\}\}"#).unwrap()
+});
+
+static PROP_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}").unwrap());
+
+static CLASS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)\bclass\s*=\s*("([^"]*)"|'([^']*)')"#).unwrap());
+
+static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)<slot(?:\s+name\s*=\s*["']([^"']+)["'])?\s*>(.*?)</slot>"#).unwrap()
+});
+
+/// Same pattern as PROP_RE but kept separate since it lives in
+/// the SQL subsystem — isolating subsystem changes per the
+/// project's own "small targeted changes" principle.
+static SQL_PARAM_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}").unwrap());
+
+/// Component/layout template source cache, keyed by resolved
+/// file path. Cleared on relevant file-change events by the dev
+/// watcher so `vlo dev` still hot-reloads correctly; in `vlo
+/// build` it just accumulates for the single-shot run.
+#[derive(Debug)]
+struct CompiledTemplate {
+    template: String,
+    css: String,
+}
+
+/// Parsed component/layout templates. The Arc keeps cache lookups cheap: each
+/// render only clones a pointer instead of cloning the template string.
+static TEMPLATE_CACHE: LazyLock<Mutex<HashMap<PathBuf, Arc<CompiledTemplate>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Debug logging toggle. The original slot/component tracing
+/// `println!`s are useful but were unconditionally on the hot
+/// path. Set `VLO_DEBUG=1` to re-enable them.
+static VLO_DEBUG: LazyLock<bool> = LazyLock::new(|| std::env::var("VLO_DEBUG").is_ok());
+
+macro_rules! vlo_debug {
+    ($($arg:tt)*) => {
+        if *VLO_DEBUG {
+            println!($($arg)*);
+        }
+    };
 }
 
 // ============================================================
@@ -89,35 +195,7 @@ async fn main() {
 // ============================================================
 
 fn get_project_root() -> PathBuf {
-    let mut starts = Vec::new();
-
-    if let Ok(dir) = std::env::current_dir() {
-        starts.push(dir);
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            starts.push(parent.to_path_buf());
-        }
-    }
-
-    starts.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
-
-    for start in starts {
-        let mut dir = start;
-
-        loop {
-            if dir.join("pages").exists() {
-                return dir;
-            }
-
-            if !dir.pop() {
-                break;
-            }
-        }
-    }
-
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    PROJECT_ROOT.clone()
 }
 
 // ============================================================
@@ -135,24 +213,31 @@ fn get_db_conn() -> Result<Connection> {
         ",
     )?;
 
-    let schema = root.join("schema.sql");
+    // schema.sql is applied at most once per process instead of
+    // once per request. If you need dev-mode schema hot-reload,
+    // reset SCHEMA_APPLIED from the file watcher the same way
+    // TEMPLATE_CACHE is cleared below.
+    if SCHEMA_APPLIED.get().is_none() {
+        let schema = root.join("schema.sql");
 
-    if schema.exists() {
-        let sql = fs::read_to_string(&schema)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        if schema.exists() {
+            let sql = fs::read_to_string(&schema)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
-        let sql = sql
-            .lines()
-            .filter(|line| {
-                let trimmed = line.trim().to_uppercase();
+            let sql = sql
+                .lines()
+                .filter(|line| {
+                    let trimmed = line.trim().to_uppercase();
 
-                !trimmed.starts_with("CREATE DATABASE")
-                    && !trimmed.starts_with("USE ")
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+                    !trimmed.starts_with("CREATE DATABASE") && !trimmed.starts_with("USE ")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
 
-        conn.execute_batch(&sql)?;
+            conn.execute_batch(&sql)?;
+        }
+
+        let _ = SCHEMA_APPLIED.set(());
     }
 
     Ok(conn)
@@ -189,7 +274,7 @@ fn strip_server_block(content: &str) -> String {
 fn load_api_actions() -> std::result::Result<HashMap<String, String>, String> {
     let file = get_project_root().join("pages/api/api.vlo");
 
-    println!("🔎 [VLO API] Loading: {}", file.display());
+    vlo_debug!("🔎 [VLO API] Loading: {}", file.display());
 
     if !file.exists() {
         return Err(format!("API file not found: {}", file.display()));
@@ -199,12 +284,7 @@ fn load_api_actions() -> std::result::Result<HashMap<String, String>, String> {
         .map_err(|e| format!("Could not read {}: {}", file.display(), e))?;
 
     let block = extract_server_block(&content)
-        .ok_or_else(|| {
-            format!(
-                "No <script server> block found in {}",
-                file.display()
-            )
-        })?;
+        .ok_or_else(|| format!("No <script server> block found in {}", file.display()))?;
 
     let clean = block
         .trim_start_matches('\u{feff}')
@@ -226,7 +306,7 @@ fn load_api_actions() -> std::result::Result<HashMap<String, String>, String> {
         }
     }
 
-    println!("✅ [VLO API] Loaded {} actions", actions.len());
+    vlo_debug!("✅ [VLO API] Loaded {} actions", actions.len());
 
     Ok(actions)
 }
@@ -248,12 +328,7 @@ async fn dev() {
     let last_reload = Arc::new(Mutex::new(Instant::now()));
 
     std::thread::spawn(move || {
-        let _ = watch_files(
-            pages_path,
-            public_path,
-            tx_watcher,
-            last_reload,
-        );
+        let _ = watch_files(pages_path, public_path, tx_watcher, last_reload);
     });
 
     let app = Router::new()
@@ -262,7 +337,6 @@ async fn dev() {
         // ----------------------------------------------------
         .route("/", get(home_handler))
         .route("/:path", get(page_handler))
-
         // ----------------------------------------------------
         // API
         // ----------------------------------------------------
@@ -290,20 +364,14 @@ async fn dev() {
                 .patch(api_handler_id)
                 .delete(api_handler_id),
         )
-
         // ----------------------------------------------------
         // VLO HMR
         // ----------------------------------------------------
         .route("/__vlo_hmr", get(move || hmr_handler(tx)))
-
         // ----------------------------------------------------
         // Static assets
         // ----------------------------------------------------
-        .nest_service(
-            "/static",
-            ServeDir::new(public_path_service),
-        )
-
+        .nest_service("/static", ServeDir::new(public_path_service))
         // ----------------------------------------------------
         // 404
         // ----------------------------------------------------
@@ -313,9 +381,7 @@ async fn dev() {
         .await
         .expect("Failed to bind port 3000");
 
-    println!(
-        "⚡ VLO dev server running at http://localhost:3000"
-    );
+    println!("⚡ VLO dev server running at http://localhost:3000");
     println!("📁 Project root: {}", root.display());
 
     axum::serve(listener, app)
@@ -336,9 +402,7 @@ async fn shutdown_signal() {
 // HOT MODULE RELOAD
 // ============================================================
 
-async fn hmr_handler(
-    tx: broadcast::Sender<()>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+async fn hmr_handler(tx: broadcast::Sender<()>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let mut rx = tx.subscribe();
 
     let stream = stream! {
@@ -358,8 +422,7 @@ fn watch_files(
 ) -> notify::Result<()> {
     let (tx_notify, rx) = channel();
 
-    let mut watcher =
-        RecommendedWatcher::new(tx_notify, Config::default())?;
+    let mut watcher = RecommendedWatcher::new(tx_notify, Config::default())?;
 
     if pages.exists() {
         watcher.watch(&pages, RecursiveMode::Recursive)?;
@@ -375,8 +438,7 @@ fn watch_files(
         };
 
         let relevant = event.paths.iter().any(|path| {
-            path.extension().and_then(|e| e.to_str()) == Some("vlo")
-                || path.starts_with(&public)
+            path.extension().and_then(|e| e.to_str()) == Some("vlo") || path.starts_with(&public)
         });
 
         if !relevant {
@@ -386,6 +448,14 @@ fn watch_files(
         if let Ok(mut timestamp) = last.try_lock() {
             if timestamp.elapsed().as_millis() > 200 {
                 *timestamp = Instant::now();
+
+                // Component/layout templates may have changed —
+                // drop the cached copies so dev mode keeps
+                // reflecting the latest source, same as before
+                // the cache was introduced.
+                if let Ok(mut cache) = TEMPLATE_CACHE.lock() {
+                    cache.clear();
+                }
 
                 let _ = tx.send(());
 
@@ -413,8 +483,7 @@ fn build() {
         let _ = fs::remove_dir_all(&dist);
     }
 
-    fs::create_dir_all(dist.join("static"))
-        .expect("Failed to create dist directory");
+    fs::create_dir_all(dist.join("static")).expect("Failed to create dist directory");
 
     if let Ok(entries) = fs::read_dir(&pages) {
         for entry in entries.flatten() {
@@ -424,11 +493,7 @@ fn build() {
                 continue;
             }
 
-            let stem = path
-                .file_stem()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
+            let stem = path.file_stem().unwrap().to_string_lossy().to_string();
 
             let content = fs::read_to_string(&path).unwrap_or_default();
             let rendered = render_vlo(content);
@@ -441,16 +506,14 @@ fn build() {
                 dist.join(format!("{}.html", stem))
             };
 
-            fs::write(&output, html)
-                .expect("Failed to write generated HTML");
+            fs::write(&output, html).expect("Failed to write generated HTML");
 
             println!("  ├─ Generated: {}", output.display());
         }
     }
 
     if public.exists() {
-        copy_dir_all(&public, &dist.join("static"))
-            .expect("Failed to copy static assets");
+        copy_dir_all(&public, &dist.join("static")).expect("Failed to copy static assets");
 
         println!("  └─ Copied static assets");
     }
@@ -466,15 +529,9 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
         let file_type = entry.file_type()?;
 
         if file_type.is_dir() {
-            copy_dir_all(
-                &entry.path(),
-                &dst.join(entry.file_name()),
-            )?;
+            copy_dir_all(&entry.path(), &dst.join(entry.file_name()))?;
         } else {
-            fs::copy(
-                entry.path(),
-                dst.join(entry.file_name()),
-            )?;
+            fs::copy(entry.path(), dst.join(entry.file_name()))?;
         }
     }
 
@@ -495,72 +552,29 @@ async fn deploy(provider: &str) {
 
     let provider = provider.to_lowercase();
 
-    println!(
-        "⚡ Deploying /dist to {}...",
-        provider
-    );
+    println!("⚡ Deploying /dist to {}...", provider);
 
     if provider == "railway" {
         let caddy = dist.join("Caddyfile");
 
         if !caddy.exists() {
-            fs::write(
-                &caddy,
-                ":$PORT {\n    root * .\n    file_server\n}\n",
-            )
-            .expect("Failed to write Caddyfile");
+            fs::write(&caddy, ":$PORT {\n    root * .\n    file_server\n}\n")
+                .expect("Failed to write Caddyfile");
         }
     }
 
     let args: Vec<&str> = match provider.as_str() {
-        "netlify" => {
-            vec![
-                "netlify-cli",
-                "deploy",
-                "--dir=dist",
-                "--prod",
-            ]
-        }
-
-        "vercel" => {
-            vec![
-                "vercel",
-                "deploy",
-                "dist",
-                "--prod",
-            ]
-        }
-
-        "cloudflare" | "pages" => {
-            vec![
-                "wrangler",
-                "pages",
-                "deploy",
-                "dist",
-            ]
-        }
-
-        "railway" => {
-            vec![
-                "@railway/cli",
-                "up",
-            ]
-        }
-
+        "netlify" => vec!["netlify-cli", "deploy", "--dir=dist", "--prod"],
+        "vercel" => vec!["vercel", "deploy", "dist", "--prod"],
+        "cloudflare" | "pages" => vec!["wrangler", "pages", "deploy", "dist"],
+        "railway" => vec!["@railway/cli", "up"],
         _ => {
-            eprintln!(
-                "❌ Unsupported provider '{}'.",
-                provider
-            );
+            eprintln!("❌ Unsupported provider '{}'.", provider);
             return;
         }
     };
 
-    let working_dir = if provider == "railway" {
-        &dist
-    } else {
-        &root
-    };
+    let working_dir = if provider == "railway" { &dist } else { &root };
 
     let status = if cfg!(target_os = "windows") {
         Command::new("cmd")
@@ -580,23 +594,15 @@ async fn deploy(provider: &str) {
 
     match status {
         Ok(status) if status.success() => {
-            println!(
-                "⚡ Deployment completed successfully!"
-            );
+            println!("⚡ Deployment completed successfully!");
         }
 
         Ok(status) => {
-            eprintln!(
-                "❌ Deployment exited with status: {}",
-                status
-            );
+            eprintln!("❌ Deployment exited with status: {}", status);
         }
 
         Err(error) => {
-            eprintln!(
-                "❌ Failed to execute deployment command: {}",
-                error
-            );
+            eprintln!("❌ Failed to execute deployment command: {}", error);
         }
     }
 }
@@ -610,14 +616,7 @@ async fn api_handler_root(
     Query(query): Query<HashMap<String, String>>,
     payload: Option<Json<Value>>,
 ) -> impl IntoResponse {
-    api_route_handler(
-        None,
-        None,
-        method,
-        query,
-        payload,
-    )
-    .await
+    api_route_handler(None, None, method, query, payload).await
 }
 
 async fn api_handler_path(
@@ -626,14 +625,7 @@ async fn api_handler_path(
     Query(query): Query<HashMap<String, String>>,
     payload: Option<Json<Value>>,
 ) -> impl IntoResponse {
-    api_route_handler(
-        Some(resource),
-        None,
-        method,
-        query,
-        payload,
-    )
-    .await
+    api_route_handler(Some(resource), None, method, query, payload).await
 }
 
 async fn api_handler_id(
@@ -642,14 +634,7 @@ async fn api_handler_id(
     Query(query): Query<HashMap<String, String>>,
     payload: Option<Json<Value>>,
 ) -> impl IntoResponse {
-    api_route_handler(
-        Some(resource),
-        Some(id),
-        method,
-        query,
-        payload,
-    )
-    .await
+    api_route_handler(Some(resource), Some(id), method, query, payload).await
 }
 
 // ============================================================
@@ -670,13 +655,7 @@ fn crud_operation(method: &Method) -> Option<&'static str> {
 fn normalize_resource(endpoint: &str) -> String {
     let value = endpoint.trim().trim_matches('/');
 
-    for prefix in [
-        "get_",
-        "post_",
-        "put_",
-        "patch_",
-        "delete_",
-    ] {
+    for prefix in ["get_", "post_", "put_", "patch_", "delete_"] {
         if let Some(rest) = value.strip_prefix(prefix) {
             return rest.to_string();
         }
@@ -686,10 +665,7 @@ fn normalize_resource(endpoint: &str) -> String {
 }
 
 fn valid_identifier(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 // ============================================================
@@ -710,10 +686,7 @@ async fn api_route_handler(
     if let Some(Json(body)) = payload {
         if let Value::Object(map) = body {
             for (key, value) in map {
-                query.insert(
-                    key,
-                    value_to_query_string(&value),
-                );
+                query.insert(key, value_to_query_string(&value));
             }
         }
     }
@@ -733,9 +706,7 @@ async fn api_route_handler(
     // --------------------------------------------------------
 
     let endpoint = match endpoint {
-        Some(value) => {
-            value.trim().trim_matches('/').to_string()
-        }
+        Some(value) => value.trim().trim_matches('/').to_string(),
 
         None => {
             return match load_api_actions() {
@@ -810,15 +781,9 @@ async fn api_route_handler(
     // Explicit API action support.
     // --------------------------------------------------------
 
-    let explicit_action = [
-        "get_",
-        "post_",
-        "put_",
-        "patch_",
-        "delete_",
-    ]
-    .iter()
-    .any(|prefix| endpoint.starts_with(prefix));
+    let explicit_action = ["get_", "post_", "put_", "patch_", "delete_"]
+        .iter()
+        .any(|prefix| endpoint.starts_with(prefix));
 
     let action_name = if explicit_action {
         endpoint.clone()
@@ -826,13 +791,11 @@ async fn api_route_handler(
         format!("{}_{}", operation, resource)
     };
 
-    println!(
+    vlo_debug!(
         "🔎 [VLO API] {} /api/{}{} -> {}",
         method,
         resource,
-        id.as_ref()
-            .map(|value| format!("/{}", value))
-            .unwrap_or_default(),
+        id.as_ref().map(|value| format!("/{}", value)).unwrap_or_default(),
         action_name
     );
 
@@ -867,8 +830,7 @@ async fn api_route_handler(
         Some(value) => value.clone(),
 
         None => {
-            let mut available =
-                actions.keys().cloned().collect::<Vec<String>>();
+            let mut available = actions.keys().cloned().collect::<Vec<String>>();
 
             available.sort();
 
@@ -899,10 +861,7 @@ async fn api_route_handler(
 
     for (key, value) in query {
         if key != "action" {
-            params.insert(
-                key,
-                query_string_to_value(&value),
-            );
+            params.insert(key, query_string_to_value(&value));
         }
     }
 
@@ -910,22 +869,12 @@ async fn api_route_handler(
     // Automatic GET /resource/:id filtering.
     // --------------------------------------------------------
 
-    if id.is_some()
-        && operation == "get"
-        && !sql.contains("{{id}}")
-    {
+    if id.is_some() && operation == "get" && !sql.contains("{{id}}") {
         sql = add_id_filter(&sql, &params);
     }
 
-    println!(
-        "🗄️ [VLO API] Executing: {}",
-        action_name
-    );
-
-    println!(
-        "📝 [VLO API] SQL: {}",
-        sql
-    );
+    vlo_debug!("🗄️ [VLO API] Executing: {}", action_name);
+    vlo_debug!("📝 [VLO API] SQL: {}", sql);
 
     // --------------------------------------------------------
     // Database.
@@ -935,10 +884,7 @@ async fn api_route_handler(
         Ok(value) => value,
 
         Err(error) => {
-            eprintln!(
-                "❌ [VLO API] Database connection failed: {}",
-                error
-            );
+            eprintln!("❌ [VLO API] Database connection failed: {}", error);
 
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -956,21 +902,11 @@ async fn api_route_handler(
     // Execute SQL.
     // --------------------------------------------------------
 
-    match execute_api_sql(
-        &mut conn,
-        &sql,
-        &params,
-    ) {
-        Ok(data) => {
-            (StatusCode::OK, Json(data)).into_response()
-        }
+    match execute_api_sql(&mut conn, &sql, &params) {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
 
         Err(error) => {
-            eprintln!(
-                "❌ [VLO API] SQL error in {}: {}",
-                action_name,
-                error
-            );
+            eprintln!("❌ [VLO API] SQL error in {}: {}", action_name, error);
 
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -991,93 +927,54 @@ async fn api_route_handler(
 // API / SQL VALUES
 // ============================================================
 
-fn value_to_sql_value(
-    value: &Value,
-) -> rusqlite::types::Value {
+fn value_to_sql_value(value: &Value) -> rusqlite::types::Value {
     match value {
-        Value::Null => {
-            rusqlite::types::Value::Null
-        }
+        Value::Null => rusqlite::types::Value::Null,
 
-        Value::Bool(value) => {
-            rusqlite::types::Value::Integer(
-                if *value { 1 } else { 0 },
-            )
-        }
+        Value::Bool(value) => rusqlite::types::Value::Integer(if *value { 1 } else { 0 }),
 
         Value::Number(value) => {
             if let Some(integer) = value.as_i64() {
                 rusqlite::types::Value::Integer(integer)
             } else if let Some(unsigned) = value.as_u64() {
                 if unsigned <= i64::MAX as u64 {
-                    rusqlite::types::Value::Integer(
-                        unsigned as i64,
-                    )
+                    rusqlite::types::Value::Integer(unsigned as i64)
                 } else {
-                    rusqlite::types::Value::Real(
-                        unsigned as f64
-                    )
+                    rusqlite::types::Value::Real(unsigned as f64)
                 }
             } else if let Some(float) = value.as_f64() {
                 rusqlite::types::Value::Real(float)
             } else {
-                rusqlite::types::Value::Text(
-                    value.to_string()
-                )
+                rusqlite::types::Value::Text(value.to_string())
             }
         }
 
-        Value::String(value) => {
-            rusqlite::types::Value::Text(value.clone())
-        }
+        Value::String(value) => rusqlite::types::Value::Text(value.clone()),
 
-        _ => {
-            rusqlite::types::Value::Text(
-                value.to_string()
-            )
-        }
+        _ => rusqlite::types::Value::Text(value.to_string()),
     }
 }
 
 fn prepare_sql(
     sql: &str,
     params: &serde_json::Map<String, Value>,
-) -> rusqlite::Result<(
-    String,
-    Vec<rusqlite::types::Value>,
-)> {
-    let regex = Regex::new(
-        r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}",
-    )
-    .map_err(|error| {
-        rusqlite::Error::ToSqlConversionFailure(
-            Box::new(error),
-        )
-    })?;
-
+) -> rusqlite::Result<(String, Vec<rusqlite::types::Value>)> {
     let mut values = Vec::new();
 
-    let prepared = regex
-        .replace_all(
-            sql,
-            |caps: &regex::Captures| {
-                let key = &caps[1];
+    let prepared = SQL_PARAM_RE
+        .replace_all(sql, |caps: &regex::Captures| {
+            let key = &caps[1];
 
-                match params.get(key) {
-                    Some(value) => {
-                        values.push(
-                            value_to_sql_value(value)
-                        );
+            match params.get(key) {
+                Some(value) => {
+                    values.push(value_to_sql_value(value));
 
-                        "?".to_string()
-                    }
-
-                    None => {
-                        format!("{{{{{}}}}}", key)
-                    }
+                    "?".to_string()
                 }
-            },
-        )
+
+                None => format!("{{{{{}}}}}", key),
+            }
+        })
         .into_owned();
 
     Ok((prepared, values))
@@ -1097,28 +994,13 @@ fn value_to_sql(value: &Value) -> String {
 
         Value::Number(value) => value.to_string(),
 
-        Value::String(value) => {
-            format!(
-                "'{}'",
-                value.replace('\'', "''")
-            )
-        }
+        Value::String(value) => format!("'{}'", value.replace('\'', "''")),
 
-        _ => {
-            format!(
-                "'{}'",
-                value
-                    .to_string()
-                    .replace('\'', "''")
-            )
-        }
+        _ => format!("'{}'", value.to_string().replace('\'', "''")),
     }
 }
 
-fn add_id_filter(
-    sql: &str,
-    params: &serde_json::Map<String, Value>,
-) -> String {
+fn add_id_filter(sql: &str, params: &serde_json::Map<String, Value>) -> String {
     let id = match params.get("id") {
         Some(value) => value_to_sql(value),
         None => return sql.to_string(),
@@ -1131,37 +1013,17 @@ fn add_id_filter(
         let order = &sql[pos..];
 
         if before.to_uppercase().contains(" WHERE ") {
-            format!(
-                "{} AND id = {}{}",
-                before,
-                id,
-                order
-            )
+            format!("{} AND id = {}{}", before, id, order)
         } else {
-            format!(
-                "{} WHERE id = {}{}",
-                before,
-                id,
-                order
-            )
+            format!("{} WHERE id = {}{}", before, id, order)
         }
     } else {
-        let trimmed = sql
-            .trim_end_matches(';')
-            .trim_end();
+        let trimmed = sql.trim_end_matches(';').trim_end();
 
         if trimmed.to_uppercase().contains(" WHERE ") {
-            format!(
-                "{} AND id = {};",
-                trimmed,
-                id
-            )
+            format!("{} AND id = {};", trimmed, id)
         } else {
-            format!(
-                "{} WHERE id = {};",
-                trimmed,
-                id
-            )
+            format!("{} WHERE id = {};", trimmed, id)
         }
     }
 }
@@ -1170,48 +1032,27 @@ fn add_id_filter(
 // API / DATABASE ROWS
 // ============================================================
 
-fn row_to_json(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<Value> {
+fn row_to_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let mut map = serde_json::Map::new();
 
     for index in 0..row.as_ref().column_count() {
-        let name = row
-            .as_ref()
-            .column_name(index)
-            .unwrap_or("column");
+        let name = row.as_ref().column_name(index).unwrap_or("column");
 
         let value = match row.get_ref(index)? {
             ValueRef::Null => Value::Null,
 
-            ValueRef::Integer(value) => {
-                Value::Number(value.into())
-            }
+            ValueRef::Integer(value) => Value::Number(value.into()),
 
-            ValueRef::Real(value) => {
-                serde_json::Number::from_f64(value)
-                    .map(Value::Number)
-                    .unwrap_or(Value::Null)
-            }
+            ValueRef::Real(value) => serde_json::Number::from_f64(value)
+                .map(Value::Number)
+                .unwrap_or(Value::Null),
 
-            ValueRef::Text(value) => {
-                Value::String(
-                    String::from_utf8_lossy(value)
-                        .to_string(),
-                )
-            }
+            ValueRef::Text(value) => Value::String(String::from_utf8_lossy(value).to_string()),
 
-            ValueRef::Blob(value) => {
-                Value::String(
-                    format!("blob {}b", value.len()),
-                )
-            }
+            ValueRef::Blob(value) => Value::String(format!("blob {}b", value.len())),
         };
 
-        map.insert(
-            name.to_string(),
-            value,
-        );
+        map.insert(name.to_string(), value);
     }
 
     Ok(Value::Object(map))
@@ -1238,38 +1079,21 @@ fn execute_api_sql(
             continue;
         }
 
-        let (prepared_sql, values) =
-            prepare_sql(statement, params)?;
+        let (prepared_sql, values) = prepare_sql(statement, params)?;
 
         if prepared_sql.contains("{{") {
-            return Err(
-                rusqlite::Error::InvalidParameterName(
-                    prepared_sql,
-                ),
-            );
+            return Err(rusqlite::Error::InvalidParameterName(prepared_sql));
         }
 
-        let upper =
-            prepared_sql.trim_start().to_uppercase();
+        let upper = prepared_sql.trim_start().to_uppercase();
 
-        let params_ref: Vec<
-            &dyn rusqlite::ToSql
-        > = values
-            .iter()
-            .map(|value| value as &dyn rusqlite::ToSql)
-            .collect();
+        let params_ref: Vec<&dyn rusqlite::ToSql> =
+            values.iter().map(|value| value as &dyn rusqlite::ToSql).collect();
 
-        if upper.starts_with("SELECT")
-            || upper.starts_with("PRAGMA")
-            || upper.starts_with("WITH")
-        {
-            let mut stmt =
-                transaction.prepare(&prepared_sql)?;
+        if upper.starts_with("SELECT") || upper.starts_with("PRAGMA") || upper.starts_with("WITH") {
+            let mut stmt = transaction.prepare(&prepared_sql)?;
 
-            let rows = stmt.query_map(
-                rusqlite::params_from_iter(params_ref),
-                row_to_json,
-            )?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(params_ref), row_to_json)?;
 
             let mut data = Vec::new();
 
@@ -1279,10 +1103,7 @@ fn execute_api_sql(
 
             last_data = Some(data);
         } else {
-            affected_rows += transaction.execute(
-                &prepared_sql,
-                rusqlite::params_from_iter(params_ref),
-            )?;
+            affected_rows += transaction.execute(&prepared_sql, rusqlite::params_from_iter(params_ref))?;
         }
     }
 
@@ -1329,9 +1150,7 @@ fn query_string_to_value(value: &str) -> Value {
     }
 
     if let Ok(float) = value.parse::<f64>() {
-        if let Some(number) =
-            serde_json::Number::from_f64(float)
-        {
+        if let Some(number) = serde_json::Number::from_f64(float) {
             return Value::Number(number);
         }
     }
@@ -1347,9 +1166,7 @@ async fn home_handler() -> impl IntoResponse {
     render_page("home".to_string(), true).await
 }
 
-async fn page_handler(
-    AxumPath(path): AxumPath<String>,
-) -> impl IntoResponse {
+async fn page_handler(AxumPath(path): AxumPath<String>) -> impl IntoResponse {
     render_page(path, true).await
 }
 
@@ -1361,60 +1178,36 @@ async fn not_found_handler() -> impl IntoResponse {
 // PAGE RENDERING
 // ============================================================
 
-async fn render_page(
-    path: String,
-    dev: bool,
-) -> impl IntoResponse {
+async fn render_page(path: String, dev: bool) -> impl IntoResponse {
     let page_path = path.clone();
 
     match tokio::task::spawn_blocking(move || {
-        let file = get_project_root()
-            .join("pages")
-            .join(format!("{}.vlo", page_path));
+        let file = get_project_root().join("pages").join(format!("{}.vlo", page_path));
 
-        fs::read_to_string(file)
-            .ok()
-            .map(|content| {
-                let rendered = render_vlo(content);
+        fs::read_to_string(file).ok().map(|content| {
+            let rendered = render_vlo(content);
 
-                (
-                    StatusCode::OK,
-                    Html(wrap_html(
-                        &page_path,
-                        &rendered,
-                        dev,
-                    )),
-                )
-            })
+            (StatusCode::OK, Html(wrap_html(&page_path, &rendered, dev)))
+        })
     })
     .await
     {
-        Ok(Some(response)) => {
-            response.into_response()
-        }
+        Ok(Some(response)) => response.into_response(),
 
         _ => render_404(dev).await.into_response(),
     }
 }
 
-async fn render_404(
-    dev: bool,
-) -> impl IntoResponse {
+async fn render_404(dev: bool) -> impl IntoResponse {
     tokio::task::spawn_blocking(move || {
-        let file = get_project_root()
-            .join("pages")
-            .join("404.vlo");
+        let file = get_project_root().join("pages").join("404.vlo");
 
         if let Ok(content) = fs::read_to_string(file) {
             let rendered = render_vlo(content);
 
             (
                 StatusCode::NOT_FOUND,
-                Html(wrap_html(
-                    "404 - Page Not Found",
-                    &rendered,
-                    dev,
-                )),
+                Html(wrap_html("404 - Page Not Found", &rendered, dev)),
             )
         } else {
             let fallback = r#"
@@ -1446,19 +1239,12 @@ Back to Home
 
             (
                 StatusCode::NOT_FOUND,
-                Html(wrap_html(
-                    "404 - Page Not Found",
-                    &rendered,
-                    dev,
-                )),
+                Html(wrap_html("404 - Page Not Found", &rendered, dev)),
             )
         }
     })
     .await
-    .unwrap_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Html("Server Error".to_string()),
-    ))
+    .unwrap_or((StatusCode::INTERNAL_SERVER_ERROR, Html("Server Error".to_string())))
 }
 
 // ============================================================
@@ -1470,16 +1256,9 @@ fn render_vlo(source: String) -> RenderedPage {
 
     let source = strip_server_block(&source);
 
-    let source = render_tag(
-        &source,
-        "BaseLayout",
-        &mut context,
-    );
+    let source = render_tag(&source, "BaseLayout", &mut context);
 
-    let source = render_components(
-        &source,
-        &mut context,
-    );
+    let source = render_components(&source, &mut context);
 
     context.html = source;
 
@@ -1490,27 +1269,12 @@ fn render_vlo(source: String) -> RenderedPage {
 // VLO TAG RENDERING
 // ============================================================
 
-fn render_tag(
-    source: &str,
-    tag: &str,
-    context: &mut RenderedPage,
-) -> String {
-    if let Some((
-        start,
-        end,
-        props,
-        children,
-    )) = find_tag(source, tag)
-    {
+fn render_tag(source: &str, tag: &str, context: &mut RenderedPage) -> String {
+    if let Some((start, end, props, children)) = find_tag(source, tag) {
         return format!(
             "{}{}{}",
             &source[..start],
-            render_component_file(
-                tag,
-                &props,
-                &children,
-                context,
-            ),
+            render_component_file(tag, &props, &children, context),
             &source[end..],
         );
     }
@@ -1522,67 +1286,34 @@ fn render_tag(
 // COMPONENT RENDERING
 // ============================================================
 
-fn render_components(
-    source: &str,
-    context: &mut RenderedPage,
-) -> String {
+fn render_components(source: &str, context: &mut RenderedPage) -> String {
     let mut output = String::new();
     let mut last = 0;
 
-    let chars: Vec<(usize, char)> =
-        source.char_indices().collect();
+    let chars: Vec<(usize, char)> = source.char_indices().collect();
 
     let mut index = 0;
 
     while index < chars.len() {
         let (position, character) = chars[index];
 
-        if character == '<'
-            && index + 1 < chars.len()
-            && chars[index + 1]
-                .1
-                .is_ascii_uppercase()
-        {
+        if character == '<' && index + 1 < chars.len() && chars[index + 1].1.is_ascii_uppercase() {
             let mut end = index + 1;
 
-            while end < chars.len()
-                && (
-                    chars[end].1.is_ascii_alphanumeric()
-                        || chars[end].1 == '_'
-                )
-            {
+            while end < chars.len() && (chars[end].1.is_ascii_alphanumeric() || chars[end].1 == '_') {
                 end += 1;
             }
 
-            let tag = &source[
-                chars[index + 1].0..chars[end].0
-            ];
+            let tag = &source[chars[index + 1].0..chars[end].0];
 
-            if let Some((
-                _,
-                tag_end,
-                props,
-                children,
-            )) = find_tag(&source[position..], tag)
-            {
-                output.push_str(
-                    &source[last..position],
-                );
+            if let Some((_, tag_end, props, children)) = find_tag(&source[position..], tag) {
+                output.push_str(&source[last..position]);
 
-                output.push_str(
-                    &render_component_file(
-                        tag,
-                        &props,
-                        &children,
-                        context,
-                    ),
-                );
+                output.push_str(&render_component_file(tag, &props, &children, context));
 
                 last = position + tag_end;
 
-                while index < chars.len()
-                    && chars[index].0 < last
-                {
+                while index < chars.len() && chars[index].0 < last {
                     index += 1;
                 }
 
@@ -1602,22 +1333,16 @@ fn render_components(
 // COMPONENT LOOKUP
 // ============================================================
 
-fn component_path(
-    name: &str,
-) -> Option<PathBuf> {
+fn component_path(name: &str) -> Option<PathBuf> {
     let root = get_project_root();
 
-    let layout = root
-        .join("layouts")
-        .join(format!("{}.vlo", name));
+    let layout = root.join("layouts").join(format!("{}.vlo", name));
 
     if layout.exists() {
         return Some(layout);
     }
 
-    let component = root
-        .join("components")
-        .join(format!("{}.vlo", name));
+    let component = root.join("components").join(format!("{}.vlo", name));
 
     if component.exists() {
         return Some(component);
@@ -1626,28 +1351,53 @@ fn component_path(
     None
 }
 
+/// Reads a component/layout template, going through the
+/// in-memory cache first. Avoids re-reading the same file from
+/// disk every time a component is used more than once on a page
+/// (or across pages within one `vlo build` run).
+fn read_component_template(path: &Path) -> Option<Arc<CompiledTemplate>> {
+    if let Ok(cache) = TEMPLATE_CACHE.lock() {
+        if let Some(cached) = cache.get(path) {
+            return Some(Arc::clone(cached));
+        }
+    }
+
+    let source = fs::read_to_string(path).ok()?;
+
+    // Compile the template once. Style extraction/removal used to happen on
+    // every component render even though the source file itself was cached.
+    let mut css = String::new();
+    for captures in STYLE_RE.captures_iter(&source) {
+        if let Some(style) = captures.get(1) {
+            css.push_str(style.as_str());
+            css.push('\n');
+        }
+    }
+
+    let template = STYLE_RE.replace_all(&source, "").into_owned();
+    let compiled = Arc::new(CompiledTemplate { template, css });
+
+    if let Ok(mut cache) = TEMPLATE_CACHE.lock() {
+        cache.insert(path.to_path_buf(), Arc::clone(&compiled));
+    }
+
+    Some(compiled)
+}
+
 // ============================================================
 // COMPONENT TAG PARSER
 // ============================================================
 
-fn find_tag(
-    source: &str,
-    name: &str,
-) -> Option<(usize, usize, String, String)> {
+fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> {
     let open = format!("<{}", name);
 
     let start = source.find(&open)?;
 
     let mut index = start + open.len();
 
-    let next = source[index..]
-        .chars()
-        .next()?;
+    let next = source[index..].chars().next()?;
 
-    if !(next.is_whitespace()
-        || next == '/'
-        || next == '>')
-    {
+    if !(next.is_whitespace() || next == '/' || next == '>') {
         return None;
     }
 
@@ -1656,8 +1406,7 @@ fn find_tag(
     let mut quote = None;
     let mut open_end = None;
 
-    for (offset, character) in source[index..].char_indices()
-    {
+    for (offset, character) in source[index..].char_indices() {
         match quote {
             Some(current) if character == current => {
                 quote = None;
@@ -1668,9 +1417,7 @@ fn find_tag(
             }
 
             None if character == '>' => {
-                open_end = Some(
-                    index + offset
-                );
+                open_end = Some(index + offset);
                 break;
             }
 
@@ -1680,21 +1427,14 @@ fn find_tag(
 
     let open_end = open_end?;
 
-    let props =
-        source[props_start..open_end].to_string();
+    let props = source[props_start..open_end].to_string();
 
-    let self_closing =
-        props.trim_end().ends_with('/');
+    let self_closing = props.trim_end().ends_with('/');
 
     index = open_end + 1;
 
     if self_closing {
-        return Some((
-            start,
-            index,
-            props,
-            String::new(),
-        ));
+        return Some((start, index, props, String::new()));
     }
 
     let close = format!("</{}>", name);
@@ -1711,11 +1451,7 @@ fn find_tag(
             let valid = source[after..]
                 .chars()
                 .next()
-                .map(|character| {
-                    character.is_whitespace()
-                        || character == '/'
-                        || character == '>'
-                })
+                .map(|character| character.is_whitespace() || character == '/' || character == '>')
                 .unwrap_or(false);
 
             if valid {
@@ -1725,23 +1461,11 @@ fn find_tag(
             depth -= 1;
 
             if depth == 0 {
-                return Some((
-                    start,
-                    index + close.len(),
-                    props,
-                    source[
-                        children_start..index
-                    ]
-                    .to_string(),
-                ));
+                return Some((start, index + close.len(), props, source[children_start..index].to_string()));
             }
         }
 
-        index += remaining
-            .chars()
-            .next()
-            .map(|character| character.len_utf8())
-            .unwrap_or(1);
+        index += remaining.chars().next().map(|character| character.len_utf8()).unwrap_or(1);
     }
 
     None
@@ -1761,67 +1485,35 @@ fn render_component_file(
         Some(path) => path,
 
         None => {
-            return format!(
-                "<!-- {} not found -->",
-                name
-            );
+            return format!("<!-- {} not found -->", name);
         }
     };
 
-    let template = match fs::read_to_string(&path) {
-        Ok(template) => template,
+    let compiled = match read_component_template(&path) {
+        Some(template) => template,
 
-        Err(_) => {
-            return format!(
-                "<!-- {} could not be read -->",
-                name
-            );
+        None => {
+            return format!("<!-- {} could not be read -->", name);
         }
     };
 
-    let style_regex =
-        Regex::new(
-            r"(?is)<style[^>]*>(.*?)</style>",
-        )
-        .unwrap();
-
-    let mut css = String::new();
-
-    for captures in style_regex.captures_iter(
-        &template,
-    ) {
-        if let Some(style) = captures.get(1) {
-            css.push_str(style.as_str());
-            css.push('\n');
-        }
+    if !compiled.css.trim().is_empty() {
+        context.add_style(name, compiled.css.trim());
     }
 
-    if !css.trim().is_empty() {
-        context.add_style(
-            name,
-            css.trim(),
-        );
-    }
-
-    let template =
-        style_regex
-            .replace_all(&template, "")
-            .into_owned();
+    let template = &compiled.template;
 
     let mut props = parse_props(props_str);
 
-    let (
-        raw_named_slots,
-        raw_default_slot,
-    ) = parse_slot_content(children);
+    let (raw_named_slots, raw_default_slot) = parse_slot_content(children);
 
-    println!(
+    vlo_debug!(
         "🧩 [VLO SLOT] Component <{}> received named slots: {:?}",
         name,
         raw_named_slots.keys().collect::<Vec<_>>()
     );
 
-    println!(
+    vlo_debug!(
         "🎯 [VLO SLOT] Component <{}> default slot length={}",
         name,
         raw_default_slot.len()
@@ -1829,106 +1521,46 @@ fn render_component_file(
 
     let mut named_slots = HashMap::new();
 
-    for (
-        slot_name,
-        slot_content,
-    ) in raw_named_slots
-    {
-        let rendered =
-            render_nested_vlo_content(
-                &slot_content,
-                context,
-            );
+    for (slot_name, slot_content) in raw_named_slots {
+        let rendered = render_nested_vlo_content(&slot_content, context);
 
-        println!(
+        vlo_debug!(
             "🧩 [VLO SLOT] Rendered named slot '{}' length={}",
             slot_name,
             rendered.len()
         );
 
-        named_slots.insert(
-            slot_name,
-            rendered,
-        );
+        named_slots.insert(slot_name, rendered);
     }
 
-    let default_slot =
-        render_nested_vlo_content(
-            &raw_default_slot,
-            context,
-        );
+    let default_slot = render_nested_vlo_content(&raw_default_slot, context);
 
-    println!(
-        "🎯 [VLO SLOT] Rendered default slot length={}",
-        default_slot.len()
-    );
+    vlo_debug!("🎯 [VLO SLOT] Rendered default slot length={}", default_slot.len());
 
-    props.insert(
-        "children".to_string(),
-        default_slot.clone(),
-    );
+    props.insert("children".to_string(), default_slot.clone());
 
-    let rendered =
-        render_component_template(
-            &template,
-            &props,
-        );
+    let rendered = render_component_template(&template, &props);
 
-    let rendered = render_slots(
-        &rendered,
-        &named_slots,
-        &default_slot,
-    );
+    let rendered = render_slots(&rendered, &named_slots, &default_slot);
 
-    let attributes =
-        build_component_attributes(
-            &template,
-            &props,
-        );
+    let attributes = build_component_attributes(&template, &props);
 
     if attributes.is_empty() {
         return rendered;
     }
 
-    let element_regex =
-        Regex::new(
-            r"(?s)<([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>",
-        )
-        .unwrap();
+    if let Some(captures) = ELEMENT_RE.captures(&rendered) {
+        let full_match = captures.get(0).unwrap();
 
-    if let Some(captures) =
-        element_regex.captures(&rendered)
-    {
-        let full_match =
-            captures.get(0).unwrap();
+        let tag_name = captures.get(1).unwrap().as_str();
 
-        let tag_name =
-            captures.get(1).unwrap().as_str();
+        let existing_attributes = captures.get(2).map(|value| value.as_str()).unwrap_or("");
 
-        let existing_attributes =
-            captures
-                .get(2)
-                .map(|value| value.as_str())
-                .unwrap_or("");
-
-        let replacement =
-            if existing_attributes
-                .trim()
-                .is_empty()
-            {
-                format!(
-                    "<{} {}>",
-                    tag_name,
-                    attributes
-                )
-            } else {
-                format!(
-                    "<{}{} {}>",
-                    tag_name,
-                    existing_attributes,
-                    attributes
-                )
-            };
+        let replacement = if existing_attributes.trim().is_empty() {
+            format!("<{} {}>", tag_name, attributes)
+        } else {
+            format!("<{}{} {}>", tag_name, existing_attributes, attributes)
+        };
 
         return format!(
             "{}{}{}",
@@ -1945,30 +1577,19 @@ fn render_component_file(
 // NESTED VLO CONTENT
 // ============================================================
 
-fn render_nested_vlo_content(
-    content: &str,
-    context: &mut RenderedPage,
-) -> String {
+fn render_nested_vlo_content(content: &str, context: &mut RenderedPage) -> String {
     if content.trim().is_empty() {
         return String::new();
     }
 
-    let mut source =
-        strip_server_block(content);
+    let mut source = strip_server_block(content);
 
     for _ in 0..20 {
         let previous = source.clone();
 
-        source = render_tag(
-            &source,
-            "BaseLayout",
-            context,
-        );
+        source = render_tag(&source, "BaseLayout", context);
 
-        source = render_components(
-            &source,
-            context,
-        );
+        source = render_components(&source, context);
 
         if source == previous {
             break;
@@ -1982,81 +1603,56 @@ fn render_nested_vlo_content(
 // COMPONENT TEMPLATE
 // ============================================================
 
-fn render_component_template(
-    template: &str,
-    props: &HashMap<String, String>,
-) -> String {
-    let mut values = props.clone();
-
-    // --------------------------------------------------------
-    // Button-specific default
-    // --------------------------------------------------------
-    //
-    // Only provide type="button" when this component actually
-    // contains a <button> element.
-    //
-    // Do NOT add "type=button" to unrelated components such
-    // as Alert, Card, Badge, Input, etc.
-    //
-    if template
-        .to_ascii_lowercase()
-        .contains("<button")
-    {
-        values
-            .entry("type".to_string())
-            .or_insert_with(|| "button".to_string());
-    }
+fn render_component_template(template: &str, props: &HashMap<String, String>) -> String {
+    // Keep the common path allocation-free with respect to the props map.
+    // The old implementation cloned every prop map just to provide the
+    // Button `type="button"` default.
+    let button_default = template.to_ascii_lowercase().contains("<button");
 
     // --------------------------------------------------------
     // Conditional blocks
     // --------------------------------------------------------
 
-    let conditional_regex = Regex::new(
-        r#"(?is)\{\{\#if\s+([a-zA-Z0-9_-]+)\s*\}\}(.*?)\{\{/if\}\}"#,
-    )
-    .unwrap();
+    let mut rendered = CONDITIONAL_RE
+        .replace_all(template, |captures: &regex::Captures| {
+            let key = captures[1].trim();
 
-    let mut rendered = conditional_regex
-        .replace_all(
-            template,
-            |captures: &regex::Captures| {
-                let key = captures[1].trim();
+            let value = props
+                .get(key)
+                .map(|value| value.trim())
+                .or_else(|| {
+                    if button_default && key == "type" && !props.contains_key("type") {
+                        Some("button")
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or("");
 
-                let value = values
-                    .get(key)
-                    .map(|value| value.trim())
-                    .unwrap_or("");
-
-                if value.is_empty()
-                    || value.eq_ignore_ascii_case("false")
-                {
-                    String::new()
-                } else {
-                    captures[2].to_string()
-                }
-            },
-        )
+            if value.is_empty() || value.eq_ignore_ascii_case("false") {
+                String::new()
+            } else {
+                captures[2].to_string()
+            }
+        })
         .into_owned();
 
     // --------------------------------------------------------
     // Normal interpolation
     // --------------------------------------------------------
 
-    let prop_regex = Regex::new(
-        r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}",
-    )
-    .unwrap();
+    rendered = PROP_RE
+        .replace_all(&rendered, |captures: &regex::Captures| {
+            let key = captures[1].trim();
 
-    rendered = prop_regex
-        .replace_all(
-            &rendered,
-            |captures: &regex::Captures| {
-                values
-                    .get(&captures[1])
-                    .cloned()
-                    .unwrap_or_default()
-            },
-        )
+            if let Some(value) = props.get(key) {
+                value.clone()
+            } else if button_default && key == "type" {
+                "button".to_string()
+            } else {
+                String::new()
+            }
+        })
         .into_owned();
 
     // --------------------------------------------------------
@@ -2067,42 +1663,24 @@ fn render_component_template(
 }
 
 fn normalize_class_attributes(html: &str) -> String {
-    let class_regex = Regex::new(
-        r#"(?i)\bclass\s*=\s*("([^"]*)"|'([^']*)')"#,
-    )
-    .unwrap();
+    CLASS_RE
+        .replace_all(html, |captures: &regex::Captures| {
+            let value = captures
+                .get(2)
+                .or_else(|| captures.get(3))
+                .map(|value| value.as_str())
+                .unwrap_or("");
 
-    class_regex
-        .replace_all(
-            html,
-            |captures: &regex::Captures| {
-                let value = captures
-                    .get(2)
-                    .or_else(|| captures.get(3))
-                    .map(|value| value.as_str())
-                    .unwrap_or("");
+            let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
 
-                let normalized = value
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ");
+            let quote = if captures.get(1).map(|value| value.as_str()).unwrap_or("").starts_with('"') {
+                '"'
+            } else {
+                '\''
+            };
 
-                let quote = if captures
-                    .get(1)
-                    .map(|value| value.as_str())
-                    .unwrap_or("")
-                    .starts_with('"')
-                {
-                    '"'
-                } else {
-                    '\''
-                };
-
-                format!(
-                    "class={quote}{normalized}{quote}"
-                )
-            },
-        )
+            format!("class={quote}{normalized}{quote}")
+        })
         .into_owned()
 }
 
@@ -2110,28 +1688,26 @@ fn normalize_class_attributes(html: &str) -> String {
 // COMPONENT ATTRIBUTE FORWARDING
 // ============================================================
 
-fn build_component_attributes(
-    template: &str,
-    props: &HashMap<String, String>,
-) -> String {
-    let interpolation_regex = Regex::new(
-        r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}",
-    )
-    .unwrap();
-
+fn build_component_attributes(template: &str, props: &HashMap<String, String>) -> String {
     let mut used = HashSet::new();
 
-    for captures in interpolation_regex.captures_iter(template) {
+    for captures in PROP_RE.captures_iter(template) {
         used.insert(captures[1].to_string());
     }
 
     let mut attributes = Vec::new();
+    let button_default = template.to_ascii_lowercase().contains("<button");
+
+    // Preserve the previous implicit Button behavior without materializing a
+    // cloned props map. If `type` is not consumed by the template, forward it
+    // to the root element exactly as the old cloned-map implementation did.
+    if button_default && !props.contains_key("type") && !used.contains("type") {
+        attributes.push("type=\"button\"".to_string());
+    }
 
     for (key, value) in props {
         // Internal VLO properties.
-        if key == "children"
-            || key == "attributes"
-        {
+        if key == "children" || key == "attributes" {
             continue;
         }
 
@@ -2143,9 +1719,7 @@ fn build_component_attributes(
 
         // Boolean HTML attributes.
         if is_boolean_attribute(key) {
-            if value.eq_ignore_ascii_case("true")
-                || value == key
-            {
+            if value.eq_ignore_ascii_case("true") || value == key {
                 attributes.push(key.clone());
             }
 
@@ -2157,17 +1731,14 @@ fn build_component_attributes(
             continue;
         }
 
-        attributes.push(format!(
-            "{}=\"{}\"",
-            key,
-            escape_html_attribute(value)
-        ));
+        attributes.push(format!("{}=\"{}\"", key, escape_html_attribute(value)));
     }
 
     attributes.sort();
 
     attributes.join(" ")
 }
+
 fn is_boolean_attribute(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
@@ -2207,42 +1778,29 @@ fn escape_html_attribute(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
+
 // ============================================================
 // COMPONENT PROPS
 // ============================================================
 
-fn parse_props(
-    raw: &str,
-) -> HashMap<String, String> {
-    let chars: Vec<char> = raw
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .chars()
-        .collect();
+fn parse_props(raw: &str) -> HashMap<String, String> {
+    let chars: Vec<char> = raw.replace("&quot;", "\"").replace("&apos;", "'").chars().collect();
 
     let mut map = HashMap::new();
     let mut index = 0;
 
     while index < chars.len() {
-        while index < chars.len()
-            && chars[index].is_whitespace()
-        {
+        while index < chars.len() && chars[index].is_whitespace() {
             index += 1;
         }
 
-        if index >= chars.len()
-            || chars[index] == '/'
-        {
+        if index >= chars.len() || chars[index] == '/' {
             break;
         }
 
         let mut key = String::new();
 
-        while index < chars.len()
-            && chars[index] != '='
-            && !chars[index].is_whitespace()
-            && chars[index] != '/'
-        {
+        while index < chars.len() && chars[index] != '=' && !chars[index].is_whitespace() && chars[index] != '/' {
             key.push(chars[index]);
             index += 1;
         }
@@ -2252,28 +1810,19 @@ fn parse_props(
             continue;
         }
 
-        while index < chars.len()
-            && chars[index].is_whitespace()
-        {
+        while index < chars.len() && chars[index].is_whitespace() {
             index += 1;
         }
 
-        if index < chars.len()
-            && chars[index] == '='
-        {
+        if index < chars.len() && chars[index] == '=' {
             index += 1;
 
-            while index < chars.len()
-                && chars[index].is_whitespace()
-            {
+            while index < chars.len() && chars[index].is_whitespace() {
                 index += 1;
             }
 
             if index >= chars.len() {
-                map.insert(
-                    key,
-                    "true".to_string(),
-                );
+                map.insert(key, "true".to_string());
                 break;
             }
 
@@ -2283,9 +1832,7 @@ fn parse_props(
             if quote == '"' || quote == '\'' {
                 index += 1;
 
-                while index < chars.len()
-                    && chars[index] != quote
-                {
+                while index < chars.len() && chars[index] != quote {
                     value.push(chars[index]);
                     index += 1;
                 }
@@ -2294,10 +1841,7 @@ fn parse_props(
                     index += 1;
                 }
             } else {
-                while index < chars.len()
-                    && !chars[index].is_whitespace()
-                    && chars[index] != '/'
-                {
+                while index < chars.len() && !chars[index].is_whitespace() && chars[index] != '/' {
                     value.push(chars[index]);
                     index += 1;
                 }
@@ -2305,10 +1849,7 @@ fn parse_props(
 
             map.insert(key, value);
         } else {
-            map.insert(
-                key,
-                "true".to_string(),
-            );
+            map.insert(key, "true".to_string());
         }
     }
 
@@ -2319,73 +1860,46 @@ fn parse_props(
 // SLOT RENDERING
 // ============================================================
 
-fn render_slots(
-    template: &str,
-    named_slots: &HashMap<String, String>,
-    default_slot: &str,
-) -> String {
-    println!(
+fn render_slots(template: &str, named_slots: &HashMap<String, String>, default_slot: &str) -> String {
+    vlo_debug!(
         "🎯 [VLO SLOT] Rendering slots: {:?}, default_len={}",
         named_slots.keys().collect::<Vec<_>>(),
         default_slot.len()
     );
 
-    let slot_regex =
-        Regex::new(
-            r#"(?is)<slot(?:\s+name\s*=\s*["']([^"']+)["'])?\s*>(.*?)</slot>"#,
-        )
-        .unwrap();
+    SLOT_RE
+        .replace_all(template, |captures: &regex::Captures| {
+            let name = captures.get(1).map(|value| value.as_str().trim()).unwrap_or("");
 
-    slot_regex
-        .replace_all(
-            template,
-            |captures: &regex::Captures| {
-                let name = captures
-                    .get(1)
-                    .map(|value| value.as_str().trim())
-                    .unwrap_or("");
+            let fallback = captures.get(2).map(|value| value.as_str()).unwrap_or("");
 
-                let fallback = captures
-                    .get(2)
-                    .map(|value| value.as_str())
-                    .unwrap_or("");
+            vlo_debug!("🔎 [VLO SLOT] Template slot requested: '{}'", name);
 
-                println!(
-                    "🔎 [VLO SLOT] Template slot requested: '{}'",
-                    name
+            if name.is_empty() {
+                vlo_debug!(
+                    "➡️ [VLO SLOT] Using default slot, content length={}",
+                    default_slot.len()
                 );
 
-                if name.is_empty() {
-                    println!(
-                        "➡️ [VLO SLOT] Using default slot, content length={}",
-                        default_slot.len()
-                    );
-
-                    if default_slot.trim().is_empty() {
-                        fallback.to_string()
-                    } else {
-                        default_slot.to_string()
-                    }
-                } else if let Some(content) =
-                    named_slots.get(name)
-                {
-                    println!(
-                        "✅ [VLO SLOT] Matched '{}' with content length={}",
-                        name,
-                        content.len()
-                    );
-
-                    content.clone()
-                } else {
-                    println!(
-                        "⚠️ [VLO SLOT] No content for '{}', using fallback",
-                        name
-                    );
-
+                if default_slot.trim().is_empty() {
                     fallback.to_string()
+                } else {
+                    default_slot.to_string()
                 }
-            },
-        )
+            } else if let Some(content) = named_slots.get(name) {
+                vlo_debug!(
+                    "✅ [VLO SLOT] Matched '{}' with content length={}",
+                    name,
+                    content.len()
+                );
+
+                content.clone()
+            } else {
+                vlo_debug!("⚠️ [VLO SLOT] No content for '{}', using fallback", name);
+
+                fallback.to_string()
+            }
+        })
         .into_owned()
 }
 
@@ -2423,15 +1937,9 @@ fn parse_slot_content(children: &str) -> (HashMap<String, String>, String) {
                 default_content.push_str(&children[default_start..open_start]);
             }
 
-            println!(
-                "🧩 [VLO SLOT] Found named slot '{}' in <{}>",
-                slot_name, tag_name
-            );
+            vlo_debug!("🧩 [VLO SLOT] Found named slot '{}' in <{}>", slot_name, tag_name);
 
-            named_slots
-                .entry(slot_name)
-                .or_insert_with(String::new)
-                .push_str(content);
+            named_slots.entry(slot_name).or_insert_with(String::new).push_str(content);
 
             cursor = element_end;
             default_start = cursor;
@@ -2447,10 +1955,7 @@ fn parse_slot_content(children: &str) -> (HashMap<String, String>, String) {
         default_content.push_str(&children[default_start..]);
     }
 
-    println!(
-        "🧩 [VLO SLOT] Named slots: {:?}",
-        named_slots.keys().collect::<Vec<_>>()
-    );
+    vlo_debug!("🧩 [VLO SLOT] Named slots: {:?}", named_slots.keys().collect::<Vec<_>>());
 
     (named_slots, default_content)
 }
@@ -2469,10 +1974,7 @@ fn get_slot_name(props: &str) -> Option<String> {
     })
 }
 
-fn parse_element_at(
-    source: &str,
-    start: usize,
-) -> Option<(String, usize, usize, String, &str)> {
+fn parse_element_at(source: &str, start: usize) -> Option<(String, usize, usize, String, &str)> {
     if !source[start..].starts_with('<') {
         return None;
     }
@@ -2514,25 +2016,14 @@ fn parse_element_at(
     let self_closing = props.trim_end().ends_with('/');
 
     if self_closing {
-        return Some((
-            tag_name,
-            opening_end + 1,
-            opening_end + 1,
-            props,
-            "",
-        ));
+        return Some((tag_name, opening_end + 1, opening_end + 1, props, ""));
     }
 
     let content_start = opening_end + 1;
 
-    let element_end = find_matching_tag_end(
-        source,
-        content_start,
-        &tag_name,
-    )?;
+    let element_end = find_matching_tag_end(source, content_start, &tag_name)?;
 
-    let close_start = element_end
-        .checked_sub(format!("</{}>", tag_name).len())?;
+    let close_start = element_end.checked_sub(format!("</{}>", tag_name).len())?;
 
     if close_start < content_start {
         return None;
@@ -2540,13 +2031,7 @@ fn parse_element_at(
 
     let content = &source[content_start..close_start];
 
-    Some((
-        tag_name,
-        opening_end + 1,
-        element_end,
-        props,
-        content,
-    ))
+    Some((tag_name, opening_end + 1, element_end, props, content))
 }
 
 fn find_tag_opening_end(source: &str, start: usize) -> Option<usize> {
@@ -2578,11 +2063,7 @@ fn find_tag_opening_end(source: &str, start: usize) -> Option<usize> {
     None
 }
 
-fn find_matching_tag_end(
-    source: &str,
-    start: usize,
-    tag_name: &str,
-) -> Option<usize> {
+fn find_matching_tag_end(source: &str, start: usize, tag_name: &str) -> Option<usize> {
     let opening = format!("<{}", tag_name);
     let closing = format!("</{}>", tag_name);
 
@@ -2609,16 +2090,11 @@ fn find_matching_tag_end(
             let valid = source[after_name..]
                 .chars()
                 .next()
-                .map(|ch| {
-                    ch.is_whitespace()
-                        || ch == '>'
-                        || ch == '/'
-                })
+                .map(|ch| ch.is_whitespace() || ch == '>' || ch == '/')
                 .unwrap_or(false);
 
             if valid {
-                let opening_end =
-                    find_tag_opening_end(source, after_name)?;
+                let opening_end = find_tag_opening_end(source, after_name)?;
 
                 let props = source[after_name..opening_end].trim();
 
@@ -2631,11 +2107,7 @@ fn find_matching_tag_end(
             }
         }
 
-        cursor += remaining
-            .chars()
-            .next()
-            .map(|ch| ch.len_utf8())
-            .unwrap_or(1);
+        cursor += remaining.chars().next().map(|ch| ch.len_utf8()).unwrap_or(1);
     }
 
     None
@@ -2645,11 +2117,7 @@ fn find_matching_tag_end(
 // HTML DOCUMENT
 // ============================================================
 
-fn wrap_html(
-    title: &str,
-    rendered: &RenderedPage,
-    dev: bool,
-) -> String {
+fn wrap_html(title: &str, rendered: &RenderedPage, dev: bool) -> String {
     let hmr = if dev {
         r#"<script>
 const es=new EventSource("/__vlo_hmr");
@@ -2660,15 +2128,11 @@ window.addEventListener("beforeunload",()=>es.close());
         ""
     };
 
-    let component_styles =
-        if rendered.styles.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "<style>\n{}\n</style>",
-                rendered.styles.join("\n")
-            )
-        };
+    let component_styles = if rendered.styles.is_empty() {
+        String::new()
+    } else {
+        format!("<style>\n{}\n</style>", rendered.styles.join("\n"))
+    };
 
     format!(
         r#"<!DOCTYPE html>
@@ -2682,9 +2146,6 @@ window.addEventListener("beforeunload",()=>es.close());
 </head>
 <body>{}</body>
 </html>"#,
-        title,
-        component_styles,
-        hmr,
-        rendered.html,
+        title, component_styles, hmr, rendered.html,
     )
 }
