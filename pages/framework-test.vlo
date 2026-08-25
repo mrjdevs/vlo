@@ -14,6 +14,128 @@
             <Badge text="Info Badge" variant="info" />
         </div>
     </Card>
+    <h2>VLO 0.5.0 Slot Test</h2>
+
+    <SlotCard>
+        <div slot="header">Custom Header</div>
+
+        <p>This is the default slot content.</p>
+
+        <div slot="footer">
+            Custom Footer
+        </div>
+    </SlotCard>
+
+<hr/>
+```vlo
+<SlotCard>
+    <div slot="header" class="slot-header-content">
+        <div class="header-main">
+            <Badge text="Featured" />
+            <h2>Advanced Slot Test</h2>
+        </div>
+
+        <div class="header-actions">
+            <Button text="Primary Action" />
+            <Button text="Secondary Action" />
+        </div>
+
+        <p>
+            This header contains multiple elements and nested components.
+        </p>
+    </div>
+
+    <section class="content-wrapper">
+        <h3>Default Slot Content</h3>
+
+        <p>
+            This paragraph belongs to the default slot and should appear
+            between the named header and footer slots.
+        </p>
+
+        <div class="content-grid">
+            <Card>
+                <h4>First Card</h4>
+                <p>Nested card inside the default slot.</p>
+
+                <Button text="Card Action" />
+            </Card>
+
+            <Card>
+                <h4>Second Card</h4>
+                <p>Another nested component inside default content.</p>
+
+                <Badge text="Nested Badge" />
+                <Button text="Another Action" />
+            </Card>
+        </div>
+
+        <div class="form-section">
+            <label>User Information</label>
+
+            <Input
+                type="text"
+                name="username"
+                placeholder="Enter username"
+            />
+
+            <Input
+                type="email"
+                name="email"
+                placeholder="Enter email"
+            />
+
+            <div class="form-actions">
+                <Button text="Save" />
+                <Button text="Cancel" />
+            </div>
+        </div>
+
+        <Alert>
+            <strong>Important:</strong>
+            This alert is nested inside the default slot.
+        </Alert>
+
+        <div class="nested-content">
+            <h4>Deeply Nested Content</h4>
+
+            <div>
+                <p>Level 1</p>
+
+                <div>
+                    <p>Level 2</p>
+
+                    <div>
+                        <p>Level 3</p>
+                        <Badge text="Deep Badge" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div slot="footer" class="slot-footer-content">
+        <div class="footer-info">
+            <Badge text="Status: Active" />
+            <span>Footer information</span>
+        </div>
+
+        <div class="footer-actions">
+            <Button text="Back" />
+            <Button text="Reset" />
+            <Button text="Continue" />
+        </div>
+
+        <p>
+            Footer can contain multiple elements, text, and components.
+        </p>
+    </div>
+</SlotCard>
+
+<hr />
+```
+
+<hr/>
 
     <Card title="Input Component" description="Testing input props and classes.">
         <Input type="text" placeholder="VLO Input Component" class="test-input" />

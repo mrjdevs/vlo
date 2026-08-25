@@ -1,6 +1,13 @@
-<div class="vlo-alert {{variant}} {{class}}">
+<div class="vlo-alert {{type}}">
+    {{#if title}}
     <strong>{{title}}</strong>
-    <p>{{description}}</p>
+    {{/if}}
+
+    {{#if message}}
+    <p>{{message}}</p>
+    {{/if}}
+
+    {{children}}
 </div>
 
 <style>

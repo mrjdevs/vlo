@@ -1,0 +1,26 @@
+<div class="slot-card">
+    <div class="slot-header">
+        <slot name="header">
+            Default Header
+        </slot>
+    </div>
+
+    <div class="slot-body">
+        <slot>
+            Default Body
+        </slot>
+    </div>
+
+    <div class="slot-footer">
+        <slot name="footer">
+            Default Footer
+        </slot>
+    </div>
+</div>
+
+<style>
+.slot-card{background:#111;border:1px solid #333;border-radius:10px;padding:20px;margin:20px 0;color:#eee}
+.slot-header{color:#00f5ff;font-size:1.2rem;font-weight:bold;margin-bottom:15px}
+.slot-body{padding:15px 0}
+.slot-footer{border-top:1px solid #333;padding-top:15px;color:#aaa}
+</style>
