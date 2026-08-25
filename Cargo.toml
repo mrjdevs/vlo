@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 axum = "0.7"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync"] }
 clap = { version = "4", features = ["derive"] }
 notify = "6"
 tower-http = { version = "0.5", features = ["fs"] }
@@ -14,3 +14,22 @@ async-stream = "0.3"
 regex = "1.10"
 serde_json = "1.0.151"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+
+# Performance optimizations
+parking_lot = "0.12"
+rustc-hash = "2"
+r2d2 = "0.8"                          # ← keep r2d2 (the pool framework)
+# r2d2_sqlite = "0.24"                # ← REMOVED (causes the conflict)
+memchr = "2"
+v_htmlescape = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+lru = "0.12"
+rayon = "1.10"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
