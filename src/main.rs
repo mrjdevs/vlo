@@ -1388,11 +1388,10 @@ fn read_component_template(path: &Path) -> Option<Arc<CompiledTemplate>> {
 // COMPONENT TAG PARSER
 // ============================================================
 
-fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> {
+fn find_tag<'a>(source: &'a str, name: &str) -> Option<(usize, usize, &'a str, &'a str)> {
     let open = format!("<{}", name);
 
     let start = source.find(&open)?;
-
     let mut index = start + open.len();
 
     let next = source[index..].chars().next()?;
@@ -1402,44 +1401,33 @@ fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> 
     }
 
     let props_start = index;
-
     let mut quote = None;
     let mut open_end = None;
 
     for (offset, character) in source[index..].char_indices() {
         match quote {
-            Some(current) if character == current => {
-                quote = None;
-            }
-
-            None if character == '"' || character == '\'' => {
-                quote = Some(character);
-            }
-
+            Some(current) if character == current => quote = None,
+            None if character == '"' || character == '\'' => quote = Some(character),
             None if character == '>' => {
                 open_end = Some(index + offset);
                 break;
             }
-
             _ => {}
         }
     }
 
     let open_end = open_end?;
-
-    let props = source[props_start..open_end].to_string();
-
+    let props = &source[props_start..open_end];
     let self_closing = props.trim_end().ends_with('/');
 
     index = open_end + 1;
 
     if self_closing {
-        return Some((start, index, props, String::new()));
+        return Some((start, index, props, &source[index..index]));
     }
 
     let close = format!("</{}>", name);
     let children_start = index;
-
     let mut depth = 1;
 
     while index < source.len() {
@@ -1447,7 +1435,6 @@ fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> 
 
         if remaining.starts_with(&open) {
             let after = index + open.len();
-
             let valid = source[after..]
                 .chars()
                 .next()
@@ -1461,7 +1448,12 @@ fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> 
             depth -= 1;
 
             if depth == 0 {
-                return Some((start, index + close.len(), props, source[children_start..index].to_string()));
+                return Some((
+                    start,
+                    index + close.len(),
+                    props,
+                    &source[children_start..index],
+                ));
             }
         }
 
@@ -1974,7 +1966,7 @@ fn get_slot_name(props: &str) -> Option<String> {
     })
 }
 
-fn parse_element_at(source: &str, start: usize) -> Option<(String, usize, usize, String, &str)> {
+fn parse_element_at<'a>(source: &'a str, start: usize) -> Option<(&'a str, usize, usize, &'a str, &'a str)> {
     if !source[start..].starts_with('<') {
         return None;
     }
@@ -2007,11 +1999,11 @@ fn parse_element_at(source: &str, start: usize) -> Option<(String, usize, usize,
         return None;
     }
 
-    let tag_name = source[tag_start..cursor].to_string();
+    let tag_name = &source[tag_start..cursor];
 
     let opening_end = find_tag_opening_end(source, cursor)?;
 
-    let props = source[cursor..opening_end].to_string();
+    let props = &source[cursor..opening_end];
 
     let self_closing = props.trim_end().ends_with('/');
 
@@ -2023,7 +2015,7 @@ fn parse_element_at(source: &str, start: usize) -> Option<(String, usize, usize,
 
     let element_end = find_matching_tag_end(source, content_start, &tag_name)?;
 
-    let close_start = element_end.checked_sub(format!("</{}>", tag_name).len())?;
+    let close_start = element_end.checked_sub(tag_name.len() + 3)?;
 
     if close_start < content_start {
         return None;
