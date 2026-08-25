@@ -142,6 +142,11 @@ struct CompiledTemplate {
 static TEMPLATE_CACHE: LazyLock<Mutex<HashMap<PathBuf, Arc<CompiledTemplate>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Parsed API definitions cache. The API file is read and parsed once per
+/// process, then reused for every request. Dev HMR clears it when pages change.
+static API_ACTIONS_CACHE: LazyLock<Mutex<Option<Arc<HashMap<String, String>>>>> =
+    LazyLock::new(|| Mutex::new(None));
+
 /// Debug logging toggle. The original slot/component tracing
 /// `println!`s are useful but were unconditionally on the hot
 /// path. Set `VLO_DEBUG=1` to re-enable them.
@@ -271,7 +276,13 @@ fn strip_server_block(content: &str) -> String {
 // VLO API DEFINITION LOADER
 // ============================================================
 
-fn load_api_actions() -> std::result::Result<HashMap<String, String>, String> {
+fn load_api_actions() -> std::result::Result<Arc<HashMap<String, String>>, String> {
+    if let Ok(cache) = API_ACTIONS_CACHE.lock() {
+        if let Some(actions) = cache.as_ref() {
+            return Ok(Arc::clone(actions));
+        }
+    }
+
     let file = get_project_root().join("pages/api/api.vlo");
 
     vlo_debug!("🔎 [VLO API] Loading: {}", file.display());
@@ -298,7 +309,7 @@ fn load_api_actions() -> std::result::Result<HashMap<String, String>, String> {
         .as_object()
         .ok_or_else(|| "API definitions must be a JSON object".to_string())?;
 
-    let mut actions = HashMap::new();
+    let mut actions = HashMap::with_capacity(object.len());
 
     for (name, value) in object {
         if let Some(sql) = value.as_str() {
@@ -306,7 +317,16 @@ fn load_api_actions() -> std::result::Result<HashMap<String, String>, String> {
         }
     }
 
+    let actions = Arc::new(actions);
+
     vlo_debug!("✅ [VLO API] Loaded {} actions", actions.len());
+
+    if let Ok(mut cache) = API_ACTIONS_CACHE.lock() {
+        if let Some(cached) = cache.as_ref() {
+            return Ok(Arc::clone(cached));
+        }
+        *cache = Some(Arc::clone(&actions));
+    }
 
     Ok(actions)
 }
@@ -455,6 +475,10 @@ fn watch_files(
                 // the cache was introduced.
                 if let Ok(mut cache) = TEMPLATE_CACHE.lock() {
                     cache.clear();
+                }
+
+                if let Ok(mut cache) = API_ACTIONS_CACHE.lock() {
+                    *cache = None;
                 }
 
                 let _ = tx.send(());
@@ -714,7 +738,7 @@ async fn api_route_handler(
                     StatusCode::OK,
                     Json(serde_json::json!({
                         "success": true,
-                        "actions": actions
+                        "actions": actions.as_ref()
                     })),
                 )
                     .into_response(),
@@ -959,6 +983,10 @@ fn prepare_sql(
     sql: &str,
     params: &serde_json::Map<String, Value>,
 ) -> rusqlite::Result<(String, Vec<rusqlite::types::Value>)> {
+    if !sql.contains("{{") {
+        return Ok((sql.to_string(), Vec::new()));
+    }
+
     let mut values = Vec::new();
 
     let prepared = SQL_PARAM_RE
@@ -1062,6 +1090,14 @@ fn row_to_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 // API / SQL EXECUTION
 // ============================================================
 
+#[inline]
+fn is_query_sql(sql: &str) -> bool {
+    let sql = sql.trim_start();
+    sql.get(..6).map(|v| v.eq_ignore_ascii_case("SELECT")).unwrap_or(false)
+        || sql.get(..6).map(|v| v.eq_ignore_ascii_case("PRAGMA")).unwrap_or(false)
+        || sql.get(..4).map(|v| v.eq_ignore_ascii_case("WITH")).unwrap_or(false)
+}
+
 fn execute_api_sql(
     conn: &mut Connection,
     sql: &str,
@@ -1085,12 +1121,10 @@ fn execute_api_sql(
             return Err(rusqlite::Error::InvalidParameterName(prepared_sql));
         }
 
-        let upper = prepared_sql.trim_start().to_uppercase();
-
         let params_ref: Vec<&dyn rusqlite::ToSql> =
             values.iter().map(|value| value as &dyn rusqlite::ToSql).collect();
 
-        if upper.starts_with("SELECT") || upper.starts_with("PRAGMA") || upper.starts_with("WITH") {
+        if is_query_sql(&prepared_sql) {
             let mut stmt = transaction.prepare(&prepared_sql)?;
 
             let rows = stmt.query_map(rusqlite::params_from_iter(params_ref), row_to_json)?;
