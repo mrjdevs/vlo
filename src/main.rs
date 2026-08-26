@@ -1248,6 +1248,20 @@ Back to Home
 }
 
 // ============================================================
+// STRIPE BLANK LINES
+// ============================================================
+fn strip_blank_lines(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    for line in html.lines() {
+        if !line.trim().is_empty() {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
+}
+
+// ============================================================
 // VLO PAGE PIPELINE
 // ============================================================
 
@@ -1260,11 +1274,10 @@ fn render_vlo(source: String) -> RenderedPage {
 
     let source = render_components(&source, &mut context);
 
-    context.html = source;
+    context.html = strip_blank_lines(&source);
 
     context
 }
-
 // ============================================================
 // VLO TAG RENDERING
 // ============================================================
