@@ -4,13 +4,11 @@
             Default Header
         </slot>
     </div>
-
     <div class="slot-body">
         <slot>
             Default Body
         </slot>
     </div>
-
     <div class="slot-footer">
         <slot name="footer">
             Default Footer

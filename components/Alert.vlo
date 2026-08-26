@@ -2,11 +2,9 @@
     {{#if title}}
     <strong>{{title}}</strong>
     {{/if}}
-
     {{#if message}}
     <p>{{message}}</p>
     {{/if}}
-
     {{children}}
 </div>
 

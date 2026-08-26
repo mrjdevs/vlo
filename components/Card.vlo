@@ -2,11 +2,9 @@
     {{#if title}}
     <h3>{{title}}</h3>
     {{/if}}
-
     {{#if description}}
     <p class="card-desc">{{description}}</p>
     {{/if}}
-
     {{children}}
 </div>
 
