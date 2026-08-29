@@ -28,11 +28,17 @@ use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
 
 // ============================================================
-// VLO CLI
+// VLO CLI DEFINITIONS & DOCUMENTATION
 // ============================================================
 
 #[derive(Parser)]
-#[command(name = "vlo", version, about = "VLO Web Framework")]
+#[command(
+    name = "vlo",
+    author = "VLO Team",
+    version,
+    about = "⚡ VLO - Ultra-fast, component-driven Web Framework powered by Rust & Axum",
+    long_about = "VLO combines component rendering, instant dynamic SQL APIs, hot module reloading (HMR), and simple static deployment into a single high-performance CLI framework."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -40,12 +46,473 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Dev,
+    /// Initialize a new VLO project with sample pages, layout, and database setup
+    #[command(name = "init", alias = "new")]
+    Init {
+        /// Project folder name or path (defaults to current directory '.')
+        #[arg(default_value = ".")]
+        name: String,
+
+        /// Database driver to setup (sqlite, postgres, mysql)
+        #[arg(short, long, default_value = "sqlite", value_parser = ["sqlite", "postgres", "mysql"])]
+        db: String,
+
+        /// Explicit database name or filename (e.g. custom_app.db or my_database)
+        #[arg(long = "db-name", alias = "db_name")]
+        db_name: Option<String>,
+
+        /// Disable initial database setup and configuration
+        #[arg(long)]
+        no_db: bool,
+    },
+
+    /// Start the local development server with Hot Module Reloading (HMR)
+    Dev {
+        /// Port to listen on (default: 3000)
+        #[arg(short, long, default_value = "3000")]
+        port: u16,
+
+        /// Host address to bind (default: 127.0.0.1)
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+    },
+
+    /// Build static HTML files and production assets for distribution
     Build,
+
+    /// Deploy the project to cloud hosting platforms (netlify, vercel, cloudflare, railway)
     Deploy {
-        #[arg(short, long, default_value = "netlify")]
+        /// Cloud provider target for deployment
+        #[arg(short, long, default_value = "netlify", value_parser = ["netlify", "vercel", "cloudflare", "pages", "railway"])]
         provider: String,
     },
+}
+
+// ============================================================
+// APPLICATION ENTRY
+// ============================================================
+
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Init {
+            ref name,
+            ref db,
+            ref db_name,
+            no_db,
+        } => {
+            init_project(name, db, db_name.as_deref(), no_db);
+        }
+        Commands::Dev { port, ref host } => {
+            init_db().await;
+            dev(host, port).await;
+        }
+        Commands::Build => {
+            init_db().await;
+            build();
+        }
+        Commands::Deploy { ref provider } => {
+            init_db().await;
+            deploy(provider).await;
+        }
+    }
+}
+
+// ============================================================
+// PROJECT BOILERPLATE GENERATOR (vlo init)
+// ============================================================
+
+fn init_project(name: &str, db_driver: &str, db_name_opt: Option<&str>, no_db: bool) {
+    let target_dir = if name == "." {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    } else {
+        PathBuf::from(name)
+    };
+
+    println!("⚡ Initializing VLO project in '{}'...", target_dir.display());
+
+    if target_dir != Path::new(".") && !target_dir.exists() {
+        fs::create_dir_all(&target_dir).expect("Failed to create project directory");
+    }
+
+    let pages_dir = target_dir.join("pages");
+    let api_dir = pages_dir.join("api");
+    let layouts_dir = target_dir.join("layouts");
+    let components_dir = target_dir.join("components");
+    let public_dir = target_dir.join("public");
+
+    fs::create_dir_all(&api_dir).ok();
+    fs::create_dir_all(&layouts_dir).ok();
+    fs::create_dir_all(&components_dir).ok();
+    fs::create_dir_all(&public_dir).ok();
+
+    // Priority for database naming: 1) explicit --db-name flag, 2) derived project folder name, 3) fallback app name
+    let db_name = match db_name_opt {
+        Some(custom) if !custom.trim().is_empty() => custom.trim().to_string(),
+        _ => {
+            let base_name = if name != "." {
+                Path::new(name)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("app")
+            } else {
+                "app"
+            };
+            let sanitized = base_name.replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_");
+            if db_driver == "sqlite" {
+                if sanitized.ends_with(".db") || sanitized.ends_with(".sqlite") {
+                    sanitized
+                } else {
+                    format!("{}.db", sanitized)
+                }
+            } else {
+                sanitized
+            }
+        }
+    };
+
+    // Create .env
+    let env_path = target_dir.join(".env");
+    if !env_path.exists() {
+        let env_content = if no_db {
+            "# Database disabled\n# DB_DRIVER=sqlite\n# DATABASE_URL=sqlite://app.db\n".to_string()
+        } else {
+            match db_driver.to_lowercase().as_str() {
+                "postgres" | "postgresql" => {
+                    format!("DB_DRIVER=postgres\nDATABASE_URL=postgres://postgres:password@localhost:5432/{}\n", db_name)
+                }
+                "mysql" => {
+                    format!("DB_DRIVER=mysql\nDATABASE_URL=mysql://root:password@localhost:3306/{}\n", db_name)
+                }
+                _ => {
+                    format!("DB_DRIVER=sqlite\nDATABASE_URL=sqlite://{}\n", db_name)
+                }
+            }
+        };
+        fs::write(&env_path, env_content).expect("Failed to write .env");
+    }
+
+    if !no_db && matches!(db_driver.to_lowercase().as_str(), "sqlite" | "") {
+        let db_file_path = target_dir.join(&db_name);
+        if !db_file_path.exists() {
+            fs::File::create(&db_file_path).ok();
+        }
+    }
+
+    // Create schema.sql with initial seed dummy data (3-5 items)
+    let schema_path = target_dir.join("schema.sql");
+    if !schema_path.exists() && !no_db {
+        let schema_sql = match db_driver.to_lowercase().as_str() {
+            "postgres" | "postgresql" => {
+                r#"CREATE TABLE IF NOT EXISTS items (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL
+);
+
+INSERT INTO items (title) VALUES ('⚡ Learn VLO Framework Architecture');
+INSERT INTO items (title) VALUES ('🛠️ Explore Component & Slot Composition');
+INSERT INTO items (title) VALUES ('🚀 Build Zero-Boilerplate Dynamic APIs');
+INSERT INTO items (title) VALUES ('📦 Deploy to Cloud Platforms in One Step');
+"#
+            }
+            "mysql" => {
+                r#"CREATE TABLE IF NOT EXISTS items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL
+);
+
+INSERT INTO items (title) VALUES 
+('⚡ Learn VLO Framework Architecture'),
+('🛠️ Explore Component & Slot Composition'),
+('🚀 Build Zero-Boilerplate Dynamic APIs'),
+('📦 Deploy to Cloud Platforms in One Step');
+"#
+            }
+            _ => {
+                r#"CREATE TABLE IF NOT EXISTS items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL
+);
+
+INSERT INTO items (title) VALUES ('⚡ Learn VLO Framework Architecture');
+INSERT INTO items (title) VALUES ('🛠️ Explore Component & Slot Composition');
+INSERT INTO items (title) VALUES ('🚀 Build Zero-Boilerplate Dynamic APIs');
+INSERT INTO items (title) VALUES ('📦 Deploy to Cloud Platforms in One Step');
+"#
+            }
+        };
+        fs::write(&schema_path, schema_sql).expect("Failed to write schema.sql");
+    }
+
+    // Create pages/api/api.vlo
+    let api_vlo_path = api_dir.join("api.vlo");
+    if !api_vlo_path.exists() {
+        let api_content = r#"<script server>
+{
+    "get_items": "SELECT * FROM items ORDER BY id DESC;",
+    "post_items": "INSERT INTO items (title) VALUES ({{title}});",
+    "put_items": "UPDATE items SET title = {{title}} WHERE id = {{id}};",
+    "delete_items": "DELETE FROM items WHERE id = {{id}};"
+}
+</script>"#;
+        fs::write(&api_vlo_path, api_content).expect("Failed to write api.vlo");
+    }
+
+    // Create layouts/BaseLayout.vlo
+    let layout_path = layouts_dir.join("BaseLayout.vlo");
+    if !layout_path.exists() {
+        let layout_content = r#"<div class="layout-container">
+    <header class="app-header">
+        <div class="brand">
+            <h1>⚡ {{title}}</h1>
+        </div>
+        <nav class="app-nav">
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+        </nav>
+    </header>
+
+    <main class="app-main">
+        <slot></slot>
+    </main>
+
+    <footer class="app-footer">
+        <p>Built with ⚡ <strong>VLO Web Framework</strong></p>
+    </footer>
+</div>
+
+<style>
+    .layout-container { max-width: 720px; margin: 0 auto; padding: 2.5rem 1.5rem; }
+    .app-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 1.25rem; margin-bottom: 2rem; }
+    .app-header h1 { font-size: 1.5rem; font-weight: 700; margin: 0; color: #f8fafc; }
+    .app-nav { display: flex; gap: 1.25rem; }
+    .app-nav a { color: #94a3b8; text-decoration: none; font-weight: 500; font-size: 0.95rem; transition: color 0.15s ease; }
+    .app-nav a:hover { color: #38bdf8; }
+    .app-main { min-height: 320px; }
+    .app-footer { border-top: 1px solid #334155; padding-top: 1.5rem; margin-top: 3rem; text-align: center; color: #64748b; font-size: 0.875rem; }
+    .app-footer strong { color: #cbd5e1; }
+</style>"#;
+        fs::write(&layout_path, layout_content).expect("Failed to write BaseLayout.vlo");
+    }
+
+    // Component 1: Card.vlo
+    let card_path = components_dir.join("Card.vlo");
+    if !card_path.exists() {
+        let card_content = r#"<div class="vlo-card">
+    <slot></slot>
+</div>
+
+<style>
+    .vlo-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); margin-bottom: 1.5rem; }
+</style>"#;
+        fs::write(&card_path, card_content).expect("Failed to write Card.vlo");
+    }
+
+    // Component 2: Badge.vlo
+    let badge_path = components_dir.join("Badge.vlo");
+    if !badge_path.exists() {
+        let badge_content = r#"<span class="vlo-badge">
+    <slot></slot>
+</span>
+
+<style>
+    .vlo-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.25rem 0.65rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border-radius: 9999px;
+        background: rgba(56, 189, 248, 0.15);
+        color: #38bdf8;
+        border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+</style>"#;
+        fs::write(&badge_path, badge_content).expect("Failed to write Badge.vlo");
+    }
+
+    // Create pages/home.vlo
+    let home_path = pages_dir.join("home.vlo");
+    if !home_path.exists() {
+        let home_content = r#"<BaseLayout title="VLO Dashboard">
+    <Card>
+        <div class="card-header">
+            <h2>Items (Live SQL CRUD)</h2>
+            <Badge>Connected to API</Badge>
+        </div>
+
+        <form onsubmit="addItem(event)" class="crud-form">
+            <input id="item-title" placeholder="Add new task or item..." required />
+            <button type="submit">+ Add</button>
+        </form>
+
+        <ul id="items-list">
+            <li class="empty">Loading data from database...</li>
+        </ul>
+    </Card>
+</BaseLayout>
+
+<script>
+    document.addEventListener("DOMContentLoaded", loadItems);
+
+    async function loadItems() {
+        const list = document.getElementById("items-list");
+        try {
+            const res = await fetch("/api/items");
+            const { data } = await res.json();
+            if (!data || !data.length) {
+                list.innerHTML = '<li class="empty">No items found in database. Add one above!</li>';
+                return;
+            }
+            list.innerHTML = data.map(item => `
+                <li>
+                    <span class="item-text" onclick="editItem(${item.id}, '${escapeJs(item.title)}')" title="Click to edit">
+                        ${escapeHtml(item.title)}
+                    </span>
+                    <button class="btn-del" onclick="deleteItem(${item.id})" title="Delete">✕</button>
+                </li>
+            `).join("");
+        } catch (e) {
+            list.innerHTML = '<li class="empty text-error">Failed to load items from API.</li>';
+        }
+    }
+
+    async function addItem(e) {
+        e.preventDefault();
+        const input = document.getElementById("item-title");
+        const title = input.value.trim();
+        if (!title) return;
+
+        await fetch("/api/items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title })
+        });
+        input.value = "";
+        loadItems();
+    }
+
+    async function editItem(id, currentTitle) {
+        const newTitle = prompt("Update item title:", currentTitle);
+        if (!newTitle || newTitle.trim() === currentTitle) return;
+
+        await fetch(`/api/items/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: newTitle.trim() })
+        });
+        loadItems();
+    }
+
+    async function deleteItem(id) {
+        if (!confirm("Are you sure you want to delete this item?")) return;
+        await fetch(`/api/items/${id}`, { method: "DELETE" });
+        loadItems();
+    }
+
+    function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function escapeJs(s) { return String(s).replace(/'/g, "\\'").replace(/"/g, '\\"'); }
+</script>
+
+<style>
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
+    .card-header h2 { font-size: 1.25rem; font-weight: 600; margin: 0; color: #f8fafc; }
+    
+    .crud-form { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; }
+    .crud-form input { flex: 1; padding: 0.625rem 0.875rem; background: #0f172a; border: 1px solid #334155; border-radius: 8px; font-size: 0.95rem; color: #f8fafc; outline: none; transition: border-color 0.15s; }
+    .crud-form input:focus { border-color: #38bdf8; }
+    .crud-form button { padding: 0.625rem 1.25rem; background: #38bdf8; color: #0f172a; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background-color 0.15s; }
+    .crud-form button:hover { background: #7dd3fc; }
+
+    #items-list { list-style: none; padding: 0; margin: 0; border: 1px solid #334155; border-radius: 8px; overflow: hidden; background: #0f172a; }
+    #items-list li { display: flex; justify-content: space-between; align-items: center; padding: 0.875rem 1rem; border-bottom: 1px solid #1e293b; color: #e2e8f0; }
+    #items-list li:last-child { border-bottom: none; }
+    
+    .item-text { cursor: pointer; flex: 1; font-size: 0.95rem; }
+    .item-text:hover { color: #38bdf8; text-decoration: underline; }
+    
+    .btn-del { background: transparent; border: none; color: #64748b; cursor: pointer; font-size: 0.95rem; padding: 0.25rem 0.5rem; border-radius: 4px; transition: all 0.15s; }
+    .btn-del:hover { color: #f87171; background: rgba(248, 113, 113, 0.1); }
+    
+    .empty { color: #64748b; text-align: center; font-size: 0.9rem; justify-content: center !important; }
+    .text-error { color: #f87171; }
+</style>"#;
+        fs::write(&home_path, home_content).expect("Failed to write home.vlo");
+    }
+
+    // Create pages/about.vlo
+    let about_path = pages_dir.join("about.vlo");
+    if !about_path.exists() {
+        let about_content = r#"<BaseLayout title="About VLO">
+    <Card>
+        <div class="card-header">
+            <h2>About This Framework</h2>
+            <Badge>v0.6.0</Badge>
+        </div>
+        <p>This application was scaffolded with ⚡ <strong>VLO</strong>, a high-performance component-driven Rust web framework.</p>
+        <p>Out of the box capabilities:</p>
+        <ul>
+            <li>Automatic file-based API endpoints (<code>/api/...</code>)</li>
+            <li>Zero-boilerplate multi-database dynamic SQL engines</li>
+            <li>Hot Module Replacement (HMR) for live developer feedback</li>
+            <li>Modular component architecture (<code>&lt;Card&gt;</code>, <code>&lt;Badge&gt;</code>, etc.)</li>
+        </ul>
+    </Card>
+</BaseLayout>
+
+<style>
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+    .card-header h2 { font-size: 1.25rem; font-weight: 600; margin: 0; color: #f8fafc; }
+    p { color: #cbd5e1; }
+    ul { color: #94a3b8; padding-left: 1.25rem; }
+    li { margin-bottom: 0.5rem; }
+</style>"#;
+        fs::write(&about_path, about_content).expect("Failed to write about.vlo");
+    }
+
+    // Create pages/404.vlo
+    let not_found_path = pages_dir.join("404.vlo");
+    if !not_found_path.exists() {
+        let not_found_content = r#"<BaseLayout title="404 - Not Found">
+    <Card>
+        <h2>404 - Page Not Found</h2>
+        <p>The page you are looking for does not exist.</p>
+        <a href="/">← Return to Home</a>
+    </Card>
+</BaseLayout>
+
+<style>
+    h2 { color: #f8fafc; margin-top: 0; }
+    p { color: #94a3b8; }
+</style>"#;
+        fs::write(&not_found_path, not_found_content).expect("Failed to write 404.vlo");
+    }
+
+    // Create public/style.css with sleek high-contrast dark theme defaults
+    let css_path = public_dir.join("style.css");
+    if !css_path.exists() {
+        let css_content = r#"*, *::before, *::after { box-sizing: border-box; }
+body {
+    margin: 0;
+    padding: 0;
+    background-color: #0f172a;
+    color: #f8fafc;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.6;
+}
+a { color: #38bdf8; text-decoration: none; }
+a:hover { text-decoration: underline; }"#;
+        fs::write(&css_path, css_content).expect("Failed to write style.css");
+    }
+
+    println!("✅ Project initialized successfully with database target '{}'!", db_name);
+    if name != "." {
+        println!("\nNext steps:\n  cd {}\n  vlo dev", name);
+    } else {
+        println!("\nNext steps:\n  vlo dev");
+    }
 }
 
 // ============================================================
@@ -82,14 +549,20 @@ async fn init_db() {
             DbPool::MySql(sqlx::MySqlPool::connect(&db_url).await.expect("Failed to connect to MySQL"))
         }
         _ => {
-            let pool = sqlx::SqlitePool::connect(&db_url).await.expect("Failed to connect to SQLite");
+            use std::str::FromStr;
+            let options = sqlx::sqlite::SqliteConnectOptions::from_str(&db_url)
+                .unwrap_or_else(|_| sqlx::sqlite::SqliteConnectOptions::new())
+                .create_if_missing(true);
+            let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                .connect_with(options)
+                .await
+                .expect("Failed to connect to SQLite");
             let _ = sqlx::query("PRAGMA foreign_keys = ON;").execute(&pool).await;
             let _ = sqlx::query("PRAGMA journal_mode = WAL;").execute(&pool).await;
             DbPool::Sqlite(pool)
         }
     };
 
-    // Apply schema once at startup
     let root = get_project_root();
     let schema_path = root.join("schema.sql");
     if schema_path.exists() {
@@ -105,13 +578,39 @@ async fn init_db() {
 
         for statement in sql.split(';') {
             let stmt = statement.trim();
-            if stmt.is_empty() {
+            if stmt.is_empty() || stmt.to_uppercase().starts_with("INSERT") {
                 continue;
             }
             match &pool {
                 DbPool::Sqlite(p) => { let _ = sqlx::query(stmt).execute(p).await; }
                 DbPool::Postgres(p) => { let _ = sqlx::query(stmt).execute(p).await; }
                 DbPool::MySql(p) => { let _ = sqlx::query(stmt).execute(p).await; }
+            }
+        }
+
+        let is_empty = match &pool {
+            DbPool::Sqlite(p) => {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM items").fetch_one(p).await.unwrap_or(0) == 0
+            }
+            DbPool::Postgres(p) => {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM items").fetch_one(p).await.unwrap_or(0) == 0
+            }
+            DbPool::MySql(p) => {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM items").fetch_one(p).await.unwrap_or(0) == 0
+            }
+        };
+
+        if is_empty {
+            for statement in sql.split(';') {
+                let stmt = statement.trim();
+                if stmt.is_empty() || !stmt.to_uppercase().starts_with("INSERT") {
+                    continue;
+                }
+                match &pool {
+                    DbPool::Sqlite(p) => { let _ = sqlx::query(stmt).execute(p).await; }
+                    DbPool::Postgres(p) => { let _ = sqlx::query(stmt).execute(p).await; }
+                    DbPool::MySql(p) => { let _ = sqlx::query(stmt).execute(p).await; }
+                }
             }
         }
     }
@@ -145,7 +644,8 @@ static ELEMENT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<([a-zA-Z
 static CONDITIONAL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?is)\{\{\#if\s+([a-zA-Z0-9_-]+)\s*\}\}(.*?)\{\{/if\}\}"#).unwrap());
 static PROP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{\{\s*([a-zA-Z0-9_-]+)\s*\}\}").unwrap());
 static CLASS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)\bclass\s*=\s*("([^"]*)"|'([^']*)')"#).unwrap());
-static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?is)<slot(?:\s+name\s*=\s*["']([^"']+)["'])?\s*>(.*?)</slot>"#).unwrap());
+
+static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?is)<slot(?:\s+name\s*=\s*["']([^"']+)["'])?\s*(?:/>|>(.*?)</slot>|>)"#).unwrap());
 static SQL_PARAM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{{1,2}\s*([a-zA-Z0-9_-]+)\s*\}{1,2}").unwrap());
 
 #[derive(Debug)]
@@ -177,26 +677,12 @@ impl RenderedPage {
     }
 }
 
-// ============================================================
-// APPLICATION ENTRY
-// ============================================================
-
-#[tokio::main]
-async fn main() {
-    init_db().await;
-    match Cli::parse().command {
-        Commands::Dev => dev().await,
-        Commands::Build => build(),
-        Commands::Deploy { provider } => deploy(&provider).await,
-    }
-}
-
 fn get_project_root() -> PathBuf {
     PROJECT_ROOT.clone()
 }
 
 // ============================================================
-// VLO SERVER BLOCK
+// VLO SERVER BLOCK & API DEFINITIONS
 // ============================================================
 
 fn extract_server_block(content: &str) -> Option<String> {
@@ -215,10 +701,6 @@ fn strip_server_block(content: &str) -> String {
     }
     content.to_string()
 }
-
-// ============================================================
-// VLO API DEFINITION LOADER
-// ============================================================
 
 fn load_api_actions() -> Result<HashMap<String, String>, String> {
     let file = get_project_root().join("pages/api/api.vlo");
@@ -247,7 +729,7 @@ fn load_api_actions() -> Result<HashMap<String, String>, String> {
 // DEVELOPMENT SERVER
 // ============================================================
 
-async fn dev() {
+async fn dev(host: &str, port: u16) {
     let root = get_project_root();
     let pages_path = root.join("pages");
     let public_path = root.join("public");
@@ -270,9 +752,9 @@ async fn dev() {
         .nest_service("/static", ServeDir::new(public_path_service))
         .fallback(not_found_handler);
 
-    let host = std::env::var("VLO_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let port = std::env::var("VLO_PORT").unwrap_or_else(|_| "3000".to_string());
-    let addr = format!("{}:{}", host, port);
+    let host_str = std::env::var("VLO_HOST").unwrap_or_else(|_| host.to_string());
+    let port_str = std::env::var("VLO_PORT").unwrap_or_else(|_| port.to_string());
+    let addr = format!("{}:{}", host_str, port_str);
 
     let listener = tokio::net::TcpListener::bind(&addr).await.expect("Failed to bind port");
     println!("⚡ VLO dev server running at http://{}", addr);
@@ -301,14 +783,25 @@ async fn hmr_handler(tx: broadcast::Sender<()>) -> Sse<impl Stream<Item = Result
 }
 
 fn watch_files(pages: PathBuf, public: PathBuf, tx: broadcast::Sender<()>, last: Arc<Mutex<Instant>>) -> notify::Result<()> {
+    let root = get_project_root();
+    let layouts = root.join("layouts");
+    let components = root.join("components");
+
     let (tx_notify, rx) = channel();
     let mut watcher = RecommendedWatcher::new(tx_notify, Config::default())?;
     if pages.exists() { watcher.watch(&pages, RecursiveMode::Recursive)?; }
     if public.exists() { watcher.watch(&public, RecursiveMode::Recursive)?; }
+    if layouts.exists() { watcher.watch(&layouts, RecursiveMode::Recursive)?; }
+    if components.exists() { watcher.watch(&components, RecursiveMode::Recursive)?; }
 
     for result in rx {
         let Ok(event) = result else { continue; };
-        let relevant = event.paths.iter().any(|path| path.extension().and_then(|e| e.to_str()) == Some("vlo") || path.starts_with(&public));
+        let relevant = event.paths.iter().any(|path| {
+            path.extension().and_then(|e| e.to_str()) == Some("vlo")
+                || path.starts_with(&public)
+                || path.starts_with(&layouts)
+                || path.starts_with(&components)
+        });
         if !relevant { continue; }
 
         if let Ok(mut timestamp) = last.try_lock() {
@@ -818,8 +1311,15 @@ fn render_vlo(source: String) -> RenderedPage {
     }
     source = STYLE_RE.replace_all(&source, "").into_owned();
 
-    let source = render_tag(&source, "BaseLayout", &mut context);
-    let source = render_components(&source, &mut context);
+    for _ in 0..20 {
+        let previous = source.clone();
+        source = render_tag(&source, "BaseLayout", &mut context);
+        source = render_components(&source, &mut context);
+        if source == previous {
+            break;
+        }
+    }
+
     context.html = strip_blank_lines(&source);
     context
 }
@@ -926,26 +1426,6 @@ fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> 
 // ============================================================
 // COMPONENT FILE RENDERER
 // ============================================================
-//
-// FIX (CSS not applying, part 1): the root-element regex match
-// was previously computed against a style-stripped *copy* of
-// `rendered` (`body_template`) but then used to slice the
-// *original* `rendered` string. Those two strings can differ in
-// length whenever a slot carries a literal <style> block
-// through, which silently corrupts the offsets and mangles the
-// output around the root tag. We now only use the stripped copy
-// to decide whether to skip attribute injection (root is a
-// <style>/<script> tag), and match/slice `rendered` directly for
-// everything else.
-//
-// FIX (CSS not applying, part 2): an incoming `class` prop is no
-// longer forwarded as a second `class="..."` attribute next to
-// whatever class the component template already hardcodes. Two
-// `class` attributes on one element is invalid HTML, and
-// browsers only honor the first one — so any class passed in
-// from the page was silently dropped. `class` is now merged into
-// the template's existing class value instead.
-// ============================================================
 
 fn render_component_file(name: &str, props_str: &str, children: &str, context: &mut RenderedPage) -> String {
     let path = match component_path(name) {
@@ -977,8 +1457,6 @@ fn render_component_file(name: &str, props_str: &str, children: &str, context: &
     let rendered = render_component_template(template, &props);
     let rendered = render_slots(&rendered, &named_slots, &default_slot);
 
-    // `class` is merged separately below, so it must not also be
-    // treated as a generic forwarded attribute.
     let incoming_class = props.get("class").cloned();
     let attributes = build_component_attributes(template, &props);
 
@@ -986,10 +1464,6 @@ fn render_component_file(name: &str, props_str: &str, children: &str, context: &
         return rendered;
     }
 
-    // Decide whether to skip attribute injection entirely (root
-    // element is a <style>/<script> tag) using a style-stripped
-    // copy, but never slice `rendered` with offsets taken from
-    // that copy.
     let skip_check = STYLE_RE.replace_all(&rendered, "");
     if let Some(first_tag) = ELEMENT_RE.captures(&skip_check).and_then(|c| c.get(1)).map(|m| m.as_str().to_string()) {
         if first_tag.eq_ignore_ascii_case("style") || first_tag.eq_ignore_ascii_case("script") {
@@ -1002,9 +1476,6 @@ fn render_component_file(name: &str, props_str: &str, children: &str, context: &
         let tag_name = captures.get(1).unwrap().as_str();
         let existing_attributes = captures.get(2).map(|v| v.as_str()).unwrap_or("").to_string();
 
-        // Merge an incoming `class` prop with any class already
-        // hardcoded on the root element instead of emitting a
-        // second class="" attribute.
         let (existing_attributes, class_attr) = if let Some(extra) = incoming_class.as_deref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
             if let Some(m) = CLASS_RE.captures(&existing_attributes) {
                 let existing_value = m.get(2).or_else(|| m.get(3)).map(|v| v.as_str()).unwrap_or("").trim();
@@ -1091,10 +1562,6 @@ fn build_component_attributes(template: &str, props: &HashMap<String, String>) -
 
     if button_default && !props.contains_key("type") && !used.contains("type") { attributes.push("type=\"button\"".to_string()); }
     for (key, value) in props {
-        // "children"/"attributes" are internal VLO plumbing.
-        // "class" is merged separately in render_component_file
-        // rather than forwarded here, to avoid emitting a second
-        // class="" attribute alongside the template's own class.
         if key == "children" || key == "attributes" || key == "class" { continue; }
         if used.contains(key) { continue; }
         if is_boolean_attribute(key) {
@@ -1153,15 +1620,20 @@ fn parse_props(raw: &str) -> HashMap<String, String> {
 
 fn render_slots(template: &str, named_slots: &HashMap<String, String>, default_slot: &str) -> String {
     vlo_debug!("🎯 [VLO SLOT] Rendering slots: {:?}, default_len={}", named_slots.keys().collect::<Vec<_>>(), default_slot.len());
-    SLOT_RE.replace_all(template, |captures: &regex::Captures| {
+    let res = SLOT_RE.replace_all(template, |captures: &regex::Captures| {
         let name = captures.get(1).map(|v| v.as_str().trim()).unwrap_or("");
         let fallback = captures.get(2).map(|v| v.as_str()).unwrap_or("");
         vlo_debug!("🔎 [VLO SLOT] Template slot requested: '{}'", name);
         if name.is_empty() {
             if default_slot.trim().is_empty() { fallback.to_string() } else { default_slot.to_string() }
-        } else if let Some(content) = named_slots.get(name) { content.clone() }
-        else { fallback.to_string() }
-    }).into_owned()
+        } else if let Some(content) = named_slots.get(name) {
+            content.clone()
+        } else {
+            fallback.to_string()
+        }
+    }).into_owned();
+
+    SLOT_RE.replace_all(&res, "").into_owned()
 }
 
 fn parse_slot_content(children: &str) -> (HashMap<String, String>, String) {
@@ -1196,11 +1668,14 @@ fn parse_slot_content(children: &str) -> (HashMap<String, String>, String) {
 }
 
 fn get_slot_name(props: &str) -> Option<String> {
-    let props = parse_props(props);
-    props.get("slot").and_then(|value| {
-        let value = value.trim();
-        if value.is_empty() { None } else { Some(value.to_string()) }
-    })
+    parse_props(props).get("slot").cloned()
+}
+
+fn is_void_tag(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "area" | "base" | "br" | "col" | "embed" | "hr" | "img" | "input" | "link" | "meta" | "param" | "source" | "track" | "wbr"
+    )
 }
 
 fn parse_element_at(source: &str, start: usize) -> Option<(String, usize, usize, String, &str)> {
@@ -1219,7 +1694,7 @@ fn parse_element_at(source: &str, start: usize) -> Option<(String, usize, usize,
     let tag_name = source[tag_start..cursor].to_string();
     let opening_end = find_tag_opening_end(source, cursor)?;
     let props = source[cursor..opening_end].to_string();
-    let self_closing = props.trim_end().ends_with('/');
+    let self_closing = props.trim_end().ends_with('/') || is_void_tag(&tag_name);
     if self_closing { return Some((tag_name, opening_end + 1, opening_end + 1, props, "")); }
     let content_start = opening_end + 1;
     let element_end = find_matching_tag_end(source, content_start, &tag_name)?;
@@ -1277,16 +1752,7 @@ fn find_matching_tag_end(source: &str, start: usize, tag_name: &str) -> Option<u
 }
 
 // ============================================================
-// HTML DOCUMENT
-// ============================================================
-//
-// FIX (CSS not applying, part 3): the <link rel="stylesheet"
-// href="/static/style.css"> (and favicon <link>) had been
-// dropped from this function. That meant every rule defined in
-// public/style.css — base styles, resets, layout — was never
-// loaded by the browser; only the inline <style> blocks scraped
-// out of individual .vlo components were showing up. Restored
-// both links below.
+// HTML DOCUMENT WRAPPER
 // ============================================================
 
 fn wrap_html(title: &str, rendered: &RenderedPage, dev: bool) -> String {
