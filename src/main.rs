@@ -27,10 +27,6 @@ use std::{
 use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
 
-// ============================================================
-// VLO CLI DEFINITIONS & DOCUMENTATION
-// ============================================================
-
 #[derive(Parser)]
 #[command(
     name = "vlo",
@@ -50,7 +46,12 @@ enum Commands {
     Init {
         #[arg(default_value = ".")]
         name: String,
-        #[arg(short, long, default_value = "sqlite", value_parser = ["sqlite", "postgres", "mysql"])]
+        #[arg(
+            short,
+            long,
+            default_value = "sqlite",
+            value_parser = ["sqlite", "postgres", "mysql"]
+        )]
         db: String,
         #[arg(long = "db-name", alias = "db_name")]
         db_name: Option<String>,
@@ -65,20 +66,27 @@ enum Commands {
     },
     Build,
     Deploy {
-        #[arg(short, long, default_value = "netlify", value_parser = ["netlify", "vercel", "cloudflare", "pages", "railway"])]
+        #[arg(
+            short,
+            long,
+            default_value = "netlify",
+            value_parser = ["netlify", "vercel", "cloudflare", "pages", "railway"]
+        )]
         provider: String,
     },
 }
 
-// ============================================================
-// APPLICATION ENTRY
-// ============================================================
-
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+
     match cli.command {
-        Commands::Init { ref name, ref db, ref db_name, no_db } => {
+        Commands::Init {
+            ref name,
+            ref db,
+            ref db_name,
+            no_db,
+        } => {
             init_project(name, db, db_name.as_deref(), no_db);
         }
         Commands::Dev { port, ref host } => {
@@ -96,158 +104,115 @@ async fn main() {
     }
 }
 
-// ============================================================
-// PROJECT BOILERPLATE GENERATOR (vlo init)
-// ============================================================
+static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
+    let mut starts = Vec::new();
 
-fn init_project(name: &str, db_driver: &str, db_name_opt: Option<&str>, no_db: bool) {
-    let target_dir = if name == "." {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    } else {
-        PathBuf::from(name)
-    };
-
-    println!("⚡ Initializing VLO v0.7 project in '{}'...", target_dir.display());
-    if target_dir != Path::new(".") && !target_dir.exists() {
-        fs::create_dir_all(&target_dir).expect("Failed to create project directory");
+    if let Ok(dir) = std::env::current_dir() {
+        starts.push(dir);
     }
 
-    let pages_dir = target_dir.join("pages");
-    let api_dir = pages_dir.join("api");
-    let layouts_dir = target_dir.join("layouts");
-    let components_dir = target_dir.join("components");
-    let public_dir = target_dir.join("public");
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            starts.push(parent.to_path_buf());
+        }
+    }
 
-    fs::create_dir_all(&api_dir).ok();
-    fs::create_dir_all(&layouts_dir).ok();
-    fs::create_dir_all(&components_dir).ok();
-    fs::create_dir_all(&public_dir).ok();
+    starts.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
 
-    let db_name = match db_name_opt {
-        Some(custom) if !custom.trim().is_empty() => custom.trim().to_string(),
-        _ => {
-            let base_name = if name != "." {
-                Path::new(name).file_name().and_then(|n| n.to_str()).unwrap_or("app")
-            } else { "app" };
-            let sanitized = base_name.replace(|c: char| !c.is_alphanumeric() && c != '_' && c != '-', "_");
-            if db_driver == "sqlite" {
-                if sanitized.ends_with(".db") || sanitized.ends_with(".sqlite") { sanitized } else { format!("{}.db", sanitized) }
-            } else { sanitized }
+    for start in starts {
+        let mut dir = start;
+
+        loop {
+            if dir.join("pages").exists() {
+                return dir;
+            }
+
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+});
+
+fn get_project_root() -> PathBuf {
+    PROJECT_ROOT.clone()
+}
+
+static STYLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>(.*?)</style>").unwrap());
+
+static ELEMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>").unwrap());
+
+static PROP_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{\s*([a-zA-Z0-9_@.-]+)\s*\}\}").unwrap());
+
+static CLASS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)\bclass\s*=\s*("([^"]*)"|'([^']*)')"#).unwrap());
+
+static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?is)<slot(?:\s+name\s*=\s*["']([^"']+)["'])?\s*(?:/>|>(.*?)</slot>|>)"#,
+    )
+    .unwrap()
+});
+
+static SQL_PARAM_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{{1,2}\s*([a-zA-Z0-9_-]+)\s*\}{1,2}").unwrap());
+
+#[derive(Debug)]
+struct CompiledTemplate {
+    template: String,
+    css: String,
+}
+
+static TEMPLATE_CACHE: LazyLock<Mutex<HashMap<PathBuf, Arc<CompiledTemplate>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static VLO_DEBUG: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("VLO_DEBUG")
+        .map(|value| env_bool_from_value(&value))
+        .unwrap_or(false)
+});
+
+fn env_bool_from_value(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+macro_rules! vlo_debug {
+    ($($arg:tt)*) => {
+        if *VLO_DEBUG {
+            println!($($arg)*);
         }
     };
-
-    let env_path = target_dir.join(".env");
-    if !env_path.exists() {
-        let env_content = if no_db {
-            "# Database disabled\n# DB_DRIVER=sqlite\n# DATABASE_URL=sqlite://app.db\n".to_string()
-        } else {
-            match db_driver.to_lowercase().as_str() {
-                "postgres" | "postgresql" => format!("DB_DRIVER=postgres\nDATABASE_URL=postgres://postgres:password@localhost:5432/{}\n", db_name),
-                "mysql" => format!("DB_DRIVER=mysql\nDATABASE_URL=mysql://root:password@localhost:3306/{}\n", db_name),
-                _ => format!("DB_DRIVER=sqlite\nDATABASE_URL=sqlite://{}\n", db_name),
-            }
-        };
-        fs::write(&env_path, env_content).expect("Failed to write .env");
-    }
-
-    if !no_db && matches!(db_driver.to_lowercase().as_str(), "sqlite" | "") {
-        let db_file_path = target_dir.join(&db_name);
-        if !db_file_path.exists() { fs::File::create(&db_file_path).ok(); }
-    }
-
-    let schema_path = target_dir.join("schema.sql");
-    if !schema_path.exists() && !no_db {
-        let schema_sql = match db_driver.to_lowercase().as_str() {
-            "postgres" | "postgresql" => r#"CREATE TABLE IF NOT EXISTS items (id SERIAL PRIMARY KEY, title TEXT NOT NULL);
-INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ Explore Component Composition'), ('🚀 Build Zero-Boilerplate APIs');"#,
-            "mysql" => r#"CREATE TABLE IF NOT EXISTS items (id INT AUTO_INCREMENT PRIMARY KEY, title VARCHAR(255) NOT NULL);
-INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ Explore Component Composition'), ('🚀 Build Zero-Boilerplate APIs');"#,
-            _ => r#"CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL);
-INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ Explore Component Composition'), ('🚀 Build Zero-Boilerplate APIs');"#,
-        };
-        fs::write(&schema_path, schema_sql).expect("Failed to write schema.sql");
-    }
-
-    let api_vlo_path = api_dir.join("api.vlo");
-    if !api_vlo_path.exists() {
-        fs::write(&api_vlo_path, r#"<script server>
-{
-    "get_items": "SELECT * FROM items ORDER BY id DESC;",
-    "post_items": "INSERT INTO items (title) VALUES ({{title}});",
-    "put_items": "UPDATE items SET title = {{title}} WHERE id = {{id}};",
-    "delete_items": "DELETE FROM items WHERE id = {{id}};"
-}
-</script>"#).expect("Failed to write api.vlo");
-    }
-
-    let layout_path = layouts_dir.join("BaseLayout.vlo");
-    if !layout_path.exists() {
-        fs::write(&layout_path, r#"<div class="layout-container">
-    <header class="app-header"><div class="brand"><h1>⚡ {{title}}</h1></div>
-    <nav class="app-nav"><a href="/">Home</a><a href="/about">About</a></nav></header>
-    <main class="app-main"><slot></slot></main>
-    <footer class="app-footer"><p>Built with ⚡ <strong>VLO v0.7</strong></p></footer>
-</div>
-<style>
-    .layout-container { max-width: 720px; margin: 0 auto; padding: 2.5rem 1.5rem; }
-    .app-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 1.25rem; margin-bottom: 2rem; }
-    .app-header h1 { font-size: 1.5rem; font-weight: 700; margin: 0; color: #f8fafc; }
-    .app-nav { display: flex; gap: 1.25rem; }
-    .app-nav a { color: #94a3b8; text-decoration: none; font-weight: 500; transition: color 0.15s ease; }
-    .app-nav a:hover { color: #38bdf8; }
-    .app-main { min-height: 320px; }
-    .app-footer { border-top: 1px solid #334155; padding-top: 1.5rem; margin-top: 3rem; text-align: center; color: #64748b; font-size: 0.875rem; }
-</style>"#).expect("Failed to write BaseLayout.vlo");
-    }
-
-    let card_path = components_dir.join("Card.vlo");
-    if !card_path.exists() {
-        fs::write(&card_path, r#"<div class="vlo-card"><slot></slot></div>
-<style>.vlo-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); margin-bottom: 1.5rem; }</style>"#).expect("Failed to write Card.vlo");
-    }
-
-    let home_path = pages_dir.join("home.vlo");
-    if !home_path.exists() {
-        fs::write(&home_path, r#"<BaseLayout title="VLO v0.7 Dashboard">
-    <Card>
-        <h2>Items (Zero-JS SSR CRUD)</h2>
-        <form action="/api/items" method="POST" class="crud-form">
-            <input name="title" placeholder="Add new task..." required/>
-            <button type="submit">+ Add</button>
-        </form>
-        <div data-source="/api/get_items">
-            {{#each items as item}}
-            <div class="item-row">
-                <span>{{item.title}}</span>
-                <div class="actions">
-                    <button v-put="/api/items/{{item.id}}" v-prompt="Update title:" v-param="title">✎</button>
-                    <button v-delete="/api/items/{{item.id}}" v-confirm="Delete this item?">✕</button>
-                </div>
-            </div>
-            {{#else}}
-            <p class="empty">No items found. Add one above!</p>
-            {{/each}}
-        </div>
-    </Card>
-</BaseLayout>
-<style>
-    .crud-form { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; }
-    .crud-form input { flex: 1; padding: 0.625rem; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #f8fafc; }
-    .crud-form button { padding: 0.625rem 1.25rem; background: #38bdf8; color: #0f172a; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
-    .item-row { display: flex; justify-content: space-between; align-items: center; padding: 0.875rem; border-bottom: 1px solid #334155; }
-    .actions { display: flex; gap: 0.5rem; }
-    .actions button { background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; }
-    .actions button:hover { border-color: #38bdf8; color: #38bdf8; }
-    .empty { color: #64748b; text-align: center; padding: 1rem; }
-</style>"#).expect("Failed to write home.vlo");
-    }
-
-    println!("✅ Project initialized successfully!");
 }
 
-// ============================================================
-// DATABASE POOL (Multi-DB Support)
-// ============================================================
+#[derive(Default)]
+struct RenderedPage {
+    html: String,
+    styles: Vec<String>,
+}
+
+impl RenderedPage {
+    fn add_style(&mut self, name: &str, css: &str) {
+        let marker = format!("/* VLO:{} */", name);
+
+        if self
+            .styles
+            .iter()
+            .any(|style| style.contains(&marker))
+        {
+            return;
+        }
+
+        self.styles.push(format!("{}\n{}", marker, css));
+    }
+}
 
 #[derive(Clone)]
 pub enum DbPool {
@@ -260,101 +225,97 @@ static DB_POOL: OnceLock<DbPool> = OnceLock::new();
 
 async fn init_db() {
     dotenvy::dotenv().ok();
+
     let db_url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
-        Err(_) => { eprintln!("⚠️ DATABASE_URL not set. DB features disabled."); return; }
+        Err(_) => {
+            eprintln!("⚠️ DATABASE_URL not set. DB features disabled.");
+            return;
+        }
     };
-    let driver = std::env::var("DB_DRIVER").unwrap_or_else(|_| "sqlite".to_string());
+
+    let driver = std::env::var("DB_DRIVER")
+        .unwrap_or_else(|_| "sqlite".to_string());
 
     let pool = match driver.to_lowercase().as_str() {
-        "postgres" | "postgresql" => DbPool::Postgres(sqlx::PgPool::connect(&db_url).await.expect("Failed to connect to Postgres")),
-        "mysql" => DbPool::MySql(sqlx::MySqlPool::connect(&db_url).await.expect("Failed to connect to MySQL")),
+        "postgres" | "postgresql" => {
+            DbPool::Postgres(
+                sqlx::PgPool::connect(&db_url)
+                    .await
+                    .expect("Failed to connect to Postgres"),
+            )
+        }
+
+        "mysql" => {
+            DbPool::MySql(
+                sqlx::MySqlPool::connect(&db_url)
+                    .await
+                    .expect("Failed to connect to MySQL"),
+            )
+        }
+
         _ => {
             use std::str::FromStr;
-            let options = sqlx::sqlite::SqliteConnectOptions::from_str(&db_url).unwrap_or_else(|_| sqlx::sqlite::SqliteConnectOptions::new()).create_if_missing(true);
-            let p = sqlx::sqlite::SqlitePoolOptions::new().connect_with(options).await.expect("Failed to connect to SQLite");
-            let _ = sqlx::query("PRAGMA foreign_keys = ON;").execute(&p).await;
-            let _ = sqlx::query("PRAGMA journal_mode = WAL;").execute(&p).await;
+
+            let options = sqlx::sqlite::SqliteConnectOptions::from_str(&db_url)
+                .unwrap_or_else(|_| sqlx::sqlite::SqliteConnectOptions::new())
+                .create_if_missing(true);
+
+            let p = sqlx::sqlite::SqlitePoolOptions::new()
+                .connect_with(options)
+                .await
+                .expect("Failed to connect to SQLite");
+
+            let _ = sqlx::query("PRAGMA foreign_keys = ON;")
+                .execute(&p)
+                .await;
+
+            let _ = sqlx::query("PRAGMA journal_mode = WAL;")
+                .execute(&p)
+                .await;
+
             DbPool::Sqlite(p)
         }
     };
 
     let root = get_project_root();
     let schema_path = root.join("schema.sql");
+
     if schema_path.exists() {
-        let sql = fs::read_to_string(&schema_path).expect("Failed to read schema.sql");
+        let sql = fs::read_to_string(&schema_path)
+            .expect("Failed to read schema.sql");
+
         for statement in sql.split(';') {
             let stmt = statement.trim();
-            if stmt.is_empty() || stmt.to_uppercase().starts_with("INSERT") { continue; }
+
+            if stmt.is_empty()
+                || stmt.to_uppercase().starts_with("INSERT")
+            {
+                continue;
+            }
+
             match &pool {
-                DbPool::Sqlite(p) => { let _ = sqlx::query(stmt).execute(p).await; }
-                DbPool::Postgres(p) => { let _ = sqlx::query(stmt).execute(p).await; }
-                DbPool::MySql(p) => { let _ = sqlx::query(stmt).execute(p).await; }
+                DbPool::Sqlite(p) => {
+                    let _ = sqlx::query(stmt).execute(p).await;
+                }
+                DbPool::Postgres(p) => {
+                    let _ = sqlx::query(stmt).execute(p).await;
+                }
+                DbPool::MySql(p) => {
+                    let _ = sqlx::query(stmt).execute(p).await;
+                }
             }
         }
     }
+
     let _ = DB_POOL.set(pool);
 }
-
-// ============================================================
-// PERFORMANCE: SHARED STATE / CACHES
-// ============================================================
-
-static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
-    let mut starts = Vec::new();
-    if let Ok(dir) = std::env::current_dir() { starts.push(dir); }
-    if let Ok(exe) = std::env::current_exe() { if let Some(parent) = exe.parent() { starts.push(parent.to_path_buf()); } }
-    starts.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
-    for start in starts {
-        let mut dir = start;
-        loop { if dir.join("pages").exists() { return dir; } if !dir.pop() { break; } }
-    }
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-});
-
-static STYLE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>(.*?)</style>").unwrap());
-static ELEMENT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>").unwrap());
-static PROP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{\{\s*([a-zA-Z0-9_@.-]+)\s*\}\}").unwrap());
-static CLASS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)\bclass\s*=\s*("([^"]*)"|'([^']*)')"#).unwrap());
-static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?is)<slot(?:\s+name\s*=\s*["']([^"']+)["'])?\s*(?:/>|>(.*?)</slot>|>)"#).unwrap());
-static SQL_PARAM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{{1,2}\s*([a-zA-Z0-9_-]+)\s*\}{1,2}").unwrap());
-
-#[derive(Debug)]
-struct CompiledTemplate { template: String, css: String }
-static TEMPLATE_CACHE: LazyLock<Mutex<HashMap<PathBuf, Arc<CompiledTemplate>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-#[allow(dead_code)]
-static VLO_DEBUG: LazyLock<bool> = LazyLock::new(|| std::env::var("VLO_DEBUG").is_ok());
-
-macro_rules! vlo_debug {
-    ($($arg:tt)*) => { if *VLO_DEBUG { println!($($arg)*); } };
-}
-
-// ============================================================
-// VLO RENDER STATE & CONTEXT
-// ============================================================
-
-#[derive(Default)]
-struct RenderedPage { html: String, styles: Vec<String> }
-
-impl RenderedPage {
-    fn add_style(&mut self, name: &str, css: &str) {
-        let marker = format!("/* VLO:{} */", name);
-        if self.styles.iter().any(|style| style.contains(&marker)) { return; }
-        self.styles.push(format!("{}\n{}", marker, css));
-    }
-}
-
-fn get_project_root() -> PathBuf { PROJECT_ROOT.clone() }
-
-// ============================================================
-// VLO SERVER BLOCK & API DEFINITIONS
-// ============================================================
 
 fn extract_server_block(content: &str) -> Option<String> {
     let start = content.find("<script server>")?;
     let rest = &content[start + 15..];
     let end = rest.find("</script>")?;
+
     Some(rest[..end].trim().to_string())
 }
 
@@ -362,283 +323,446 @@ fn strip_server_block(content: &str) -> String {
     if let Some(start) = content.find("<script server>") {
         if let Some(end) = content[start..].find("</script>") {
             let end = start + end + "</script>".len();
-            return format!("{}{}", &content[..start], &content[end..]);
+
+            return format!(
+                "{}{}",
+                &content[..start],
+                &content[end..]
+            );
         }
     }
+
     content.to_string()
 }
 
 fn load_api_actions() -> Result<HashMap<String, String>, String> {
     let file = get_project_root().join("pages/api/api.vlo");
-    if !file.exists() { return Err(format!("API file not found: {}", file.display())); }
-    let content = fs::read_to_string(&file).map_err(|e| format!("Could not read {}: {}", file.display(), e))?;
-    let block = extract_server_block(&content).ok_or_else(|| format!("No <script server> block found in {}", file.display()))?;
-    let clean = block.trim_start_matches('\u{feff}').replace('\u{a0}', " ").replace('\r', "");
-    let json: Value = serde_json::from_str(&clean).map_err(|e| format!("Invalid JSON in {}: {}", file.display(), e))?;
-    let object = json.as_object().ok_or_else(|| "API definitions must be a JSON object".to_string())?;
-    let mut actions = HashMap::new();
-    for (name, value) in object {
-        if let Some(sql) = value.as_str() { actions.insert(name.clone(), sql.to_string()); }
+
+    if !file.exists() {
+        return Err(format!(
+            "API file not found: {}",
+            file.display()
+        ));
     }
+
+    let content = fs::read_to_string(&file)
+        .map_err(|e| {
+            format!(
+                "Could not read {}: {}",
+                file.display(),
+                e
+            )
+        })?;
+
+    let block = extract_server_block(&content)
+        .ok_or_else(|| {
+            format!(
+                "No <script server> block found in {}",
+                file.display()
+            )
+        })?;
+
+    let clean = block
+        .trim_start_matches('\u{feff}')
+        .replace('\u{a0}', " ")
+        .replace('\r', "");
+
+    let json: Value = serde_json::from_str(&clean)
+        .map_err(|e| {
+            format!(
+                "Invalid JSON in {}: {}",
+                file.display(),
+                e
+            )
+        })?;
+
+    let object = json
+        .as_object()
+        .ok_or_else(|| {
+            "API definitions must be a JSON object".to_string()
+        })?;
+
+    let mut actions = HashMap::new();
+
+    for (name, value) in object {
+        if let Some(sql) = value.as_str() {
+            actions.insert(name.clone(), sql.to_string());
+        }
+    }
+
     Ok(actions)
 }
 
-// ============================================================
-// DEVELOPMENT SERVER
-// ============================================================
-
-async fn dev(host: &str, port: u16) {
-    let root = get_project_root();
-    let pages_path = root.join("pages");
-    let public_path = root.join("public");
-    let public_path_service = public_path.clone();
-    let (tx, _) = broadcast::channel::<()>(16);
-    let tx_watcher = tx.clone();
-    let last_reload = Arc::new(Mutex::new(Instant::now()));
-
-    std::thread::spawn(move || { let _ = watch_files(pages_path, public_path, tx_watcher, last_reload); });
-
-    let app = Router::new()
-        .route("/", get(home_handler))
-        .route("/:path", get(page_handler))
-        .route("/api", get(api_handler_root).post(api_handler_root).put(api_handler_root).patch(api_handler_root).delete(api_handler_root))
-        .route("/api/:resource", get(api_handler_path).post(api_handler_path).put(api_handler_path).patch(api_handler_path).delete(api_handler_path))
-        .route("/api/:resource/:id", get(api_handler_id).post(api_handler_id).put(api_handler_id).patch(api_handler_id).delete(api_handler_id))
-        .route("/__vlo_hmr", get(move || hmr_handler(tx)))
-        .nest_service("/static", ServeDir::new(public_path_service))
-        .fallback(not_found_handler);
-
-    let host_str = std::env::var("VLO_HOST").unwrap_or_else(|_| host.to_string());
-    let port_str = std::env::var("VLO_PORT").unwrap_or_else(|_| port.to_string());
-    let addr = format!("{}:{}", host_str, port_str);
-
-    let listener = tokio::net::TcpListener::bind(&addr).await.expect("Failed to bind port");
-    println!("⚡ VLO v0.7 dev server running at http://{}", addr);
-    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await.expect("Server error");
+async fn api_handler_root(
+    method: Method,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    body: String,
+) -> impl IntoResponse {
+    api_route_handler(
+        None,
+        None,
+        method,
+        query,
+        headers,
+        body,
+    )
+    .await
 }
 
-async fn shutdown_signal() {
-    tokio::signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-    println!("\n⚡ Shutting down VLO dev server...");
+async fn api_handler_path(
+    AxumPath(resource): AxumPath<String>,
+    method: Method,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    body: String,
+) -> impl IntoResponse {
+    api_route_handler(
+        Some(resource),
+        None,
+        method,
+        query,
+        headers,
+        body,
+    )
+    .await
 }
 
-async fn hmr_handler(tx: broadcast::Sender<()>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let mut rx = tx.subscribe();
-    let stream = stream! { while rx.recv().await.is_ok() { yield Ok(Event::default().data("reload")); } };
-    Sse::new(stream).keep_alive(KeepAlive::default())
+async fn api_handler_id(
+    AxumPath((resource, id)): AxumPath<(String, String)>,
+    method: Method,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    body: String,
+) -> impl IntoResponse {
+    api_route_handler(
+        Some(resource),
+        Some(id),
+        method,
+        query,
+        headers,
+        body,
+    )
+    .await
 }
-
-fn watch_files(pages: PathBuf, public: PathBuf, tx: broadcast::Sender<()>, last: Arc<Mutex<Instant>>) -> notify::Result<()> {
-    let root = get_project_root();
-    let layouts = root.join("layouts");
-    let components = root.join("components");
-    let (tx_notify, rx) = channel();
-    let mut watcher = RecommendedWatcher::new(tx_notify, Config::default())?;
-    
-    let paths_to_watch = [&pages, &public, &layouts, &components];
-    for path in paths_to_watch {
-        if path.exists() { watcher.watch(path, RecursiveMode::Recursive)?; }
-    }
-
-    for result in rx {
-        let Ok(event) = result else { continue; };
-        let relevant = event.paths.iter().any(|path| {
-            path.extension().and_then(|e| e.to_str()) == Some("vlo") 
-                || path.starts_with(&public) 
-                || path.starts_with(&layouts) 
-                || path.starts_with(&components)
-        });
-        if !relevant { continue; }
-        if let Ok(mut timestamp) = last.try_lock() {
-            if timestamp.elapsed().as_millis() > 200 {
-                *timestamp = Instant::now();
-                if let Ok(mut cache) = TEMPLATE_CACHE.lock() { cache.clear(); }
-                let _ = tx.send(());
-                println!("⚡ Reload");
-            }
-        }
-    }
-    Ok(())
-}
-
-// ============================================================
-// PRODUCTION BUILD & DEPLOYMENT
-// ============================================================
-
-fn build() {
-    println!("⚡ Building production site...");
-    let root = get_project_root();
-    let pages = root.join("pages");
-    let public = root.join("public");
-    let dist = root.join("dist");
-    if dist.exists() { let _ = fs::remove_dir_all(&dist); }
-    fs::create_dir_all(dist.join("static")).expect("Failed to create dist directory");
-
-    if let Ok(entries) = fs::read_dir(&pages) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("vlo") { continue; }
-            let stem = path.file_stem().unwrap().to_string_lossy().to_string();
-            let content = fs::read_to_string(&path).unwrap_or_default();
-            let rendered = render_vlo(content);
-            let html = wrap_html(&stem, &rendered, false);
-            let output = if stem == "home" || stem == "index" { dist.join("index.html") } else { dist.join(format!("{}.html", stem)) };
-            fs::write(&output, html).expect("Failed to write generated HTML");
-            println!("  ├─ Generated: {}", output.display());
-        }
-    }
-    if public.exists() {
-        copy_dir_all(&public, &dist.join("static")).expect("Failed to copy static assets");
-        println!("  └─ Copied static assets");
-    }
-    println!("⚡ Build completed successfully!");
-}
-
-fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        if entry.file_type()?.is_dir() { copy_dir_all(&entry.path(), &dst.join(entry.file_name()))?; } 
-        else { fs::copy(entry.path(), dst.join(entry.file_name()))?; }
-    }
-    Ok(())
-}
-
-async fn deploy(provider: &str) {
-    let root = get_project_root();
-    let dist = root.join("dist");
-    if !dist.exists() { build(); }
-    let provider = provider.to_lowercase();
-    println!("⚡ Deploying /dist to {}...", provider);
-    if provider == "railway" {
-        let caddy = dist.join("Caddyfile");
-        if !caddy.exists() { fs::write(&caddy, ":$PORT {\n    root * .\n    file_server\n}\n").expect("Failed to write Caddyfile"); }
-    }
-    let args: Vec<&str> = match provider.as_str() {
-        "netlify" => vec!["netlify-cli", "deploy", "--dir=dist", "--prod"],
-        "vercel" => vec!["vercel", "deploy", "dist", "--prod"],
-        "cloudflare" | "pages" => vec!["wrangler", "pages", "deploy", "dist"],
-        "railway" => vec!["@railway/cli", "up"],
-        _ => { eprintln!("❌ Unsupported provider '{}'.", provider); return; }
-    };
-    let working_dir = if provider == "railway" { &dist } else { &root };
-    let status = if cfg!(target_os = "windows") {
-        Command::new("cmd").arg("/C").arg("npx.cmd").arg("-y").args(&args).current_dir(working_dir).status()
-    } else {
-        Command::new("npx").arg("-y").args(&args).current_dir(working_dir).status()
-    };
-    match status {
-        Ok(status) if status.success() => println!("⚡ Deployment completed successfully!"),
-        Ok(status) => eprintln!("❌ Deployment exited with status: {}", status),
-        Err(error) => eprintln!("❌ Failed to execute deployment command: {}", error),
-    }
-}
-
-// ============================================================
-// API ROUTES & HELPERS
-// ============================================================
-
-async fn api_handler_root(method: Method, Query(query): Query<HashMap<String, String>>, headers: HeaderMap, body: String) -> impl IntoResponse { api_route_handler(None, None, method, query, headers, body).await }
-async fn api_handler_path(AxumPath(resource): AxumPath<String>, method: Method, Query(query): Query<HashMap<String, String>>, headers: HeaderMap, body: String) -> impl IntoResponse { api_route_handler(Some(resource), None, method, query, headers, body).await }
-async fn api_handler_id(AxumPath((resource, id)): AxumPath<(String, String)>, method: Method, Query(query): Query<HashMap<String, String>>, headers: HeaderMap, body: String) -> impl IntoResponse { api_route_handler(Some(resource), Some(id), method, query, headers, body).await }
 
 fn crud_operation(method: &Method) -> Option<&'static str> {
-    match *method { Method::GET => Some("get"), Method::POST => Some("post"), Method::PUT => Some("put"), Method::PATCH => Some("patch"), Method::DELETE => Some("delete"), _ => None }
+    match *method {
+        Method::GET => Some("get"),
+        Method::POST => Some("post"),
+        Method::PUT => Some("put"),
+        Method::PATCH => Some("patch"),
+        Method::DELETE => Some("delete"),
+        _ => None,
+    }
 }
 
 fn normalize_resource(endpoint: &str) -> String {
     let value = endpoint.trim().trim_matches('/');
-    for prefix in ["get_", "post_", "put_", "patch_", "delete_"] { if let Some(rest) = value.strip_prefix(prefix) { return rest.to_string(); } }
+
+    for prefix in [
+        "get_",
+        "post_",
+        "put_",
+        "patch_",
+        "delete_",
+    ] {
+        if let Some(rest) = value.strip_prefix(prefix) {
+            return rest.to_string();
+        }
+    }
+
     value.to_string()
 }
 
-fn valid_identifier(value: &str) -> bool { !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') }
+fn valid_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
 
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
+
     while i < bytes.len() {
-        if bytes[i] == b'+' { out.push(b' '); i += 1; continue; }
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let h = |c: u8| -> Option<u8> { match c { b'0'..=b'9' => Some(c - b'0'), b'a'..=b'f' => Some(c - b'a' + 10), b'A'..=b'F' => Some(c - b'A' + 10), _ => None } };
-            if let (Some(a), Some(b)) = (h(bytes[i + 1]), h(bytes[i + 2])) { out.push(a * 16 + b); i += 3; continue; }
+        if bytes[i] == b'+' {
+            out.push(b' ');
+            i += 1;
+            continue;
         }
-        out.push(bytes[i]); i += 1;
+
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let h = |c: u8| -> Option<u8> {
+                match c {
+                    b'0'..=b'9' => Some(c - b'0'),
+                    b'a'..=b'f' => Some(c - b'a' + 10),
+                    b'A'..=b'F' => Some(c - b'A' + 10),
+                    _ => None,
+                }
+            };
+
+            if let (Some(a), Some(b)) =
+                (h(bytes[i + 1]), h(bytes[i + 2]))
+            {
+                out.push(a * 16 + b);
+                i += 3;
+                continue;
+            }
+        }
+
+        out.push(bytes[i]);
+        i += 1;
     }
+
     String::from_utf8_lossy(&out).into_owned()
 }
 
 fn parse_form_body(body: &str) -> HashMap<String, String> {
-    body.split('&').filter(|part| !part.is_empty()).filter_map(|part| {
-        let mut pair = part.splitn(2, '=');
-        let key = percent_decode(pair.next().unwrap_or(""));
-        if key.is_empty() { return None; }
-        Some((key, percent_decode(pair.next().unwrap_or(""))))
-    }).collect()
+    body.split('&')
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| {
+            let mut pair = part.splitn(2, '=');
+
+            let key = percent_decode(
+                pair.next().unwrap_or(""),
+            );
+
+            if key.is_empty() {
+                return None;
+            }
+
+            Some((
+                key,
+                percent_decode(pair.next().unwrap_or("")),
+            ))
+        })
+        .collect()
 }
 
-async fn api_route_handler(mut endpoint: Option<String>, id: Option<String>, method: Method, mut query: HashMap<String, String>, headers: HeaderMap, body: String) -> impl IntoResponse {
-    let content_type = headers.get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
+async fn api_route_handler(
+    mut endpoint: Option<String>,
+    id: Option<String>,
+    method: Method,
+    mut query: HashMap<String, String>,
+    headers: HeaderMap,
+    body: String,
+) -> impl IntoResponse {
+    let content_type = headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
     if !body.trim().is_empty() {
         if content_type.contains("application/json") {
-            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&body) {
-                for (key, value) in map { query.insert(key, value_to_query_string(&value)); }
+            if let Ok(Value::Object(map)) =
+                serde_json::from_str::<Value>(&body)
+            {
+                for (key, value) in map {
+                    query.insert(
+                        key,
+                        value_to_query_string(&value),
+                    );
+                }
             }
-        } else if content_type.contains("application/x-www-form-urlencoded") {
-            for (key, value) in parse_form_body(&body) { query.insert(key, value); }
+        } else if content_type
+            .contains("application/x-www-form-urlencoded")
+        {
+            for (key, value) in parse_form_body(&body) {
+                query.insert(key, value);
+            }
         }
     }
-    if endpoint.is_none() { if let Some(action) = query.get("action").cloned() { endpoint = Some(action); } }
+
+    if endpoint.is_none() {
+        if let Some(action) = query.get("action").cloned() {
+            endpoint = Some(action);
+        }
+    }
 
     let endpoint = match endpoint {
         Some(value) => value.trim().trim_matches('/').to_string(),
-        None => return match load_api_actions() {
-            Ok(actions) => (StatusCode::OK, Json(serde_json::json!({ "success": true, "actions": actions }))).into_response(),
-            Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "success": false, "error": "Failed to load API definitions", "details": error }))).into_response(),
-        },
+
+        None => {
+            return match load_api_actions() {
+                Ok(actions) => (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "success": true,
+                        "actions": actions
+                    })),
+                )
+                    .into_response(),
+
+                Err(error) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "success": false,
+                        "error": "Failed to load API definitions",
+                        "details": error
+                    })),
+                )
+                    .into_response(),
+            };
+        }
     };
 
     let resource = normalize_resource(&endpoint);
-    if !valid_identifier(&resource) { return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "success": false, "error": "Invalid API resource" }))).into_response(); }
+
+    if !valid_identifier(&resource) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "success": false,
+                "error": "Invalid API resource"
+            })),
+        )
+            .into_response();
+    }
 
     let operation = match crud_operation(&method) {
         Some(value) => value,
-        None => return (StatusCode::METHOD_NOT_ALLOWED, Json(serde_json::json!({ "success": false, "error": "Unsupported HTTP method" }))).into_response(),
+
+        None => {
+            return (
+                StatusCode::METHOD_NOT_ALLOWED,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "Unsupported HTTP method"
+                })),
+            )
+                .into_response();
+        }
     };
 
-    let explicit_action = ["get_", "post_", "put_", "patch_", "delete_"].iter().any(|prefix| endpoint.starts_with(prefix));
-    let action_name = if explicit_action { endpoint.clone() } else { format!("{}_{}", operation, resource) };
+    let explicit_action = [
+        "get_",
+        "post_",
+        "put_",
+        "patch_",
+        "delete_",
+    ]
+    .iter()
+    .any(|prefix| endpoint.starts_with(prefix));
+
+    let action_name = if explicit_action {
+        endpoint.clone()
+    } else {
+        format!("{}_{}", operation, resource)
+    };
 
     let actions = match load_api_actions() {
         Ok(value) => value,
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "success": false, "error": "Failed to load API definitions", "details": error }))).into_response(),
+
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "Failed to load API definitions",
+                    "details": error
+                })),
+            )
+                .into_response();
+        }
     };
 
     let mut sql = match actions.get(&action_name) {
         Some(value) => value.clone(),
-        None => return (StatusCode::NOT_FOUND, Json(serde_json::json!({ "success": false, "error": "API operation not found", "action": action_name }))).into_response(),
+
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "API operation not found",
+                    "action": action_name
+                })),
+            )
+                .into_response();
+        }
     };
 
-    if let Some(id_value) = id.clone() { query.insert("id".to_string(), id_value); }
-    let mut params = serde_json::Map::new();
-    for (key, value) in query { if key != "action" { params.insert(key, query_string_to_value(&value)); } }
+    if let Some(id_value) = id.clone() {
+        query.insert("id".to_string(), id_value);
+    }
 
-    if id.is_some() && operation == "get" && !sql.contains("{{id}}") && !sql.contains("{id}") {
+    let mut params = serde_json::Map::new();
+
+    for (key, value) in query {
+        if key != "action" {
+            params.insert(
+                key,
+                query_string_to_value(&value),
+            );
+        }
+    }
+
+    if id.is_some()
+        && operation == "get"
+        && !sql.contains("{{id}}")
+        && !sql.contains("{id}")
+    {
         let upper = sql.to_uppercase();
+
         if let Some(pos) = upper.find(" ORDER BY ") {
             let before = sql[..pos].trim_end();
             let order = &sql[pos..];
-            sql = if before.to_uppercase().contains(" WHERE ") { format!("{} AND id = {{id}}{}", before, order) } else { format!("{} WHERE id = {{id}}{}", before, order) };
+
+            sql = if before
+                .to_uppercase()
+                .contains(" WHERE ")
+            {
+                format!(
+                    "{} AND id = {{id}}{}",
+                    before,
+                    order
+                )
+            } else {
+                format!(
+                    "{} WHERE id = {{id}}{}",
+                    before,
+                    order
+                )
+            };
         } else {
-            let trimmed = sql.trim_end_matches(';').trim_end();
-            sql = if trimmed.to_uppercase().contains(" WHERE ") { format!("{} AND id = {{id}}", trimmed) } else { format!("{} WHERE id = {{id}}", trimmed) };
+            let trimmed = sql
+                .trim_end_matches(';')
+                .trim_end();
+
+            sql = if trimmed
+                .to_uppercase()
+                .contains(" WHERE ")
+            {
+                format!(
+                    "{} AND id = {{id}}",
+                    trimmed
+                )
+            } else {
+                format!(
+                    "{} WHERE id = {{id}}",
+                    trimmed
+                )
+            };
         }
     }
 
     let pool = match DB_POOL.get() {
         Some(p) => p,
-        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "success": false, "error": "Database not configured" }))).into_response(),
+
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "Database not configured"
+                })),
+            )
+                .into_response();
+        }
     };
 
     match execute_api_sql(pool, &sql, &params).await {
@@ -650,23 +774,28 @@ async fn api_route_handler(mut endpoint: Option<String>, id: Option<String>, met
                 data
             );
 
-            if method == Method::POST && resource == "products" {
-                vlo_debug!("↪️ [VLO API] POST products completed -> redirecting to /products");
-                return Redirect::to("/products").into_response();
+            if method == Method::POST
+                && resource == "products"
+            {
+                vlo_debug!(
+                    "↪️ [VLO API] POST products completed -> redirecting to /products"
+                );
+
+                return Redirect::to("/products")
+                    .into_response();
             }
 
-            (StatusCode::OK, Json(data)).into_response()
+            (
+                StatusCode::OK,
+                Json(data),
+            )
+                .into_response()
         }
+
         Err(error) => {
             eprintln!(
                 "❌ [VLO API] {} {} -> SQL error: {}",
                 method,
-                action_name,
-                error
-            );
-
-            vlo_debug!(
-                "❌ [VLO API] SQL failure for {}: {}",
                 action_name,
                 error
             );
@@ -685,85 +814,182 @@ async fn api_route_handler(mut endpoint: Option<String>, id: Option<String>, met
     }
 }
 
-
-
-// ============================================================
-// API / SQL VALUES & PREPARATION
-// ============================================================
-
-enum QueryParam { Null, Bool(bool), Int(i64), Float(f64), Text(String), Json(serde_json::Value) }
+enum QueryParam {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Text(String),
+    Json(serde_json::Value),
+}
 
 fn value_to_any_param(value: &Value) -> QueryParam {
     match value {
         Value::Null => QueryParam::Null,
         Value::Bool(b) => QueryParam::Bool(*b),
-        Value::Number(n) => { if let Some(i) = n.as_i64() { QueryParam::Int(i) } else if let Some(f) = n.as_f64() { QueryParam::Float(f) } else { QueryParam::Text(n.to_string()) } }
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                QueryParam::Int(i)
+            } else if let Some(f) = n.as_f64() {
+                QueryParam::Float(f)
+            } else {
+                QueryParam::Text(n.to_string())
+            }
+        }
         Value::String(s) => QueryParam::Text(s.clone()),
         _ => QueryParam::Json(value.clone()),
     }
 }
 
-fn prepare_sql(sql: &str, params: &serde_json::Map<String, Value>, pool: &DbPool) -> Result<(String, Vec<QueryParam>), String> {
+fn prepare_sql(
+    sql: &str,
+    params: &serde_json::Map<String, Value>,
+    pool: &DbPool,
+) -> Result<(String, Vec<QueryParam>), String> {
     let mut values = Vec::new();
     let mut param_index = 1;
     let is_postgres = matches!(pool, DbPool::Postgres(_));
-    let prepared = SQL_PARAM_RE.replace_all(sql, |caps: &regex::Captures| {
-        let key = &caps[1];
-        match params.get(key) {
-            Some(value) => {
-                let placeholder = if is_postgres { let ph = format!("${}", param_index); param_index += 1; ph } else { param_index += 1; "?".to_string() };
-                values.push(value_to_any_param(value));
-                placeholder
+
+    let prepared = SQL_PARAM_RE
+        .replace_all(sql, |caps: &regex::Captures| {
+            let key = &caps[1];
+
+            match params.get(key) {
+                Some(value) => {
+                    let placeholder = if is_postgres {
+                        let ph = format!("${}", param_index);
+                        param_index += 1;
+                        ph
+                    } else {
+                        param_index += 1;
+                        "?".to_string()
+                    };
+
+                    values.push(value_to_any_param(value));
+                    placeholder
+                }
+                None => {
+                    let placeholder = if is_postgres {
+                        let ph = format!("${}", param_index);
+                        param_index += 1;
+                        ph
+                    } else {
+                        param_index += 1;
+                        "?".to_string()
+                    };
+
+                    values.push(QueryParam::Null);
+                    placeholder
+                }
             }
-            None => {
-                let placeholder = if is_postgres { let ph = format!("${}", param_index); param_index += 1; ph } else { param_index += 1; "?".to_string() };
-                values.push(QueryParam::Null);
-                placeholder
-            }
-        }
-    }).into_owned();
-    if prepared.contains('{') || prepared.contains('}') { return Err(format!("Unresolved parameter in SQL: {}", prepared)); }
+        })
+        .into_owned();
+
+    if prepared.contains('{') || prepared.contains('}') {
+        return Err(format!("Unresolved parameter in SQL: {}", prepared));
+    }
+
     Ok((prepared, values))
 }
 
 macro_rules! convert_row_to_json {
     ($row:expr) => {{
         let mut map = serde_json::Map::new();
+
         for (i, column) in $row.columns().iter().enumerate() {
             let name = column.name().to_string();
-            let is_null = $row.try_get_raw(i).map(|r| r.is_null()).unwrap_or(true);
-            let val: serde_json::Value = if is_null { serde_json::Value::Null } else {
+
+            let is_null = $row
+                .try_get_raw(i)
+                .map(|r| r.is_null())
+                .unwrap_or(true);
+
+            let val: serde_json::Value = if is_null {
+                serde_json::Value::Null
+            } else {
                 let type_name = column.type_info().name().to_lowercase();
-                if type_name.contains("int") { $row.try_get::<i64, _>(i).or_else(|_| $row.try_get::<i32, _>(i).map(|v| v as i64)).map(|v| serde_json::Value::Number(v.into())).unwrap_or(serde_json::Value::Null) }
-                else if type_name.contains("bool") { $row.try_get::<bool, _>(i).map(serde_json::Value::Bool).unwrap_or(serde_json::Value::Null) }
-                else if type_name.contains("float") || type_name.contains("double") || type_name.contains("real") || type_name.contains("numeric") || type_name.contains("decimal") { $row.try_get::<f64, _>(i).ok().and_then(|v| serde_json::Number::from_f64(v).map(serde_json::Value::Number)).unwrap_or(serde_json::Value::Null) }
-                else if type_name.contains("json") { $row.try_get::<sqlx::types::Json<serde_json::Value>, _>(i).map(|j| j.0).unwrap_or(serde_json::Value::Null) }
-                else { $row.try_get::<String, _>(i).map(serde_json::Value::String).unwrap_or_else(|_| $row.try_get::<Vec<u8>, _>(i).map(|v| serde_json::Value::String(format!("blob {}b", v.len()))).unwrap_or(serde_json::Value::Null)) }
+
+                if type_name.contains("int") {
+                    $row.try_get::<i64, _>(i)
+                        .or_else(|_| $row.try_get::<i32, _>(i).map(|v| v as i64))
+                        .map(|v| serde_json::Value::Number(v.into()))
+                        .unwrap_or(serde_json::Value::Null)
+                } else if type_name.contains("bool") {
+                    $row.try_get::<bool, _>(i)
+                        .map(serde_json::Value::Bool)
+                        .unwrap_or(serde_json::Value::Null)
+                } else if type_name.contains("float")
+                    || type_name.contains("double")
+                    || type_name.contains("real")
+                    || type_name.contains("numeric")
+                    || type_name.contains("decimal")
+                {
+                    $row.try_get::<f64, _>(i)
+                        .ok()
+                        .and_then(|v| serde_json::Number::from_f64(v).map(serde_json::Value::Number))
+                        .unwrap_or(serde_json::Value::Null)
+                } else if type_name.contains("json") {
+                    $row.try_get::<sqlx::types::Json<serde_json::Value>, _>(i)
+                        .map(|j| j.0)
+                        .unwrap_or(serde_json::Value::Null)
+                } else {
+                    $row.try_get::<String, _>(i)
+                        .map(serde_json::Value::String)
+                        .unwrap_or_else(|_| {
+                            $row.try_get::<Vec<u8>, _>(i)
+                                .map(|v| serde_json::Value::String(format!("blob {}b", v.len())))
+                                .unwrap_or(serde_json::Value::Null)
+                        })
+                }
             };
+
             map.insert(name, val);
         }
+
         serde_json::Value::Object(map)
     }};
 }
-fn sqlite_row_to_json(row: &sqlx::sqlite::SqliteRow) -> serde_json::Value { convert_row_to_json!(row) }
-fn pg_row_to_json(row: &sqlx::postgres::PgRow) -> serde_json::Value { convert_row_to_json!(row) }
-fn mysql_row_to_json(row: &sqlx::mysql::MySqlRow) -> serde_json::Value { convert_row_to_json!(row) }
 
-async fn execute_api_sql(pool: &DbPool, sql: &str, params: &serde_json::Map<String, Value>) -> Result<Value, String> {
+fn sqlite_row_to_json(row: &sqlx::sqlite::SqliteRow) -> serde_json::Value {
+    convert_row_to_json!(row)
+}
+
+fn pg_row_to_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    convert_row_to_json!(row)
+}
+
+fn mysql_row_to_json(row: &sqlx::mysql::MySqlRow) -> serde_json::Value {
+    convert_row_to_json!(row)
+}
+
+async fn execute_api_sql(
+    pool: &DbPool,
+    sql: &str,
+    params: &serde_json::Map<String, Value>,
+) -> Result<Value, String> {
     let mut last_data = None;
     let mut affected_rows = 0u64;
-    
+
     macro_rules! exec_db {
         ($pool:expr, $to_json:ident) => {{
             let mut tx = $pool.begin().await.map_err(|e| e.to_string())?;
+
             for statement in sql.split(';') {
                 let statement = statement.trim();
-                if statement.is_empty() { continue; }
+
+                if statement.is_empty() {
+                    continue;
+                }
+
                 let (prepared_sql, values) = prepare_sql(statement, params, pool)?;
                 let upper = prepared_sql.trim_start().to_uppercase();
-                let is_select = upper.starts_with("SELECT") || upper.starts_with("PRAGMA") || upper.starts_with("WITH");
-                
+
+                let is_select = upper.starts_with("SELECT")
+                    || upper.starts_with("PRAGMA")
+                    || upper.starts_with("WITH");
+
                 let mut query = sqlx::query(&prepared_sql);
+
                 for p in &values {
                     match p {
                         QueryParam::Null => query = query.bind(Option::<String>::None),
@@ -778,53 +1004,802 @@ async fn execute_api_sql(pool: &DbPool, sql: &str, params: &serde_json::Map<Stri
                 if is_select {
                     let rows = query.fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
                     let mut data = Vec::new();
-                    for row in rows { data.push($to_json(&row)); }
+                    for row in rows {
+                        data.push($to_json(&row));
+                    }
                     last_data = Some(data);
                 } else {
                     let res = query.execute(&mut *tx).await.map_err(|e| e.to_string())?;
                     affected_rows += res.rows_affected();
                 }
             }
+
             tx.commit().await.map_err(|e| e.to_string())?;
         }};
     }
-    
+
     match pool {
         DbPool::Sqlite(p) => exec_db!(p, sqlite_row_to_json),
         DbPool::Postgres(p) => exec_db!(p, pg_row_to_json),
         DbPool::MySql(p) => exec_db!(p, mysql_row_to_json),
     }
-    
-    if let Some(data) = last_data { Ok(serde_json::json!({ "data": data, "affected_rows": affected_rows })) } 
-    else { Ok(serde_json::json!({ "success": true, "affected_rows": affected_rows })) }
+
+    if let Some(data) = last_data {
+        Ok(serde_json::json!({
+            "data": data,
+            "affected_rows": affected_rows
+        }))
+    } else {
+        Ok(serde_json::json!({
+            "success": true,
+            "affected_rows": affected_rows
+        }))
+    }
 }
 
-fn value_to_query_string(value: &Value) -> String { match value { Value::String(v) => v.clone(), Value::Number(v) => v.to_string(), Value::Bool(v) => v.to_string(), Value::Null => String::new(), _ => value.to_string() } }
+fn value_to_query_string(value: &Value) -> String {
+    match value {
+        Value::String(v) => v.clone(),
+        Value::Number(v) => v.to_string(),
+        Value::Bool(v) => v.to_string(),
+        Value::Null => String::new(),
+        _ => value.to_string(),
+    }
+}
+
 fn query_string_to_value(value: &str) -> Value {
-    if value.is_empty() { return Value::String(value.to_string()); }
-    if value.eq_ignore_ascii_case("true") { return Value::Bool(true); }
-    if value.eq_ignore_ascii_case("false") { return Value::Bool(false); }
-    if let Ok(integer) = value.parse::<i64>() { return Value::Number(integer.into()); }
-    if let Ok(float) = value.parse::<f64>() { if let Some(number) = serde_json::Number::from_f64(float) { return Value::Number(number); } }
+    if value.is_empty() {
+        return Value::String(value.to_string());
+    }
+    if value.eq_ignore_ascii_case("true") {
+        return Value::Bool(true);
+    }
+    if value.eq_ignore_ascii_case("false") {
+        return Value::Bool(false);
+    }
+    if let Ok(integer) = value.parse::<i64>() {
+        return Value::Number(integer.into());
+    }
+    if let Ok(float) = value.parse::<f64>() {
+        if let Some(number) = serde_json::Number::from_f64(float) {
+            return Value::Number(number);
+        }
+    }
     Value::String(value.to_string())
 }
 
-// ============================================================
-// VLO v0.7 TEMPLATE ENGINE: CONTEXT & EXPRESSIONS
-// ============================================================
+fn component_path(name: &str) -> Option<PathBuf> {
+    let root = get_project_root();
+
+    let layout = root.join("layouts").join(format!("{}.vlo", name));
+    if layout.exists() {
+        return Some(layout);
+    }
+
+    let component = root.join("components").join(format!("{}.vlo", name));
+    if component.exists() {
+        return Some(component);
+    }
+
+    None
+}
+
+fn read_component_template(path: &Path) -> Option<Arc<CompiledTemplate>> {
+    if let Ok(cache) = TEMPLATE_CACHE.lock() {
+        if let Some(cached) = cache.get(path) {
+            return Some(Arc::clone(cached));
+        }
+    }
+
+    let source = fs::read_to_string(path).ok()?;
+    let mut css = String::new();
+
+    for captures in STYLE_RE.captures_iter(&source) {
+        if let Some(style) = captures.get(1) {
+            css.push_str(style.as_str());
+            css.push('\n');
+        }
+    }
+
+    let template = STYLE_RE.replace_all(&source, "").into_owned();
+    let compiled = Arc::new(CompiledTemplate { template, css });
+
+    if let Ok(mut cache) = TEMPLATE_CACHE.lock() {
+        cache.insert(path.to_path_buf(), Arc::clone(&compiled));
+    }
+
+    Some(compiled)
+}
+
+fn render_tag(source: &str, tag: &str, context: &mut RenderedPage) -> String {
+    if let Some((start, end, props, children)) = find_tag(source, tag) {
+        return format!(
+            "{}{}{}",
+            &source[..start],
+            render_component_file(tag, &props, &children, context),
+            &source[end..]
+        );
+    }
+    source.to_string()
+}
+
+fn render_components(source: &str, context: &mut RenderedPage) -> String {
+    let mut output = String::new();
+    let mut last = 0;
+    let chars: Vec<(usize, char)> = source.char_indices().collect();
+    let mut index = 0;
+
+    while index < chars.len() {
+        let (position, character) = chars[index];
+
+        if character == '<' && index + 1 < chars.len() && chars[index + 1].1.is_ascii_uppercase() {
+            let mut end = index + 1;
+            while end < chars.len() && (chars[end].1.is_ascii_alphanumeric() || chars[end].1 == '_') {
+                end += 1;
+            }
+
+            let tag = &source[chars[index + 1].0..chars[end].0];
+
+            if let Some((_, tag_end, props, children)) = find_tag(&source[position..], tag) {
+                output.push_str(&source[last..position]);
+                output.push_str(&render_component_file(tag, &props, &children, context));
+                last = position + tag_end;
+
+                while index < chars.len() && chars[index].0 < last {
+                    index += 1;
+                }
+                continue;
+            }
+        }
+        index += 1;
+    }
+
+    output.push_str(&source[last..]);
+    output
+}
+
+fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> {
+    let open = format!("<{}", name);
+    let start = source.find(&open)?;
+    let mut index = start + open.len();
+
+    let next = source[index..].chars().next()?;
+    if !(next.is_whitespace() || next == '/' || next == '>') {
+        return None;
+    }
+
+    let props_start = index;
+    let mut quote = None;
+    let mut open_end = None;
+
+    for (offset, character) in source[index..].char_indices() {
+        match quote {
+            Some(current) if character == current => {
+                quote = None;
+            }
+            None if character == '"' || character == '\'' => {
+                quote = Some(character);
+            }
+            None if character == '>' => {
+                open_end = Some(index + offset);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let open_end = open_end?;
+    let props = source[props_start..open_end].to_string();
+    let self_closing = props.trim_end().ends_with('/');
+    index = open_end + 1;
+
+    if self_closing {
+        return Some((start, index, props, String::new()));
+    }
+
+    let close = format!("</{}>", name);
+    let children_start = index;
+    let mut depth = 1;
+
+    while index < source.len() {
+        let remaining = &source[index..];
+
+        if remaining.starts_with(&open) {
+            let after = index + open.len();
+            let valid = source[after..]
+                .chars()
+                .next()
+                .map(|c| c.is_whitespace() || c == '/' || c == '>')
+                .unwrap_or(false);
+
+            if valid {
+                depth += 1;
+            }
+        } else if remaining.starts_with(&close) {
+            depth -= 1;
+            if depth == 0 {
+                return Some((
+                    start,
+                    index + close.len(),
+                    props,
+                    source[children_start..index].to_string(),
+                ));
+            }
+        }
+
+        index += remaining.chars().next().map(|ch| ch.len_utf8()).unwrap_or(1);
+    }
+
+    None
+}
+
+fn render_component_file(
+    name: &str,
+    props_str: &str,
+    children: &str,
+    context: &mut RenderedPage,
+) -> String {
+    let path = match component_path(name) {
+        Some(path) => path,
+        None => return format!("<!-- Missing component: {} -->", name),
+    };
+
+    let compiled = match read_component_template(&path) {
+        Some(template) => template,
+        None => return format!("<!-- Missing template: {} -->", name),
+    };
+
+    if !compiled.css.trim().is_empty() {
+        context.add_style(name, compiled.css.trim());
+    }
+
+    let template = &compiled.template;
+    let props = parse_props_v7(props_str);
+
+    let (raw_named_slots, raw_default_slot) = parse_slot_content(children);
+    let mut named_slots = HashMap::new();
+
+    for (slot_name, slot_content) in raw_named_slots {
+        let rendered = render_nested_vlo_content(&slot_content, context);
+        named_slots.insert(slot_name, rendered);
+    }
+
+    let default_slot = render_nested_vlo_content(&raw_default_slot, context);
+    let mut render_ctx = props.clone();
+    render_ctx.insert("children".to_string(), Value::String(default_slot.clone()));
+
+    let rendered = render_component_template(template, &render_ctx);
+    let rendered = render_slots(&rendered, &named_slots, &default_slot);
+
+    let incoming_class = props.get("class").and_then(|v| {
+        if let Value::String(s) = v {
+            Some(s.clone())
+        } else {
+            None
+        }
+    });
+
+    let attributes = build_component_attributes(template, &props);
+    if attributes.is_empty() && incoming_class.is_none() {
+        return rendered;
+    }
+
+    let skip_check = STYLE_RE.replace_all(&rendered, "");
+    if let Some(first_tag) = ELEMENT_RE
+        .captures(&skip_check)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+    {
+        if first_tag.eq_ignore_ascii_case("style") || first_tag.eq_ignore_ascii_case("script") {
+            return rendered;
+        }
+    }
+
+    if let Some(captures) = ELEMENT_RE.captures(&rendered) {
+        let full_match = captures.get(0).unwrap();
+        let tag_name = captures.get(1).unwrap().as_str();
+        let existing_attributes = captures
+            .get(2)
+            .map(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let (existing_attributes, class_attr) = if let Some(extra) = incoming_class
+            .as_deref()
+            .map(|c| c.trim())
+            .filter(|c| !c.is_empty())
+        {
+            if let Some(m) = CLASS_RE.captures(&existing_attributes) {
+                let existing_value = m
+                    .get(2)
+                    .or_else(|| m.get(3))
+                    .map(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+
+                let merged = if existing_value.is_empty() {
+                    format!("class=\"{}\"", extra)
+                } else {
+                    format!("class=\"{} {}\"", existing_value, extra)
+                };
+
+                let stripped = CLASS_RE.replace(&existing_attributes, "").trim().to_string();
+                (stripped, Some(merged))
+            } else {
+                (existing_attributes, Some(format!("class=\"{}\"", extra)))
+            }
+        } else {
+            (existing_attributes, None)
+        };
+
+        let attributes = match class_attr {
+            Some(c) if attributes.is_empty() => c,
+            Some(c) => format!("{} {}", c, attributes),
+            None => attributes,
+        };
+
+        if attributes.is_empty() {
+            return rendered;
+        }
+
+        let replacement = if existing_attributes.trim().is_empty() {
+            format!("<{} {}>", tag_name, attributes)
+        } else {
+            format!("<{} {} {}>", tag_name, existing_attributes.trim(), attributes)
+        };
+
+        return format!(
+            "{}{}{}",
+            &rendered[..full_match.start()],
+            replacement,
+            &rendered[full_match.end()..]
+        );
+    }
+
+    rendered
+}
+
+fn render_slots(
+    template: &str,
+    named_slots: &HashMap<String, String>,
+    default_slot: &str,
+) -> String {
+    let res = SLOT_RE
+        .replace_all(template, |captures: &regex::Captures| {
+            let name = captures
+                .get(1)
+                .map(|v| v.as_str().trim())
+                .unwrap_or("");
+
+            let fallback = captures
+                .get(2)
+                .map(|v| v.as_str())
+                .unwrap_or("");
+
+            if name.is_empty() {
+                if default_slot.trim().is_empty() {
+                    fallback.to_string()
+                } else {
+                    default_slot.to_string()
+                }
+            } else if let Some(content) = named_slots.get(name) {
+                content.clone()
+            } else {
+                fallback.to_string()
+            }
+        })
+        .into_owned();
+
+    SLOT_RE.replace_all(&res, "").into_owned()
+}
+
+fn parse_slot_content(children: &str) -> (HashMap<String, String>, String) {
+    let mut named_slots = HashMap::new();
+    let mut default_content = String::new();
+    let mut cursor = 0;
+    let mut default_start = 0;
+
+    while cursor < children.len() {
+        let remaining = &children[cursor..];
+        let open_start = match remaining.find('<') {
+            Some(offset) => cursor + offset,
+            None => break,
+        };
+
+        let tag_info = match parse_element_at(children, open_start) {
+            Some(info) => info,
+            None => {
+                cursor = open_start + 1;
+                continue;
+            }
+        };
+
+        let (_tag_name, _opening_end, element_end, props, content) = tag_info;
+
+        if let Some(slot_name) = get_slot_name(&props) {
+            if open_start > default_start {
+                default_content.push_str(&children[default_start..open_start]);
+            }
+            named_slots
+                .entry(slot_name)
+                .or_insert_with(String::new)
+                .push_str(content);
+            cursor = element_end;
+            default_start = cursor;
+            continue;
+        }
+
+        cursor = element_end;
+    }
+
+    if default_start < children.len() {
+        default_content.push_str(&children[default_start..]);
+    }
+
+    (named_slots, default_content)
+}
+
+fn get_slot_name(props: &str) -> Option<String> {
+    parse_props_v7(props).get("slot").and_then(|v| {
+        if let Value::String(s) = v {
+            Some(s.clone())
+        } else {
+            None
+        }
+    })
+}
+
+fn is_void_tag(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "area" | "base" | "br" | "col" | "embed" | "hr" | "img" | "input" | "link" | "meta" | "param" | "source" | "track" | "wbr"
+    )
+}
+
+fn parse_element_at(source: &str, start: usize) -> Option<(String, usize, usize, String, &str)> {
+    if !source[start..].starts_with('<') {
+        return None;
+    }
+
+    let mut cursor = start + 1;
+    if cursor >= source.len() {
+        return None;
+    }
+
+    let first = source[cursor..].chars().next()?;
+    if first == '/' || first == '!' || first == '?' {
+        return None;
+    }
+
+    let tag_start = cursor;
+    while cursor < source.len() {
+        let ch = source[cursor..].chars().next()?;
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == ':' {
+            cursor += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    if cursor == tag_start {
+        return None;
+    }
+
+    let tag_name = source[tag_start..cursor].to_string();
+    let opening_end = find_tag_opening_end(source, cursor)?;
+    let props = source[cursor..opening_end].to_string();
+    let self_closing = props.trim_end().ends_with('/') || is_void_tag(&tag_name);
+
+    if self_closing {
+        return Some((tag_name, opening_end + 1, opening_end + 1, props, ""));
+    }
+
+    let content_start = opening_end + 1;
+    let element_end = find_matching_tag_end(source, content_start, &tag_name)?;
+    let close_start = element_end.checked_sub(format!("</{}>", tag_name).len())?;
+
+    if close_start < content_start {
+        return None;
+    }
+
+    let content = &source[content_start..close_start];
+    Some((tag_name, opening_end + 1, element_end, props, content))
+}
+
+fn find_tag_opening_end(source: &str, start: usize) -> Option<usize> {
+    let mut quote = None;
+    let mut cursor = start;
+
+    while cursor < source.len() {
+        let ch = source[cursor..].chars().next()?;
+        match quote {
+            Some(active) => {
+                if ch == active {
+                    quote = None;
+                }
+            }
+            None => {
+                if ch == '"' || ch == '\'' {
+                    quote = Some(ch);
+                } else if ch == '>' {
+                    return Some(cursor);
+                }
+            }
+        }
+        cursor += ch.len_utf8();
+    }
+    None
+}
+
+fn find_matching_tag_end(source: &str, start: usize, tag_name: &str) -> Option<usize> {
+    let opening = format!("<{}", tag_name);
+    let closing = format!("</{}>", tag_name);
+    let mut depth = 1;
+    let mut cursor = start;
+
+    while cursor < source.len() {
+        let remaining = &source[cursor..];
+
+        if remaining.starts_with(&closing) {
+            depth -= 1;
+            if depth == 0 {
+                return Some(cursor + closing.len());
+            }
+            cursor += closing.len();
+            continue;
+        }
+
+        if remaining.starts_with(&opening) {
+            let after_name = cursor + opening.len();
+            let valid = source[after_name..]
+                .chars()
+                .next()
+                .map(|ch| ch.is_whitespace() || ch == '>' || ch == '/')
+                .unwrap_or(false);
+
+            if valid {
+                let opening_end = find_tag_opening_end(source, after_name)?;
+                let props = source[after_name..opening_end].trim();
+                if !props.ends_with('/') {
+                    depth += 1;
+                }
+                cursor = opening_end + 1;
+                continue;
+            }
+        }
+
+        cursor += remaining.chars().next().map(|ch| ch.len_utf8()).unwrap_or(1);
+    }
+
+    None
+}
+
+fn parse_props_v7(raw: &str) -> HashMap<String, Value> {
+    let chars: Vec<char> = raw
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .chars()
+        .collect();
+
+    let mut map = HashMap::new();
+    let mut index = 0;
+
+    while index < chars.len() {
+        while index < chars.len() && chars[index].is_whitespace() {
+            index += 1;
+        }
+
+        if index >= chars.len() || chars[index] == '/' {
+            break;
+        }
+
+        let mut key = String::new();
+        while index < chars.len()
+            && chars[index] != '='
+            && !chars[index].is_whitespace()
+            && chars[index] != '/'
+        {
+            key.push(chars[index]);
+            index += 1;
+        }
+
+        if key.is_empty() {
+            index += 1;
+            continue;
+        }
+
+        while index < chars.len() && chars[index].is_whitespace() {
+            index += 1;
+        }
+
+        if index < chars.len() && chars[index] == '=' {
+            index += 1;
+            while index < chars.len() && chars[index].is_whitespace() {
+                index += 1;
+            }
+
+            if index >= chars.len() {
+                map.insert(key, Value::Bool(true));
+                break;
+            }
+
+            let quote = chars[index];
+            let mut value = String::new();
+
+            if quote == '"' || quote == '\'' {
+                index += 1;
+                while index < chars.len() && chars[index] != quote {
+                    value.push(chars[index]);
+                    index += 1;
+                }
+                if index < chars.len() {
+                    index += 1;
+                }
+            } else {
+                while index < chars.len() && !chars[index].is_whitespace() && chars[index] != '/' {
+                    value.push(chars[index]);
+                    index += 1;
+                }
+            }
+
+            map.insert(key, Value::String(value));
+        } else {
+            map.insert(key, Value::Bool(true));
+        }
+    }
+
+    map
+}
+
+fn render_component_template(template: &str, props: &HashMap<String, Value>) -> String {
+    let rendered = render_control_flow(template, props);
+    normalize_class_attributes(&rendered)
+}
+
+fn normalize_class_attributes(html: &str) -> String {
+    CLASS_RE
+        .replace_all(html, |captures: &regex::Captures| {
+            let value = captures
+                .get(2)
+                .or_else(|| captures.get(3))
+                .map(|v| v.as_str())
+                .unwrap_or("");
+
+            let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+            let quote = if captures.get(1).map(|v| v.as_str()).unwrap_or("").starts_with('"') {
+                '"'
+            } else {
+                '\''
+            };
+
+            format!("class={quote}{normalized}{quote}")
+        })
+        .into_owned()
+}
+
+fn build_component_attributes(template: &str, props: &HashMap<String, Value>) -> String {
+    let mut used = HashSet::new();
+    for captures in PROP_RE.captures_iter(template) {
+        used.insert(captures[1].to_string());
+    }
+
+    let mut attributes = Vec::new();
+    let button_default = template.to_ascii_lowercase().contains("<button");
+
+    if button_default && !props.contains_key("type") && !used.contains("type") {
+        attributes.push("type=\"button\"".to_string());
+    }
+
+    for (key, value) in props {
+        if key == "children" || key == "attributes" || key == "class" {
+            continue;
+        }
+
+        if used.contains(key) {
+            continue;
+        }
+
+        if is_boolean_attribute(key) {
+            if let Value::Bool(b) = value {
+                if *b {
+                    attributes.push(key.clone());
+                }
+            } else if let Value::String(s) = value {
+                if s.eq_ignore_ascii_case("true") || s == key {
+                    attributes.push(key.clone());
+                }
+            }
+            continue;
+        }
+
+        if let Value::String(s) = value {
+            if s.trim().is_empty() {
+                continue;
+            }
+            attributes.push(format!("{}=\"{}\"", key, escape_html_attribute(s)));
+        }
+    }
+
+    attributes.sort();
+    attributes.join(" ")
+}
+
+fn is_boolean_attribute(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "allowfullscreen"
+            | "async"
+            | "autofocus"
+            | "autoplay"
+            | "checked"
+            | "controls"
+            | "default"
+            | "defer"
+            | "disabled"
+            | "formnovalidate"
+            | "hidden"
+            | "inert"
+            | "ismap"
+            | "itemscope"
+            | "loop"
+            | "multiple"
+            | "muted"
+            | "nomodule"
+            | "novalidate"
+            | "open"
+            | "playsinline"
+            | "readonly"
+            | "required"
+            | "reversed"
+            | "selected"
+    )
+}
+
+fn escape_html_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
 
 fn get_nested_value(path: &str, context: &HashMap<String, Value>) -> Value {
-    let parts: Vec<&str> = path.split('.').collect();
-    let mut val = Value::Object(context.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-    for part in parts {
-        if let Value::Object(map) = val { val = map.get(part).cloned().unwrap_or(Value::Null); } 
-        else { return Value::Null; }
+    let path = path.trim();
+    if path.is_empty() {
+        return Value::Null;
     }
-    val
+
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = context.get(parts[0]);
+
+    for part in &parts[1..] {
+        match current {
+            Some(Value::Object(map)) => current = map.get(*part),
+            Some(Value::Array(arr)) => {
+                if let Ok(idx) = part.parse::<usize>() {
+                    current = arr.get(idx);
+                } else {
+                    return Value::Null;
+                }
+            }
+            _ => return Value::Null,
+        }
+    }
+
+    current.cloned().unwrap_or(Value::Null)
 }
 
 fn evaluate_condition(expr: &str, context: &HashMap<String, Value>) -> bool {
     let expr = expr.trim();
+    if expr.is_empty() {
+        return false;
+    }
+
+    if let Some(stripped) = expr.strip_prefix('!') {
+        return !evaluate_condition(stripped.trim(), context);
+    }
+
     let operators = ["==", "!=", "<=", ">=", "<", ">"];
     for op in operators {
         if let Some(pos) = expr.find(op) {
@@ -835,13 +1810,17 @@ fn evaluate_condition(expr: &str, context: &HashMap<String, Value>) -> bool {
             return compare_values(&left_val, &right_val, op);
         }
     }
+
     is_truthy(&resolve_operand(expr, context))
 }
 
 fn resolve_operand(operand: &str, context: &HashMap<String, Value>) -> Value {
     let trimmed = operand.trim();
-    if (trimmed.starts_with('"') && trimmed.ends_with('"')) || (trimmed.starts_with('\'') && trimmed.ends_with('\'')) {
-        Value::String(trimmed[1..trimmed.len()-1].to_string())
+
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        Value::String(trimmed[1..trimmed.len() - 1].to_string())
     } else if let Ok(num) = trimmed.parse::<i64>() {
         Value::Number(num.into())
     } else if let Ok(num) = trimmed.parse::<f64>() {
@@ -856,15 +1835,35 @@ fn compare_values(left: &Value, right: &Value, op: &str) -> bool {
         (Value::Number(l), Value::Number(r)) => {
             let l = l.as_f64().unwrap_or(0.0);
             let r = r.as_f64().unwrap_or(0.0);
-            match op { "==" => l == r, "!=" => l != r, "<" => l < r, ">" => l > r, "<=" => l <= r, ">=" => l >= r, _ => false }
+            match op {
+                "==" => l == r,
+                "!=" => l != r,
+                "<" => l < r,
+                ">" => l > r,
+                "<=" => l <= r,
+                ">=" => l >= r,
+                _ => false,
+            }
         }
-        (Value::String(l), Value::String(r)) => {
-            match op { "==" => l == r, "!=" => l != r, "<" => l < r, ">" => l > r, "<=" => l <= r, ">=" => l >= r, _ => false }
-        }
-        (Value::Bool(l), Value::Bool(r)) => {
-            match op { "==" => l == r, "!=" => l != r, _ => false }
-        }
-        _ => match op { "==" => left == right, "!=" => left != right, _ => false }
+        (Value::String(l), Value::String(r)) => match op {
+            "==" => l == r,
+            "!=" => l != r,
+            "<" => l < r,
+            ">" => l > r,
+            "<=" => l <= r,
+            ">=" => l >= r,
+            _ => false,
+        },
+        (Value::Bool(l), Value::Bool(r)) => match op {
+            "==" => l == r,
+            "!=" => l != r,
+            _ => false,
+        },
+        _ => match op {
+            "==" => left == right,
+            "!=" => left != right,
+            _ => false,
+        },
     }
 }
 
@@ -879,140 +1878,245 @@ fn is_truthy(val: &Value) -> bool {
     }
 }
 
-// ============================================================
-// VLO v0.7 TEMPLATE CONTROL FLOW
-// ============================================================
-
 fn find_next_token(template: &str, from: usize) -> Option<(usize, &'static str)> {
     let mut best: Option<(usize, &'static str)> = None;
-    for token in ["{for ", "{if ", "{{", "<script", "</script>"] {
+
+    for token in [
+        "{{#for ",
+        "{{for ",
+        "{{#if ",
+        "{{if ",
+        "{for ",
+        "{if ",
+        "{{",
+        "<script",
+        "</script>",
+    ] {
         if let Some(pos) = template[from..].find(token) {
             let absolute = from + pos;
-            if best.map(|(p, _)| absolute < p).unwrap_or(true) { best = Some((absolute, token)); }
+            if best.map(|(p, _)| absolute < p).unwrap_or(true) {
+                best = Some((absolute, token));
+            }
         }
     }
+
     best
 }
 
-fn find_modern_block_end(template: &str, start: usize, kind: &str) -> Option<(usize, usize)> {
-    let open = format!("{{{} ", kind);
-    let close = format!("{{/{}}}", kind);
+fn find_block_end(template: &str, start: usize, token: &str) -> Option<(usize, usize)> {
+    let is_double = token.starts_with("{{");
+    let kind = if token.contains("for") { "for" } else { "if" };
+
+    let header_end = if is_double {
+        template[start..].find("}}")? + start + 2
+    } else {
+        template[start..].find('}')? + start + 1
+    };
+
+    let open_patterns: Vec<String> = if is_double {
+        vec![format!("{{{{#{kind} ", kind = kind), format!("{{{{{kind} ", kind = kind)]
+    } else {
+        vec![format!("{{{kind} ", kind = kind)]
+    };
+
+    let close_patterns: Vec<String> = if is_double {
+        vec![
+            format!("{{{{/#{{{kind}}}}}}}", kind = kind),
+            format!("{{{{/{kind}}}}}", kind = kind),
+        ]
+    } else {
+        vec![format!("{{/{kind}}}", kind = kind)]
+    };
+
     let mut depth = 1usize;
-    let header_end = template[start..].find('}')? + start + 1;
     let mut cursor = header_end;
+
     while cursor < template.len() {
-        let next_open = template[cursor..].find(&open).map(|p| cursor + p);
-        let next_close = template[cursor..].find(&close).map(|p| cursor + p);
-        match (next_open, next_close) {
-            (Some(o), Some(c)) if o < c => {
-                depth += 1;
-                cursor = o + open.len();
+        let mut next_open: Option<(usize, usize)> = None;
+        for pat in &open_patterns {
+            if let Some(p) = template[cursor..].find(pat) {
+                let abs = cursor + p;
+                if next_open.map(|(op, _)| abs < op).unwrap_or(true) {
+                    next_open = Some((abs, pat.len()));
+                }
             }
-            (_, Some(c)) => {
+        }
+
+        let mut next_close: Option<(usize, usize)> = None;
+        for pat in &close_patterns {
+            if let Some(p) = template[cursor..].find(pat) {
+                let abs = cursor + p;
+                if next_close.map(|(cp, _)| abs < cp).unwrap_or(true) {
+                    next_close = Some((abs, pat.len()));
+                }
+            }
+        }
+
+        match (next_open, next_close) {
+            (Some((o, len)), Some((c, _))) if o < c => {
+                depth += 1;
+                cursor = o + len;
+            }
+            (_, Some((c, len))) => {
                 depth -= 1;
-                if depth == 0 { return Some((header_end, c + close.len())); }
-                cursor = c + close.len();
+                if depth == 0 {
+                    return Some((header_end, c + len));
+                }
+                cursor = c + len;
             }
             _ => return None,
         }
     }
+
     None
 }
 
-fn split_modern_else(inner: &str) -> (String, Option<String>) {
+fn split_else_branches(inner: &str) -> (String, Option<String>) {
     let mut depth = 0usize;
     let mut cursor = 0usize;
+
+    let targets = [
+        ("{{#if ", 0), ("{{if ", 0), ("{if ", 0),
+        ("{{#for ", 0), ("{{for ", 0), ("{for ", 0),
+        ("{{/#if}}", 1), ("{{/if}}", 1), ("{/if}", 1),
+        ("{{/#for}}", 1), ("{{/for}}", 1), ("{/for}", 1),
+        ("{{else if ", 2), ("{else if ", 2),
+        ("{{#else}}", 3), ("{{else}}", 3), ("{else}", 3),
+    ];
+
     while cursor < inner.len() {
-        let next_if = inner[cursor..].find("{if ").map(|p| cursor + p);
-        let next_close = inner[cursor..].find("{/if}").map(|p| cursor + p);
-        let next_else = inner[cursor..].find("{else}").map(|p| cursor + p);
-        let next_else_if = inner[cursor..].find("{else if ").map(|p| cursor + p);
-        let mut candidates = Vec::new();
-        if let Some(p) = next_if { candidates.push((p, 0)); }
-        if let Some(p) = next_close { candidates.push((p, 1)); }
-        if let Some(p) = next_else_if { candidates.push((p, 2)); }
-        if let Some(p) = next_else { candidates.push((p, 3)); }
-        let Some((pos, kind)) = candidates.into_iter().min_by_key(|x| x.0) else { break; };
+        let mut candidate: Option<(usize, usize, usize)> = None;
+
+        for (pat, kind) in targets {
+            if let Some(p) = inner[cursor..].find(pat) {
+                let abs = cursor + p;
+                if candidate.map(|(cp, _, _)| abs < cp).unwrap_or(true) {
+                    candidate = Some((abs, kind, pat.len()));
+                }
+            }
+        }
+
+        let Some((pos, kind, len)) = candidate else {
+            break;
+        };
+
         match kind {
-            0 => { depth += 1; cursor = pos + 4; }
-            1 => { if depth > 0 { depth -= 1; } cursor = pos + 5; }
+            0 => {
+                depth += 1;
+                cursor = pos + len;
+            }
+            1 => {
+                if depth > 0 {
+                    depth -= 1;
+                }
+                cursor = pos + len;
+            }
             2 | 3 if depth == 0 => {
                 return (inner[..pos].to_string(), Some(inner[pos..].to_string()));
             }
-            _ => { cursor = pos + if kind == 2 { 10 } else { 6 }; }
-        }
-    }
-    (inner.to_string(), None)
-}
-
-fn split_for_else(inner: &str) -> (String, Option<String>) {
-    let mut depth_for = 0usize;
-    let mut depth_if = 0usize;
-    let mut cursor = 0usize;
-    while cursor < inner.len() {
-        let mut candidates = Vec::new();
-        if let Some(p) = inner[cursor..].find("{for ") { candidates.push((cursor + p, 0)); }
-        if let Some(p) = inner[cursor..].find("{/for}") { candidates.push((cursor + p, 1)); }
-        if let Some(p) = inner[cursor..].find("{if ") { candidates.push((cursor + p, 2)); }
-        if let Some(p) = inner[cursor..].find("{/if}") { candidates.push((cursor + p, 3)); }
-        if let Some(p) = inner[cursor..].find("{else}") { candidates.push((cursor + p, 4)); }
-        if let Some(p) = inner[cursor..].find("{else if ") { candidates.push((cursor + p, 5)); }
-        let Some((pos, kind)) = candidates.into_iter().min_by_key(|x| x.0) else { break; };
-        match kind {
-            0 => { depth_for += 1; cursor = pos + 5; }
-            1 => { if depth_for > 0 { depth_for -= 1; } cursor = pos + 6; }
-            2 => { depth_if += 1; cursor = pos + 4; }
-            3 => { if depth_if > 0 { depth_if -= 1; } cursor = pos + 5; }
-            4 | 5 if depth_for == 0 && depth_if == 0 => {
-                return (inner[..pos].to_string(), Some(inner[pos..].to_string()));
+            _ => {
+                cursor = pos + len;
             }
-            _ => { cursor = pos + if kind == 5 { 10 } else { 6 }; }
         }
     }
+
     (inner.to_string(), None)
 }
 
-fn evaluate_modern_if(inner: &str, expression: &str, context: &HashMap<String, Value>) -> String {
-    let (true_part, else_part) = split_modern_else(inner);
+fn evaluate_if_block(
+    inner: &str,
+    expression: &str,
+    context: &HashMap<String, Value>,
+) -> String {
+    let (true_part, else_part) = split_else_branches(inner);
+
     if evaluate_condition(expression, context) {
         return render_control_flow(&true_part, context);
     }
+
     if let Some(rest) = else_part {
-        if let Some(v) = rest.strip_prefix("{else if ") {
-            if let Some(end) = v.find('}') {
+        let stripped = rest
+            .strip_prefix("{{else if ")
+            .or_else(|| rest.strip_prefix("{else if "));
+
+        if let Some(v) = stripped {
+            let delimiter = if rest.starts_with("{{") { "}}" } else { "}" };
+            if let Some(end) = v.find(delimiter) {
                 let expr = v[..end].trim();
-                return evaluate_modern_if(&v[end + 1..], expr, context);
+                let body = &v[end + delimiter.len()..];
+                return evaluate_if_block(body, expr, context);
             }
         }
-        return render_control_flow(rest.strip_prefix("{else}").unwrap_or(&rest), context);
+
+        let else_body = rest
+            .strip_prefix("{{#else}}")
+            .or_else(|| rest.strip_prefix("{{else}}"))
+            .or_else(|| rest.strip_prefix("{else}"))
+            .unwrap_or(&rest);
+
+        return render_control_flow(else_body, context);
     }
+
     String::new()
 }
 
-
-fn evaluate_modern_for(inner: &str, expression: &str, context: &HashMap<String, Value>) -> String {
+fn evaluate_for_block(
+    inner: &str,
+    expression: &str,
+    context: &HashMap<String, Value>,
+) -> String {
     let parts: Vec<&str> = expression.split_whitespace().collect();
-    if parts.len() != 3 || parts[1] != "in" { return String::new(); }
+    if parts.len() != 3 || parts[1] != "in" {
+        return String::new();
+    }
+
     let item_var = parts[0];
     let array_path = parts[2];
-    let array = get_nested_value(array_path, context);
-    let (body, else_part) = split_for_else(inner);
-    let Value::Array(items) = array else {
-        return else_part.map(|v| render_control_flow(v.strip_prefix("{else}").unwrap_or(&v), context)).unwrap_or_default();
+    let array_val = get_nested_value(array_path, context);
+
+    let (body, else_part) = split_else_branches(inner);
+
+    let Value::Array(items) = array_val else {
+        return else_part
+            .map(|v| {
+                render_control_flow(
+                    v.strip_prefix("{{#else}}")
+                        .or_else(|| v.strip_prefix("{{else}}"))
+                        .or_else(|| v.strip_prefix("{else}"))
+                        .unwrap_or(&v),
+                    context,
+                )
+            })
+            .unwrap_or_default();
     };
+
     if items.is_empty() {
-        return else_part.map(|v| render_control_flow(v.strip_prefix("{else}").unwrap_or(&v), context)).unwrap_or_default();
+        return else_part
+            .map(|v| {
+                render_control_flow(
+                    v.strip_prefix("{{#else}}")
+                        .or_else(|| v.strip_prefix("{{else}}"))
+                        .or_else(|| v.strip_prefix("{else}"))
+                        .unwrap_or(&v),
+                    context,
+                )
+            })
+            .unwrap_or_default();
     }
+
     let mut result = String::with_capacity(body.len() * items.len());
+
     for (idx, item) in items.iter().enumerate() {
-        let mut child = context.clone();
-        child.insert(item_var.to_string(), item.clone());
-        child.insert("@index".to_string(), Value::Number((idx as i64).into()));
-        child.insert("@number".to_string(), Value::Number(((idx + 1) as i64).into()));
-        child.insert("@first".to_string(), Value::Bool(idx == 0));
-        child.insert("@last".to_string(), Value::Bool(idx + 1 == items.len()));
-        result.push_str(&render_control_flow(&body, &child));
+        let mut child_context = context.clone();
+        child_context.insert(item_var.to_string(), item.clone());
+        child_context.insert("@index".to_string(), Value::from(idx));
+        child_context.insert("@number".to_string(), Value::from(idx + 1));
+        child_context.insert("@first".to_string(), Value::from(idx == 0));
+        child_context.insert("@last".to_string(), Value::from(idx + 1 == items.len()));
+
+        result.push_str(&render_control_flow(&body, &child_context));
     }
+
     result
 }
 
@@ -1037,7 +2141,6 @@ fn render_control_flow(template: &str, context: &HashMap<String, Value>) -> Stri
                 cursor = end;
                 continue;
             }
-
             result.push_str(&template[pos..]);
             break;
         }
@@ -1048,11 +2151,8 @@ fn render_control_flow(template: &str, context: &HashMap<String, Value>) -> Stri
                 let key = template[pos + 2..end].trim();
                 let value = format_value(&get_nested_value(key, context));
 
-                // Determine whether this interpolation is inside a quoted
-                // HTML attribute. If so, escape HTML attribute characters.
                 let before = &template[..pos];
                 let mut quote: Option<char> = None;
-
                 for ch in before.chars() {
                     match quote {
                         Some(active) if ch == active => quote = None,
@@ -1072,37 +2172,50 @@ fn render_control_flow(template: &str, context: &HashMap<String, Value>) -> Stri
                 result.push_str(&template[pos..]);
                 break;
             }
-
             continue;
         }
 
-        let kind = if token == "{for " { "for" } else { "if" };
+        let is_double = token.starts_with("{{");
+        let kind = if token.contains("for") { "for" } else { "if" };
 
-        let header_end = match template[pos..].find('}') {
-            Some(v) => pos + v,
-            None => {
-                result.push_str(&template[pos..]);
-                break;
+        let header_end = if is_double {
+            match template[pos..].find("}}") {
+                Some(v) => pos + v,
+                None => {
+                    result.push_str(&template[pos..]);
+                    break;
+                }
+            }
+        } else {
+            match template[pos..].find('}') {
+                Some(v) => pos + v,
+                None => {
+                    result.push_str(&template[pos..]);
+                    break;
+                }
             }
         };
 
-        let expression = template[pos + kind.len() + 2..header_end].trim();
+        let expression = template[pos + token.len()..header_end].trim();
 
-        let Some((content_start, block_end)) =
-            find_modern_block_end(template, pos, kind)
-        else {
+        let Some((content_start, block_end)) = find_block_end(template, pos, token) else {
             result.push_str(&template[pos..]);
             break;
         };
 
-        let inner = &template[
-            content_start..block_end - (kind.len() + 3)
-        ];
+        let slice = &template[..block_end];
+        let closing_len = if is_double {
+            slice.len() - slice.rfind("{{").unwrap_or(slice.len())
+        } else {
+            kind.len() + 3
+        };
+
+        let inner = &template[content_start..block_end - closing_len];
 
         let rendered = if kind == "for" {
-            evaluate_modern_for(inner, expression, context)
+            evaluate_for_block(inner, expression, context)
         } else {
-            evaluate_modern_if(inner, expression, context)
+            evaluate_if_block(inner, expression, context)
         };
 
         result.push_str(&rendered);
@@ -1110,31 +2223,6 @@ fn render_control_flow(template: &str, context: &HashMap<String, Value>) -> Stri
     }
 
     result
-}
-
-fn render_interpolations(template: &str, context: &HashMap<String, Value>) -> String {
-    PROP_RE.replace_all(template, |captures: &regex::Captures| {
-        let full = captures.get(0).unwrap();
-        let key = captures[1].trim();
-        let value = format_value(&get_nested_value(key, context));
-
-        let before = &template[..full.start()];
-        let mut quote: Option<char> = None;
-
-        for ch in before.chars() {
-            match quote {
-                Some(active) if ch == active => quote = None,
-                None if ch == '"' || ch == '\'' => quote = Some(ch),
-                _ => {}
-            }
-        }
-
-        if quote.is_some() {
-            escape_html_attribute(&value)
-        } else {
-            value
-        }
-    }).into_owned()
 }
 
 fn format_value(val: &Value) -> String {
@@ -1147,23 +2235,322 @@ fn format_value(val: &Value) -> String {
     }
 }
 
-// ============================================================
-// PAGE ROUTES & RENDERING
-// ============================================================
+fn render_nested_vlo_content(content: &str, context: &mut RenderedPage) -> String {
+    if content.trim().is_empty() {
+        return String::new();
+    }
 
-async fn home_handler() -> impl IntoResponse { render_page("home".to_string(), true).await }
-async fn page_handler(AxumPath(path): AxumPath<String>) -> impl IntoResponse { render_page(path, true).await }
-async fn not_found_handler() -> impl IntoResponse { render_404(true).await }
+    let mut source = strip_server_block(content);
+
+    for _ in 0..20 {
+        let previous = source.clone();
+        source = render_tag(&source, "BaseLayout", context);
+        source = render_components(&source, context);
+
+        if source == previous {
+            break;
+        }
+    }
+
+    source
+}
+
+fn strip_blank_lines(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+
+    for line in html.lines() {
+        if !line.trim().is_empty() {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
+fn resolve_data_sources(source: &str) -> String {
+    let re = Regex::new(
+        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)data-source\s*=\s*[\"']([^\"']+)[\"']([^>]*?)>"#,
+    )
+    .unwrap();
+
+    let mut result = String::with_capacity(source.len());
+    let mut last_end = 0usize;
+
+    for cap in re.captures_iter(source) {
+        let full = cap.get(0).unwrap();
+        if full.start() < last_end {
+            continue;
+        }
+
+        let tag = cap.get(1).unwrap().as_str();
+        let before = cap.get(2).unwrap().as_str();
+        let action = cap
+            .get(3)
+            .unwrap()
+            .as_str()
+            .trim_start_matches("/api/")
+            .trim_matches('/')
+            .to_string();
+
+        let after = cap.get(4).unwrap().as_str();
+        let close = format!("</{}>", tag);
+        let open = format!("<{}", tag);
+
+        let mut depth = 1usize;
+        let mut cursor = full.end();
+        let mut close_start = None;
+
+        while cursor < source.len() {
+            let next_open = source[cursor..].find(&open).map(|p| cursor + p);
+            let next_close = source[cursor..].find(&close).map(|p| cursor + p);
+
+            match (next_open, next_close) {
+                (Some(o), Some(c)) if o < c => {
+                    let after_open = o + open.len();
+                    if source
+                        .get(after_open..)
+                        .map(|v| v.starts_with('>') || v.starts_with(' ') || v.starts_with('/'))
+                        .unwrap_or(false)
+                    {
+                        depth += 1;
+                    }
+                    cursor = after_open;
+                }
+                (_, Some(c)) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close_start = Some(c);
+                        break;
+                    }
+                    cursor = c + close.len();
+                }
+                _ => break,
+            }
+        }
+
+        let Some(close_pos) = close_start else {
+            result.push_str(&source[last_end..]);
+            return result;
+        };
+
+        result.push_str(&source[last_end..full.start()]);
+        let inner = &source[full.end()..close_pos];
+        let rendered = evaluate_data_source_block(inner, &action);
+
+        result.push_str(&format!(
+            "<{}{}{}>{}</{}>",
+            tag, before, after, rendered, tag
+        ));
+
+        last_end = close_pos + close.len();
+    }
+
+    result.push_str(&source[last_end..]);
+    result
+}
+
+fn fetch_api_data_sync(action: &str) -> Value {
+    let handle = tokio::runtime::Handle::current();
+
+    handle.block_on(async {
+        let actions = load_api_actions().unwrap_or_default();
+
+        if let Some(sql) = actions.get(action) {
+            if let Some(pool) = DB_POOL.get() {
+                let params = serde_json::Map::new();
+                if let Ok(res) = execute_api_sql(pool, sql, &params).await {
+                    if let Some(data) = res.get("data") {
+                        return data.clone();
+                    }
+                }
+            }
+        }
+
+        Value::Array(vec![])
+    })
+}
+
+fn evaluate_data_source_block(inner: &str, action: &str) -> String {
+    let data = fetch_api_data_sync(action);
+    let mut context = HashMap::new();
+
+    let var_name = action
+        .trim_start_matches("get_")
+        .trim_start_matches("post_")
+        .trim_start_matches("put_")
+        .trim_start_matches("delete_");
+
+    context.insert(var_name.to_string(), data);
+    render_control_flow(inner, &context)
+}
+
+fn render_vlo(source: String) -> RenderedPage {
+    let mut context = RenderedPage::default();
+    let mut source = strip_server_block(&source);
+
+    for captures in STYLE_RE.captures_iter(&source) {
+        if let Some(style) = captures.get(1) {
+            context.add_style("page", style.as_str());
+        }
+    }
+
+    source = STYLE_RE.replace_all(&source, "").into_owned();
+    source = resolve_data_sources(&source);
+
+    for _ in 0..20 {
+        let previous = source.clone();
+        source = render_tag(&source, "BaseLayout", &mut context);
+        source = render_components(&source, &mut context);
+
+        if source == previous {
+            break;
+        }
+    }
+
+    source = resolve_directives(&source);
+    context.html = strip_blank_lines(&source);
+    context
+}
+
+fn js_string_literal(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+fn strip_vlo_directive_attrs(attrs: &str) -> String {
+    let re = Regex::new(
+        r#"(?is)\s+v-(?:put|delete|prompt|param|confirm)\s*=\s*["'][^"']*["']"#,
+    )
+    .unwrap();
+
+    re.replace_all(attrs, "").into_owned()
+}
+
+fn resolve_directives(source: &str) -> String {
+    let mut result = source.to_string();
+
+    let re_del = Regex::new(
+        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-delete\s*=\s*["']([^"']+)["']([^>]*?)>"#,
+    )
+    .unwrap();
+
+    result = re_del
+        .replace_all(&result, |caps: &regex::Captures| {
+            let tag = caps.get(1).unwrap().as_str();
+            let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            let url = caps.get(3).unwrap().as_str();
+            let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+            let all_attrs = format!("{} {}", attrs_before, attrs_after);
+
+            let confirm_re = Regex::new(r#"(?is)v-confirm\s*=\s*["']([^"']*)["']"#).unwrap();
+            let confirm_js = if let Some(c) = confirm_re.captures(&all_attrs) {
+                let msg = c.get(1).map(|m| m.as_str()).unwrap_or("");
+                format!("confirm({})", js_string_literal(msg))
+            } else {
+                "true".to_string()
+            };
+
+            let clean_before = strip_vlo_directive_attrs(attrs_before);
+            let clean_after = strip_vlo_directive_attrs(attrs_after);
+            let url_js = js_string_literal(url);
+
+            let onclick = format!(
+                "if({}){{fetch({},{{method:'DELETE'}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO DELETE]',e))}}",
+                confirm_js, url_js
+            );
+
+            let onclick_attr = escape_html_attribute(&onclick);
+
+            format!(
+                "<{} {} onclick=\"{}\">",
+                tag,
+                format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
+                onclick_attr
+            )
+        })
+        .into_owned();
+
+    let re_put = Regex::new(
+        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-put\s*=\s*["']([^"']+)["']([^>]*?)>"#,
+    )
+    .unwrap();
+
+    result = re_put
+        .replace_all(&result, |caps: &regex::Captures| {
+            let tag = caps.get(1).unwrap().as_str();
+            let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            let url = caps.get(3).unwrap().as_str();
+            let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+            let all_attrs = format!("{} {}", attrs_before, attrs_after);
+
+            let param_re = Regex::new(r#"(?is)v-param\s*=\s*["']([^"']+)["']"#).unwrap();
+            let param = param_re
+                .captures(&all_attrs)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str())
+                .unwrap_or("value");
+
+            let prompt_re = Regex::new(r#"(?is)v-prompt\s*=\s*["']([^"']*)["']"#).unwrap();
+            let prompt = prompt_re
+                .captures(&all_attrs)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str())
+                .unwrap_or("Enter new value:");
+
+            let clean_before = strip_vlo_directive_attrs(attrs_before);
+            let clean_after = strip_vlo_directive_attrs(attrs_after);
+            let prompt_js = js_string_literal(prompt);
+            let url_js = js_string_literal(url);
+            let param_js = js_string_literal(param);
+
+            let onclick = format!(
+                "let v=prompt({});if(v!==null){{fetch({},{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO PUT]',e))}}",
+                prompt_js, url_js, param_js
+            );
+
+            let onclick_attr = escape_html_attribute(&onclick);
+
+            format!(
+                "<{} {} onclick=\"{}\">",
+                tag,
+                format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
+                onclick_attr
+            )
+        })
+        .into_owned();
+
+    vlo_debug!("🧩 [VLO DIRECTIVES] Resolved HTML:\n{}", result);
+    result
+}
+
+async fn home_handler() -> impl IntoResponse {
+    render_page("home".to_string(), true).await
+}
+
+async fn page_handler(AxumPath(path): AxumPath<String>) -> impl IntoResponse {
+    render_page(path, true).await
+}
+
+async fn not_found_handler() -> impl IntoResponse {
+    render_404(true).await
+}
 
 async fn render_page(path: String, dev: bool) -> impl IntoResponse {
     let page_path = path.clone();
+
     match tokio::task::spawn_blocking(move || {
         let file = get_project_root().join("pages").join(format!("{}.vlo", page_path));
+
         fs::read_to_string(file).ok().map(|content| {
             let rendered = render_vlo(content);
-            (StatusCode::OK, Html(wrap_html(&page_path, &rendered, dev)))
+            (
+                StatusCode::OK,
+                Html(wrap_html(&page_path, &rendered, dev)),
+            )
         })
-    }).await {
+    })
+    .await
+    {
         Ok(Some(response)) => response.into_response(),
         _ => render_404(dev).await.into_response(),
     }
@@ -1172,634 +2559,29 @@ async fn render_page(path: String, dev: bool) -> impl IntoResponse {
 async fn render_404(dev: bool) -> impl IntoResponse {
     tokio::task::spawn_blocking(move || {
         let file = get_project_root().join("pages").join("404.vlo");
+
         if let Ok(content) = fs::read_to_string(file) {
             let rendered = render_vlo(content);
-            (StatusCode::NOT_FOUND, Html(wrap_html("404 - Page Not Found", &rendered, dev)))
+            (
+                StatusCode::NOT_FOUND,
+                Html(wrap_html("404 - Page Not Found", &rendered, dev)),
+            )
         } else {
-            let rendered = RenderedPage { html: r#"<div class="not-found"><h1>404</h1><p>Page Not Found</p><a href="/">Back to Home</a></div>"#.to_string(), ..Default::default() };
-            (StatusCode::NOT_FOUND, Html(wrap_html("404 - Page Not Found", &rendered, dev)))
+            let rendered = RenderedPage {
+                html: r#"<div class="not-found"><h1>404</h1><p>Page Not Found</p><a href="/">Back to Home</a></div>"#.to_string(),
+                ..Default::default()
+            };
+            (
+                StatusCode::NOT_FOUND,
+                Html(wrap_html("404 - Page Not Found", &rendered, dev)),
+            )
         }
-    }).await.unwrap_or((StatusCode::INTERNAL_SERVER_ERROR, Html("Server Error".to_string())))
-}
-
-fn strip_blank_lines(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    for line in html.lines() { if !line.trim().is_empty() { out.push_str(line); out.push('\n'); } }
-    out
-}
-
-fn render_vlo(source: String) -> RenderedPage {
-    let mut context = RenderedPage::default();
-    let mut source = strip_server_block(&source);
-
-    for captures in STYLE_RE.captures_iter(&source) {
-        if let Some(style) = captures.get(1) { context.add_style("page", style.as_str()); }
-    }
-    source = STYLE_RE.replace_all(&source, "").into_owned();
-
-    source = resolve_data_sources(&source);
-
-    for _ in 0..20 {
-        let previous = source.clone();
-        source = render_tag(&source, "BaseLayout", &mut context);
-        source = render_components(&source, &mut context);
-        if source == previous { break; }
-    }
-
-    source = resolve_directives(&source);
-    context.html = strip_blank_lines(&source);
-    context
-}
-
-// ============================================================
-// VLO v0.7 DATA SOURCE RESOLUTION (UTF-8 SAFE)
-// ============================================================
-
-fn resolve_data_sources(source: &str) -> String {
-    let re = Regex::new(r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)data-source\s*=\s*[\"']([^\"']+)[\"']([^>]*?)>"#).unwrap();
-    let mut result = String::with_capacity(source.len());
-    let mut last_end = 0usize;
-    for cap in re.captures_iter(source) {
-        let full = cap.get(0).unwrap();
-        if full.start() < last_end { continue; }
-        let tag = cap.get(1).unwrap().as_str();
-        let before = cap.get(2).unwrap().as_str();
-        let action = cap.get(3).unwrap().as_str().trim_start_matches("/api/").trim_matches('/').to_string();
-        let after = cap.get(4).unwrap().as_str();
-        let close = format!("</{}>", tag);
-        let open = format!("<{}", tag);
-        let mut depth = 1usize;
-        let mut cursor = full.end();
-        let mut close_start = None;
-        while cursor < source.len() {
-            let next_open = source[cursor..].find(&open).map(|p| cursor + p);
-            let next_close = source[cursor..].find(&close).map(|p| cursor + p);
-            match (next_open, next_close) {
-                (Some(o), Some(c)) if o < c => {
-                    let after_open = o + open.len();
-                    if source.get(after_open..).map(|v| v.starts_with('>') || v.starts_with(' ') || v.starts_with('/')).unwrap_or(false) { depth += 1; }
-                    cursor = after_open;
-                }
-                (_, Some(c)) => {
-                    depth -= 1;
-                    if depth == 0 { close_start = Some(c); break; }
-                    cursor = c + close.len();
-                }
-                _ => break,
-            }
-        }
-        let Some(close_pos) = close_start else {
-            result.push_str(&source[last_end..]);
-            return result;
-        };
-        result.push_str(&source[last_end..full.start()]);
-        let inner = &source[full.end()..close_pos];
-        let rendered = evaluate_data_source_block(inner, &action);
-        result.push_str(&format!("<{}{}{}>{}</{}>", tag, before, after, rendered, tag));
-        last_end = close_pos + close.len();
-    }
-    result.push_str(&source[last_end..]);
-    result
-}
-
-fn fetch_api_data_sync(action: &str) -> Value {
-    let handle = tokio::runtime::Handle::current();
-    handle.block_on(async {
-        let actions = load_api_actions().unwrap_or_default();
-        if let Some(sql) = actions.get(action) {
-            if let Some(pool) = DB_POOL.get() {
-                let params = serde_json::Map::new();
-                if let Ok(res) = execute_api_sql(pool, sql, &params).await {
-                    if let Some(data) = res.get("data") { return data.clone(); }
-                }
-            }
-        }
-        Value::Array(vec![])
     })
-}
-
-fn evaluate_data_source_block(inner: &str, action: &str) -> String {
-    let data = fetch_api_data_sync(action);
-    let mut context = HashMap::new();
-    let var_name = action.trim_start_matches("get_").trim_start_matches("post_").trim_start_matches("put_").trim_start_matches("delete_");
-    context.insert(var_name.to_string(), data);
-    render_control_flow(inner, &context)
-}
-
-// ============================================================
-// VLO v0.7 VLO DIRECTIVES
-// ============================================================
-
-fn js_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('\'', "\\'")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\u{2028}', "\\u2028")
-        .replace('\u{2029}', "\\u2029")
-}
-
-fn js_string_literal(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
-}
-
-fn strip_vlo_directive_attrs(attrs: &str) -> String {
-    let re = Regex::new(r#"(?is)\s+v-(?:put|delete|prompt|param|confirm)\s*=\s*["'][^"']*["']"#).unwrap();
-    re.replace_all(attrs, "").into_owned()
-}
-
-fn resolve_directives(source: &str) -> String {
-    let mut result = source.to_string();
-
-    let re_del = Regex::new(
-        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-delete\s*=\s*["']([^"']+)["']([^>]*?)>"#
-    ).unwrap();
-
-    result = re_del.replace_all(&result, |caps: &regex::Captures| {
-        let tag = caps.get(1).unwrap().as_str();
-        let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-        let url = caps.get(3).unwrap().as_str();
-        let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
-
-        let all_attrs = format!("{} {}", attrs_before, attrs_after);
-
-        let confirm_re = Regex::new(
-            r#"(?is)v-confirm\s*=\s*["']([^"']*)["']"#
-        ).unwrap();
-
-        let confirm_js = if let Some(c) = confirm_re.captures(&all_attrs) {
-            let msg = c.get(1).map(|m| m.as_str()).unwrap_or("");
-            format!("confirm({})", js_string_literal(msg))
-        } else {
-            "true".to_string()
-        };
-
-        let clean_before = strip_vlo_directive_attrs(attrs_before);
-        let clean_after = strip_vlo_directive_attrs(attrs_after);
-
-        let url_js = js_string_literal(url);
-
-        let onclick = format!(
-            "if({}){{fetch({},{{method:'DELETE'}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO DELETE]',e))}}",
-            confirm_js,
-            url_js
-        );
-
-        let onclick_attr = escape_html_attribute(&onclick);
-
-        format!(
-            "<{} {} onclick=\"{}\">",
-            tag,
-            format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
-            onclick_attr
-        )
-    }).into_owned();
-
-    let re_put = Regex::new(
-        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-put\s*=\s*["']([^"']+)["']([^>]*?)>"#
-    ).unwrap();
-
-    result = re_put.replace_all(&result, |caps: &regex::Captures| {
-        let tag = caps.get(1).unwrap().as_str();
-        let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-        let url = caps.get(3).unwrap().as_str();
-        let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
-
-        let all_attrs = format!("{} {}", attrs_before, attrs_after);
-
-        let param_re = Regex::new(
-            r#"(?is)v-param\s*=\s*["']([^"']+)["']"#
-        ).unwrap();
-
-        let param = param_re
-            .captures(&all_attrs)
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str())
-            .unwrap_or("value");
-
-        let prompt_re = Regex::new(
-            r#"(?is)v-prompt\s*=\s*["']([^"']*)["']"#
-        ).unwrap();
-
-        let prompt = prompt_re
-            .captures(&all_attrs)
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str())
-            .unwrap_or("Enter new value:");
-
-        let clean_before = strip_vlo_directive_attrs(attrs_before);
-        let clean_after = strip_vlo_directive_attrs(attrs_after);
-
-        let prompt_js = js_string_literal(prompt);
-        let url_js = js_string_literal(url);
-        let param_js = js_string_literal(param);
-
-        let onclick = format!(
-            "let v=prompt({});if(v!==null){{fetch({},{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO PUT]',e))}}",
-            prompt_js,
-            url_js,
-            param_js
-        );
-
-        let onclick_attr = escape_html_attribute(&onclick);
-
-        format!(
-            "<{} {} onclick=\"{}\">",
-            tag,
-            format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
-            onclick_attr
-        )
-    }).into_owned();
-
-    vlo_debug!("🧩 [VLO DIRECTIVES] Resolved HTML:\n{}", result);
-
-    result
-}
-
-// ============================================================
-// COMPONENT RENDERING
-// ============================================================
-
-fn render_tag(source: &str, tag: &str, context: &mut RenderedPage) -> String {
-    if let Some((start, end, props, children)) = find_tag(source, tag) {
-        return format!("{}{}{}", &source[..start], render_component_file(tag, &props, &children, context), &source[end..]);
-    }
-    source.to_string()
-}
-
-fn render_components(source: &str, context: &mut RenderedPage) -> String {
-    let mut output = String::new();
-    let mut last = 0;
-    let chars: Vec<(usize, char)> = source.char_indices().collect();
-    let mut index = 0;
-
-    while index < chars.len() {
-        let (position, character) = chars[index];
-        if character == '<' && index + 1 < chars.len() && chars[index + 1].1.is_ascii_uppercase() {
-            let mut end = index + 1;
-            while end < chars.len() && (chars[end].1.is_ascii_alphanumeric() || chars[end].1 == '_') { end += 1; }
-            let tag = &source[chars[index + 1].0..chars[end].0];
-            if let Some((_, tag_end, props, children)) = find_tag(&source[position..], tag) {
-                output.push_str(&source[last..position]);
-                output.push_str(&render_component_file(tag, &props, &children, context));
-                last = position + tag_end;
-                while index < chars.len() && chars[index].0 < last { index += 1; }
-                continue;
-            }
-        }
-        index += 1;
-    }
-    output.push_str(&source[last..]);
-    output
-}
-
-fn component_path(name: &str) -> Option<PathBuf> {
-    let root = get_project_root();
-    let layout = root.join("layouts").join(format!("{}.vlo", name));
-    if layout.exists() { return Some(layout); }
-    let component = root.join("components").join(format!("{}.vlo", name));
-    if component.exists() { return Some(component); }
-    None
-}
-
-fn read_component_template(path: &Path) -> Option<Arc<CompiledTemplate>> {
-    if let Ok(cache) = TEMPLATE_CACHE.lock() {
-        if let Some(cached) = cache.get(path) { return Some(Arc::clone(cached)); }
-    }
-    let source = fs::read_to_string(path).ok()?;
-    let mut css = String::new();
-    for captures in STYLE_RE.captures_iter(&source) {
-        if let Some(style) = captures.get(1) { css.push_str(style.as_str()); css.push('\n'); }
-    }
-    let template = STYLE_RE.replace_all(&source, "").into_owned();
-    let compiled = Arc::new(CompiledTemplate { template, css });
-    if let Ok(mut cache) = TEMPLATE_CACHE.lock() { cache.insert(path.to_path_buf(), Arc::clone(&compiled)); }
-    Some(compiled)
-}
-
-fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> {
-    let open = format!("<{}", name);
-    let start = source.find(&open)?;
-    let mut index = start + open.len();
-    let next = source[index..].chars().next()?;
-    if !(next.is_whitespace() || next == '/' || next == '>') { return None; }
-    let props_start = index;
-    let mut quote = None;
-    let mut open_end = None;
-
-    for (offset, character) in source[index..].char_indices() {
-        match quote {
-            Some(current) if character == current => { quote = None; }
-            None if character == '"' || character == '\'' => { quote = Some(character); }
-            None if character == '>' => { open_end = Some(index + offset); break; }
-            _ => {}
-        }
-    }
-    let open_end = open_end?;
-    let props = source[props_start..open_end].to_string();
-    let self_closing = props.trim_end().ends_with('/');
-    index = open_end + 1;
-    if self_closing { return Some((start, index, props, String::new())); }
-    let close = format!("</{}>", name);
-    let children_start = index;
-    let mut depth = 1;
-
-    while index < source.len() {
-        let remaining = &source[index..];
-        if remaining.starts_with(&open) {
-            let after = index + open.len();
-            let valid = source[after..].chars().next().map(|c| c.is_whitespace() || c == '/' || c == '>').unwrap_or(false);
-            if valid { depth += 1; }
-        } else if remaining.starts_with(&close) {
-            depth -= 1;
-            if depth == 0 { return Some((start, index + close.len(), props, source[children_start..index].to_string())); }
-        }
-        index += remaining.chars().next().map(|ch| ch.len_utf8()).unwrap_or(1);
-    }
-    None
-}
-
-fn render_component_file(name: &str, props_str: &str, children: &str, context: &mut RenderedPage) -> String {
-    let path = match component_path(name) {
-        Some(path) => path,
-        None => return format!("<!-- Missing component: {} -->", name),
-    };
-    let compiled = match read_component_template(&path) {
-        Some(template) => template,
-        None => return format!("<!-- Missing template: {} -->", name),
-    };
-    if !compiled.css.trim().is_empty() { context.add_style(name, compiled.css.trim()); }
-    let template = &compiled.template;
-    let props = parse_props_v7(props_str);
-    let (raw_named_slots, raw_default_slot) = parse_slot_content(children);
-
-    let mut named_slots = HashMap::new();
-    for (slot_name, slot_content) in raw_named_slots {
-        let rendered = render_nested_vlo_content(&slot_content, context);
-        named_slots.insert(slot_name, rendered);
-    }
-    let default_slot = render_nested_vlo_content(&raw_default_slot, context);
-    
-    let mut render_ctx = props.clone();
-    render_ctx.insert("children".to_string(), Value::String(default_slot.clone()));
-
-    let rendered = render_component_template(template, &render_ctx);
-    let rendered = render_slots(&rendered, &named_slots, &default_slot);
-
-    let incoming_class = props.get("class").and_then(|v| if let Value::String(s) = v { Some(s.clone()) } else { None });
-    let attributes = build_component_attributes(template, &props);
-
-    if attributes.is_empty() && incoming_class.is_none() { return rendered; }
-
-    let skip_check = STYLE_RE.replace_all(&rendered, "");
-    if let Some(first_tag) = ELEMENT_RE.captures(&skip_check).and_then(|c| c.get(1)).map(|m| m.as_str().to_string()) {
-        if first_tag.eq_ignore_ascii_case("style") || first_tag.eq_ignore_ascii_case("script") { return rendered; }
-    }
-
-    if let Some(captures) = ELEMENT_RE.captures(&rendered) {
-        let full_match = captures.get(0).unwrap();
-        let tag_name = captures.get(1).unwrap().as_str();
-        let existing_attributes = captures.get(2).map(|v| v.as_str()).unwrap_or("").to_string();
-
-        let (existing_attributes, class_attr) = if let Some(extra) = incoming_class.as_deref().map(|c| c.trim()).filter(|c| !c.is_empty()) {
-            if let Some(m) = CLASS_RE.captures(&existing_attributes) {
-                let existing_value = m.get(2).or_else(|| m.get(3)).map(|v| v.as_str()).unwrap_or("").trim();
-                let merged = if existing_value.is_empty() { format!("class=\"{}\"", extra) } else { format!("class=\"{} {}\"", existing_value, extra) };
-                let stripped = CLASS_RE.replace(&existing_attributes, "").trim().to_string();
-                (stripped, Some(merged))
-            } else { (existing_attributes, Some(format!("class=\"{}\"", extra))) }
-        } else { (existing_attributes, None) };
-
-        let attributes = match class_attr {
-            Some(c) if attributes.is_empty() => c,
-            Some(c) => format!("{} {}", c, attributes),
-            None => attributes,
-        };
-
-        if attributes.is_empty() { return rendered; }
-        let replacement = if existing_attributes.trim().is_empty() {
-            format!("<{} {}>", tag_name, attributes)
-        } else {
-            format!("<{} {} {}>", tag_name, existing_attributes.trim(), attributes)
-        };
-        return format!("{}{}{}", &rendered[..full_match.start()], replacement, &rendered[full_match.end()..]);
-    }
-    rendered
-}
-
-fn render_nested_vlo_content(content: &str, context: &mut RenderedPage) -> String {
-    if content.trim().is_empty() { return String::new(); }
-    let mut source = strip_server_block(content);
-    for _ in 0..20 {
-        let previous = source.clone();
-        source = render_tag(&source, "BaseLayout", context);
-        source = render_components(&source, context);
-        if source == previous { break; }
-    }
-    source
-}
-
-fn render_component_template(template: &str, props: &HashMap<String, Value>) -> String {
-    let rendered = render_control_flow(template, props);
-    let rendered = render_interpolations(&rendered, props);
-    normalize_class_attributes(&rendered)
-}
-
-fn normalize_class_attributes(html: &str) -> String {
-    CLASS_RE.replace_all(html, |captures: &regex::Captures| {
-        let value = captures.get(2).or_else(|| captures.get(3)).map(|v| v.as_str()).unwrap_or("");
-        let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
-        let quote = if captures.get(1).map(|v| v.as_str()).unwrap_or("").starts_with('"') { '"' } else { '\'' };
-        format!("class={quote}{normalized}{quote}")
-    }).into_owned()
-}
-
-fn build_component_attributes(template: &str, props: &HashMap<String, Value>) -> String {
-    let mut used = HashSet::new();
-    for captures in PROP_RE.captures_iter(template) { used.insert(captures[1].to_string()); }
-    let mut attributes = Vec::new();
-    let button_default = template.to_ascii_lowercase().contains("<button");
-
-    if button_default && !props.contains_key("type") && !used.contains("type") { attributes.push("type=\"button\"".to_string()); }
-    for (key, value) in props {
-        if key == "children" || key == "attributes" || key == "class" { continue; }
-        if used.contains(key) { continue; }
-        if is_boolean_attribute(key) {
-            if let Value::Bool(b) = value { if *b { attributes.push(key.clone()); } }
-            else if let Value::String(s) = value { if s.eq_ignore_ascii_case("true") || s == key { attributes.push(key.clone()); } }
-            continue;
-        }
-        if let Value::String(s) = value {
-            if s.trim().is_empty() { continue; }
-            attributes.push(format!("{}=\"{}\"", key, escape_html_attribute(s)));
-        }
-    }
-    attributes.sort();
-    attributes.join(" ")
-}
-
-fn is_boolean_attribute(name: &str) -> bool {
-    matches!(name.to_ascii_lowercase().as_str(), "allowfullscreen" | "async" | "autofocus" | "autoplay" | "checked" | "controls" | "default" | "defer" | "disabled" | "formnovalidate" | "hidden" | "inert" | "ismap" | "itemscope" | "loop" | "multiple" | "muted" | "nomodule" | "novalidate" | "open" | "playsinline" | "readonly" | "required" | "reversed" | "selected")
-}
-
-fn escape_html_attribute(value: &str) -> String {
-    value.replace('&', "&amp;").replace('"', "&quot;").replace('\'', "&#39;").replace('<', "&lt;").replace('>', "&gt;")
-}
-
-fn parse_props_v7(raw: &str) -> HashMap<String, Value> {
-    let chars: Vec<char> = raw.replace("&quot;", "\"").replace("&#39;", "'").chars().collect();
-    let mut map = HashMap::new();
-    let mut index = 0;
-
-    while index < chars.len() {
-        while index < chars.len() && chars[index].is_whitespace() { index += 1; }
-        if index >= chars.len() || chars[index] == '/' { break; }
-        let mut key = String::new();
-        while index < chars.len() && chars[index] != '=' && !chars[index].is_whitespace() && chars[index] != '/' {
-            key.push(chars[index]); index += 1;
-        }
-        if key.is_empty() { index += 1; continue; }
-        while index < chars.len() && chars[index].is_whitespace() { index += 1; }
-        if index < chars.len() && chars[index] == '=' {
-            index += 1;
-            while index < chars.len() && chars[index].is_whitespace() { index += 1; }
-            if index >= chars.len() { map.insert(key, Value::Bool(true)); break; }
-            let quote = chars[index];
-            let mut value = String::new();
-            if quote == '"' || quote == '\'' {
-                index += 1;
-                while index < chars.len() && chars[index] != quote { value.push(chars[index]); index += 1; }
-                if index < chars.len() { index += 1; }
-            } else {
-                while index < chars.len() && !chars[index].is_whitespace() && chars[index] != '/' { value.push(chars[index]); index += 1; }
-            }
-            map.insert(key, Value::String(value));
-        } else {
-            map.insert(key, Value::Bool(true));
-        }
-    }
-    map
-}
-
-fn render_slots(template: &str, named_slots: &HashMap<String, String>, default_slot: &str) -> String {
-    let res = SLOT_RE.replace_all(template, |captures: &regex::Captures| {
-        let name = captures.get(1).map(|v| v.as_str().trim()).unwrap_or("");
-        let fallback = captures.get(2).map(|v| v.as_str()).unwrap_or("");
-        if name.is_empty() {
-            if default_slot.trim().is_empty() { fallback.to_string() } else { default_slot.to_string() }
-        } else if let Some(content) = named_slots.get(name) { content.clone() } 
-        else { fallback.to_string() }
-    }).into_owned();
-    SLOT_RE.replace_all(&res, "").into_owned()
-}
-
-fn parse_slot_content(children: &str) -> (HashMap<String, String>, String) {
-    let mut named_slots = HashMap::new();
-    let mut default_content = String::new();
-    let mut cursor = 0;
-    let mut default_start = 0;
-
-    while cursor < children.len() {
-        let remaining = &children[cursor..];
-        let open_start = match remaining.find('<') {
-            Some(offset) => cursor + offset,
-            None => break,
-        };
-        let tag_info = match parse_element_at(children, open_start) {
-            Some(info) => info,
-            None => { cursor = open_start + 1; continue; }
-        };
-        let (_tag_name, _opening_end, element_end, props, content) = tag_info;
-        if let Some(slot_name) = get_slot_name(&props) {
-            if open_start > default_start { default_content.push_str(&children[default_start..open_start]); }
-            named_slots.entry(slot_name).or_insert_with(String::new).push_str(content);
-            cursor = element_end;
-            default_start = cursor;
-            continue;
-        }
-        cursor = element_end;
-    }
-    if default_start < children.len() { default_content.push_str(&children[default_start..]); }
-    (named_slots, default_content)
-}
-
-fn get_slot_name(props: &str) -> Option<String> {
-    parse_props_v7(props).get("slot").and_then(|v| if let Value::String(s) = v { Some(s.clone()) } else { None })
-}
-
-fn is_void_tag(name: &str) -> bool {
-    matches!(name.to_ascii_lowercase().as_str(), "area" | "base" | "br" | "col" | "embed" | "hr" | "img" | "input" | "link" | "meta" | "param" | "source" | "track" | "wbr")
-}
-
-fn parse_element_at(source: &str, start: usize) -> Option<(String, usize, usize, String, &str)> {
-    if !source[start..].starts_with('<') { return None; }
-    let mut cursor = start + 1;
-    if cursor >= source.len() { return None; }
-    let first = source[cursor..].chars().next()?;
-    if first == '/' || first == '!' || first == '?' { return None; }
-    let tag_start = cursor;
-    while cursor < source.len() {
-        let ch = source[cursor..].chars().next()?;
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == ':' { cursor += ch.len_utf8(); }
-        else { break; }
-    }
-    if cursor == tag_start { return None; }
-    let tag_name = source[tag_start..cursor].to_string();
-    let opening_end = find_tag_opening_end(source, cursor)?;
-    let props = source[cursor..opening_end].to_string();
-    let self_closing = props.trim_end().ends_with('/') || is_void_tag(&tag_name);
-    if self_closing { return Some((tag_name, opening_end + 1, opening_end + 1, props, "")); }
-    let content_start = opening_end + 1;
-    let element_end = find_matching_tag_end(source, content_start, &tag_name)?;
-    let close_start = element_end.checked_sub(format!("</{}>", tag_name).len())?;
-    if close_start < content_start { return None; }
-    let content = &source[content_start..close_start];
-    Some((tag_name, opening_end + 1, element_end, props, content))
-}
-
-fn find_tag_opening_end(source: &str, start: usize) -> Option<usize> {
-    let mut quote = None;
-    let mut cursor = start;
-    while cursor < source.len() {
-        let ch = source[cursor..].chars().next()?;
-        match quote {
-            Some(active) => { if ch == active { quote = None; } }
-            None => { if ch == '"' || ch == '\'' { quote = Some(ch); } else if ch == '>' { return Some(cursor); } }
-        }
-        cursor += ch.len_utf8();
-    }
-    None
-}
-
-fn find_matching_tag_end(source: &str, start: usize, tag_name: &str) -> Option<usize> {
-    let opening = format!("<{}", tag_name);
-    let closing = format!("</{}>", tag_name);
-    let mut depth = 1;
-    let mut cursor = start;
-
-    while cursor < source.len() {
-        let remaining = &source[cursor..];
-        if remaining.starts_with(&closing) {
-            depth -= 1;
-            if depth == 0 { return Some(cursor + closing.len()); }
-            cursor += closing.len();
-            continue;
-        }
-        if remaining.starts_with(&opening) {
-            let after_name = cursor + opening.len();
-            let valid = source[after_name..].chars().next().map(|ch| ch.is_whitespace() || ch == '>' || ch == '/').unwrap_or(false);
-            if valid {
-                let opening_end = find_tag_opening_end(source, after_name)?;
-                let props = source[after_name..opening_end].trim();
-                if !props.ends_with('/') { depth += 1; }
-                cursor = opening_end + 1;
-                continue;
-            }
-        }
-        cursor += remaining.chars().next().map(|ch| ch.len_utf8()).unwrap_or(1);
-    }
-    None
+    .await
+    .unwrap_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Html("Server Error".to_string()),
+    ))
 }
 
 fn wrap_html(title: &str, rendered: &RenderedPage, dev: bool) -> String {
@@ -1809,7 +2591,9 @@ const es = new EventSource("/__vlo_hmr");
 es.onmessage = () => location.reload();
 window.addEventListener("beforeunload", () => es.close());
 </script>"#
-    } else { "" };
+    } else {
+        ""
+    };
 
     let component_styles = if rendered.styles.is_empty() {
         String::new()
@@ -1834,4 +2618,477 @@ window.addEventListener("beforeunload", () => es.close());
 </html>"#,
         title, component_styles, rendered.html, hmr
     )
+}
+
+async fn hmr_handler(
+    tx: broadcast::Sender<()>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let mut rx = tx.subscribe();
+
+    let stream = stream! {
+        while rx.recv().await.is_ok() {
+            yield Ok(Event::default().data("reload"));
+        }
+    };
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn watch_files(
+    pages: PathBuf,
+    public: PathBuf,
+    tx: broadcast::Sender<()>,
+    last: Arc<Mutex<Instant>>,
+) -> notify::Result<()> {
+    let root = get_project_root();
+    let layouts = root.join("layouts");
+    let components = root.join("components");
+
+    let (tx_notify, rx) = channel();
+    let mut watcher = RecommendedWatcher::new(tx_notify, Config::default())?;
+
+    let paths_to_watch = [&pages, &public, &layouts, &components];
+    for path in paths_to_watch {
+        if path.exists() {
+            watcher.watch(path, RecursiveMode::Recursive)?;
+        }
+    }
+
+    for result in rx {
+        let Ok(event) = result else {
+            continue;
+        };
+
+        let relevant = event.paths.iter().any(|path| {
+            path.extension().and_then(|e| e.to_str()) == Some("vlo")
+                || path.starts_with(&public)
+                || path.starts_with(&layouts)
+                || path.starts_with(&components)
+        });
+
+        if !relevant {
+            continue;
+        }
+
+        if let Ok(mut timestamp) = last.try_lock() {
+            if timestamp.elapsed().as_millis() > 200 {
+                *timestamp = Instant::now();
+                if let Ok(mut cache) = TEMPLATE_CACHE.lock() {
+                    cache.clear();
+                }
+                let _ = tx.send(());
+                println!("⚡ Reload");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn dev(host: &str, port: u16) {
+    let root = get_project_root();
+    let pages_path = root.join("pages");
+    let public_path = root.join("public");
+    let public_path_service = public_path.clone();
+
+    let (tx, _) = broadcast::channel::<()>(16);
+    let tx_watcher = tx.clone();
+    let last_reload = Arc::new(Mutex::new(Instant::now()));
+
+    std::thread::spawn(move || {
+        let _ = watch_files(pages_path, public_path, tx_watcher, last_reload);
+    });
+
+    let app = Router::new()
+        .route("/", get(home_handler))
+        .route("/:path", get(page_handler))
+        .route(
+            "/api",
+            get(api_handler_root)
+                .post(api_handler_root)
+                .put(api_handler_root)
+                .patch(api_handler_root)
+                .delete(api_handler_root),
+        )
+        .route(
+            "/api/:resource",
+            get(api_handler_path)
+                .post(api_handler_path)
+                .put(api_handler_path)
+                .patch(api_handler_path)
+                .delete(api_handler_path),
+        )
+        .route(
+            "/api/:resource/:id",
+            get(api_handler_id)
+                .post(api_handler_id)
+                .put(api_handler_id)
+                .patch(api_handler_id)
+                .delete(api_handler_id),
+        )
+        .route("/__vlo_hmr", get(move || hmr_handler(tx)))
+        .nest_service("/static", ServeDir::new(public_path_service))
+        .fallback(not_found_handler);
+
+    let host_str = std::env::var("VLO_HOST").unwrap_or_else(|_| host.to_string());
+    let port_str = std::env::var("VLO_PORT").unwrap_or_else(|_| port.to_string());
+    let addr = format!("{}:{}", host_str, port_str);
+
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .expect("Failed to bind port");
+
+    println!("⚡ VLO v0.7 dev server running at http://{}", addr);
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("Server error");
+}
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Failed to listen for Ctrl+C");
+    println!("\n⚡ Shutting down VLO dev server...");
+}
+
+fn build() {
+    println!("⚡ Building production site...");
+
+    let root = get_project_root();
+    let pages = root.join("pages");
+    let public = root.join("public");
+    let dist = root.join("dist");
+
+    if dist.exists() {
+        let _ = fs::remove_dir_all(&dist);
+    }
+
+    fs::create_dir_all(dist.join("static")).expect("Failed to create dist directory");
+
+    if let Ok(entries) = fs::read_dir(&pages) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("vlo") {
+                continue;
+            }
+
+            let stem = path
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+
+            let content = fs::read_to_string(&path).unwrap_or_default();
+            let rendered = render_vlo(content);
+            let html = wrap_html(&stem, &rendered, false);
+
+            let output = if stem == "home" || stem == "index" {
+                dist.join("index.html")
+            } else {
+                dist.join(format!("{}.html", stem))
+            };
+
+            fs::write(&output, html).expect("Failed to write generated HTML");
+            println!("  ├─ Generated: {}", output.display());
+        }
+    }
+
+    if public.exists() {
+        copy_dir_all(&public, &dist.join("static")).expect("Failed to copy static assets");
+        println!("  └─ Copied static assets");
+    }
+
+    println!("⚡ Build completed successfully!");
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&entry.path(), &dst.join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+async fn deploy(provider: &str) {
+    let root = get_project_root();
+    let dist = root.join("dist");
+
+    if !dist.exists() {
+        build();
+    }
+
+    let provider = provider.to_lowercase();
+    println!("⚡ Deploying /dist to {}...", provider);
+
+    if provider == "railway" {
+        let caddy = dist.join("Caddyfile");
+        if !caddy.exists() {
+            fs::write(&caddy, ":$PORT {\n    root * .\n    file_server\n}\n")
+                .expect("Failed to write Caddyfile");
+        }
+    }
+
+    let args: Vec<&str> = match provider.as_str() {
+        "netlify" => vec!["netlify-cli", "deploy", "--dir=dist", "--prod"],
+        "vercel" => vec!["vercel", "deploy", "dist", "--prod"],
+        "cloudflare" | "pages" => vec!["wrangler", "pages", "deploy", "dist"],
+        "railway" => vec!["@railway/cli", "up"],
+        _ => {
+            eprintln!("❌ Unsupported provider '{}'.", provider);
+            return;
+        }
+    };
+
+    let working_dir = if provider == "railway" { &dist } else { &root };
+
+    let status = if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .arg("/C")
+            .arg("npx.cmd")
+            .arg("-y")
+            .args(&args)
+            .current_dir(working_dir)
+            .status()
+    } else {
+        Command::new("npx")
+            .arg("-y")
+            .args(&args)
+            .current_dir(working_dir)
+            .status()
+    };
+
+    match status {
+        Ok(status) if status.success() => {
+            println!("⚡ Deployment completed successfully!");
+        }
+        Ok(status) => {
+            eprintln!("❌ Deployment exited with status: {}", status);
+        }
+        Err(error) => {
+            eprintln!("❌ Failed to execute deployment command: {}", error);
+        }
+    }
+}
+
+fn init_project(
+    name: &str,
+    db_driver: &str,
+    db_name_opt: Option<&str>,
+    no_db: bool,
+) {
+    let target_dir = if name == "." {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    } else {
+        PathBuf::from(name)
+    };
+
+    println!("⚡ Initializing VLO v0.7 project in '{}'...", target_dir.display());
+
+    if target_dir != Path::new(".") && !target_dir.exists() {
+        fs::create_dir_all(&target_dir).expect("Failed to create project directory");
+    }
+
+    let pages_dir = target_dir.join("pages");
+    let api_dir = pages_dir.join("api");
+    let layouts_dir = target_dir.join("layouts");
+    let components_dir = target_dir.join("components");
+    let public_dir = target_dir.join("public");
+
+    fs::create_dir_all(&api_dir).ok();
+    fs::create_dir_all(&layouts_dir).ok();
+    fs::create_dir_all(&components_dir).ok();
+    fs::create_dir_all(&public_dir).ok();
+
+    let db_name = match db_name_opt {
+        Some(custom) if !custom.trim().is_empty() => custom.trim().to_string(),
+        _ => {
+            let base_name = if name != "." {
+                Path::new(name)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("app")
+            } else {
+                "app"
+            };
+
+            let sanitized = base_name.replace(
+                |c: char| !c.is_alphanumeric() && c != '_' && c != '-',
+                "_",
+            );
+
+            if db_driver == "sqlite" {
+                if sanitized.ends_with(".db") || sanitized.ends_with(".sqlite") {
+                    sanitized
+                } else {
+                    format!("{}.db", sanitized)
+                }
+            } else {
+                sanitized
+            }
+        }
+    };
+
+    let env_path = target_dir.join(".env");
+    if !env_path.exists() {
+        let env_content = if no_db {
+            "# Database disabled\n# DB_DRIVER=sqlite\n# DATABASE_URL=sqlite://app.db\n".to_string()
+        } else {
+            match db_driver.to_lowercase().as_str() {
+                "postgres" | "postgresql" => {
+                    format!(
+                        "DB_DRIVER=postgres\nDATABASE_URL=postgres://postgres:password@localhost:5432/{}\n",
+                        db_name
+                    )
+                }
+                "mysql" => {
+                    format!(
+                        "DB_DRIVER=mysql\nDATABASE_URL=mysql://root:password@localhost:3306/{}\n",
+                        db_name
+                    )
+                }
+                _ => {
+                    format!(
+                        "DB_DRIVER=sqlite\nDATABASE_URL=sqlite://{}\n",
+                        db_name
+                    )
+                }
+            }
+        };
+
+        fs::write(&env_path, env_content).expect("Failed to write .env");
+    }
+
+    if !no_db && matches!(db_driver.to_lowercase().as_str(), "sqlite" | "") {
+        let db_file_path = target_dir.join(&db_name);
+        if !db_file_path.exists() {
+            fs::File::create(&db_file_path).ok();
+        }
+    }
+
+    let schema_path = target_dir.join("schema.sql");
+    if !schema_path.exists() && !no_db {
+        let schema_sql = match db_driver.to_lowercase().as_str() {
+            "postgres" | "postgresql" => {
+                r#"CREATE TABLE IF NOT EXISTS items (id SERIAL PRIMARY KEY, title TEXT NOT NULL);
+INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ Explore Component Composition'), ('🚀 Build Zero-Boilerplate APIs');"#
+            }
+            "mysql" => {
+                r#"CREATE TABLE IF NOT EXISTS items (id INT AUTO_INCREMENT PRIMARY KEY, title VARCHAR(255) NOT NULL);
+INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ Explore Component Composition'), ('🚀 Build Zero-Boilerplate APIs');"#
+            }
+            _ => {
+                r#"CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL);
+INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ Explore Component Composition'), ('🚀 Build Zero-Boilerplate APIs');"#
+            }
+        };
+
+        fs::write(&schema_path, schema_sql).expect("Failed to write schema.sql");
+    }
+
+    let api_vlo_path = api_dir.join("api.vlo");
+    if !api_vlo_path.exists() {
+        fs::write(
+            &api_vlo_path,
+            r#"<script server>
+{
+    "get_items": "SELECT * FROM items ORDER BY id DESC;",
+    "post_items": "INSERT INTO items (title) VALUES ({{title}});",
+    "put_items": "UPDATE items SET title = {{title}} WHERE id = {{id}};",
+    "delete_items": "DELETE FROM items WHERE id = {{id}};"
+}
+</script>"#,
+        )
+        .expect("Failed to write api.vlo");
+    }
+
+    let layout_path = layouts_dir.join("BaseLayout.vlo");
+    if !layout_path.exists() {
+        fs::write(
+            &layout_path,
+            r#"<div class="layout-container">
+    <header class="app-header"><div class="brand"><h1>⚡ {{title}}</h1></div>
+    <nav class="app-nav"><a href="/">Home</a><a href="/about">About</a></nav></header>
+    <main class="app-main"><slot></slot></main>
+    <footer class="app-footer"><p>Built with ⚡ <strong>VLO v0.7</strong></p></footer>
+</div>
+<style>
+    .layout-container { max-width: 720px; margin: 0 auto; padding: 2.5rem 1.5rem; }
+    .app-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 1.25rem; margin-bottom: 2rem; }
+    .app-header h1 { font-size: 1.5rem; font-weight: 700; margin: 0; color: #f8fafc; }
+    .app-nav { display: flex; gap: 1.25rem; }
+    .app-nav a { color: #94a3b8; text-decoration: none; font-weight: 500; transition: color 0.15s ease; }
+    .app-nav a:hover { color: #38bdf8; }
+    .app-main { min-height: 320px; }
+    .app-footer { border-top: 1px solid #334155; padding-top: 1.5rem; margin-top: 3rem; text-align: center; color: #64748b; font-size: 0.875rem; }
+</style>"#,
+        )
+        .expect("Failed to write BaseLayout.vlo");
+    }
+
+    let card_path = components_dir.join("Card.vlo");
+    if !card_path.exists() {
+        fs::write(
+            &card_path,
+            r#"<div class="vlo-card">
+    {{#if title}}
+        <h3>{{title}}</h3>
+    {{/#if}}
+    {{#if description}}
+        <p class="card-desc">{{description}}</p>
+    {{/#if}}
+    <slot></slot>
+</div>
+<style>.vlo-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); margin-bottom: 1.5rem; }</style>"#,
+        )
+        .expect("Failed to write Card.vlo");
+    }
+
+    let home_path = pages_dir.join("home.vlo");
+    if !home_path.exists() {
+        fs::write(
+            &home_path,
+            r#"<BaseLayout title="VLO v0.7 Dashboard">
+    <Card>
+        <h2>Items (Zero-JS SSR CRUD)</h2>
+        <form action="/api/items" method="POST" class="crud-form">
+            <input name="title" placeholder="Add new task..." required/>
+            <button type="submit">+ Add</button>
+        </form>
+        <div data-source="/api/get_items">
+            {{#for item in items}}
+            <div class="item-row">
+                <span>{{item.title}}</span>
+                <div class="actions">
+                    <button v-put="/api/items/{{item.id}}" v-prompt="Update title:" v-param="title">✎</button>
+                    <button v-delete="/api/items/{{item.id}}" v-confirm="Delete this item?">✕</button>
+                </div>
+            </div>
+            {{#else}}
+            <p class="empty">No items found. Add one above!</p>
+            {{/#for}}
+        </div>
+    </Card>
+</BaseLayout>
+<style>
+    .crud-form { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; }
+    .crud-form input { flex: 1; padding: 0.625rem; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #f8fafc; }
+    .crud-form button { padding: 0.625rem 1.25rem; background: #38bdf8; color: #0f172a; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
+    .item-row { display: flex; justify-content: space-between; align-items: center; padding: 0.875rem; border-bottom: 1px solid #334155; }
+    .actions { display: flex; gap: 0.5rem; }
+    .actions button { background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; }
+    .actions button:hover { border-color: #38bdf8; color: #38bdf8; }
+    .empty { color: #64748b; text-align: center; padding: 1rem; }
+</style>"#,
+        )
+        .expect("Failed to write home.vlo");
+    }
+
+    println!("✅ Project initialized successfully!");
 }
