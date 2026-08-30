@@ -3,8 +3,8 @@
 -- Database Target: SQLite (vlo_app)
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS vlo_app;
-USE vlo_apps;
+--CREATE DATABASE IF NOT EXISTS vlo_app;
+--USE vlo_apps;
 
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
