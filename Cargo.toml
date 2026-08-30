@@ -1,12 +1,11 @@
 [package]
 name = "vlo"
-version = "0.6.0"
+version = "0.8.0"
 edition = "2021"
 
 [dependencies]
 # Web framework & HTTP routing
 axum = { version = "0.7", features = ["macros", "http1", "json", "query", "tokio"] }
-tower-http = { version = "0.5", features = ["fs"] }
 
 # Asynchronous runtime & streaming
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "fs"] }
@@ -35,6 +34,8 @@ sqlx = {
         "json"
     ]
 }
+
+tower-http = { version = "0.5.2", features = ["fs", "compression-gzip"] }
 
 [profile.release]
 opt-level = "z"
