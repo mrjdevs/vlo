@@ -1,10 +1,6 @@
 use crate::state::get_project_root;
 use std::{fs, sync::OnceLock};
 
-// ============================================================
-// 9. VLO DATABASE
-// ============================================================
-
 #[derive(Clone)]
 pub enum DbPool {
     Sqlite(sqlx::SqlitePool),

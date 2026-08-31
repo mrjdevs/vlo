@@ -1,7 +1,6 @@
 use crate::{
     database::{DbPool, DB_POOL},
     state::get_project_root,
-    vlo_debug,
 };
 use axum::{
     extract::{Path as AxumPath, Query},
@@ -11,10 +10,6 @@ use axum::{
 use serde_json::Value;
 use sqlx::{Column, Row, TypeInfo, ValueRef};
 use std::{collections::HashMap, fs};
-
-// ============================================================
-// 10. VLO SERVER BLOCK
-// ============================================================
 
 pub fn extract_server_block(content: &str) -> Option<String> {
     let start = content.find("<script server>")?;
@@ -39,10 +34,6 @@ pub fn strip_server_block(content: &str) -> String {
 
     content.to_string()
 }
-
-// ============================================================
-// 11. VLO API DEFINITION LOADER
-// ============================================================
 
 pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
     let file = get_project_root().join("pages/api/api.vlo");
@@ -101,10 +92,6 @@ pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
 
     Ok(actions)
 }
-
-// ============================================================
-// 12. VLO API ENGINE & 13. VLO SQL ENGINE
-// ============================================================
 
 pub async fn api_handler_root(
     method: Method,
@@ -281,9 +268,7 @@ pub async fn api_route_handler(
                     );
                 }
             }
-        } else if content_type
-            .contains("application/x-www-form-urlencoded")
-        {
+        } else {
             for (key, value) in parse_form_body(&body) {
                 query.insert(key, value);
             }
@@ -480,21 +465,9 @@ pub async fn api_route_handler(
 
     match execute_api_sql(pool, &sql, &params).await {
         Ok(data) => {
-            vlo_debug!(
-                "✅ [VLO API] {} {} -> success: {:?}",
-                method,
-                action_name,
-                data
-            );
-
-            if method == Method::POST
-                && resource == "products"
-            {
-                vlo_debug!(
-                    "↪️ [VLO API] POST products completed -> redirecting to /products"
-                );
-
-                return Redirect::to("/products")
+            if method == Method::POST {
+                let redirect_url = format!("/{}", resource);
+                return Redirect::to(&redirect_url)
                     .into_response();
             }
 
@@ -509,12 +482,6 @@ pub async fn api_route_handler(
             eprintln!(
                 "❌ [VLO API] {} {} -> SQL error: {}",
                 method,
-                action_name,
-                error
-            );
-
-            vlo_debug!(
-                "❌ [VLO API] SQL failure for {}: {}",
                 action_name,
                 error
             );

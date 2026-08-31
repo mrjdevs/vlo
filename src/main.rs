@@ -2,6 +2,7 @@
 // 1. VLO IMPORTS & MODULE DECLARATIONS
 // ============================================================
 
+#[macro_use]
 mod state;
 mod database;
 mod api;
@@ -14,7 +15,7 @@ mod utils;
 use clap::Parser;
 
 // ============================================================
-// 2. VLO CLI & 3. VLO APPLICATION ENTRY
+// 2. VLO CLI & APPLICATION ENTRY
 // ============================================================
 
 #[derive(Parser)]

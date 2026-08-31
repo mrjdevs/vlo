@@ -3,10 +3,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-// ============================================================
-// 27. VLO INIT / PROJECT BOILERPLATE
-// ============================================================
-
 pub fn init_project(
     name: &str,
     db_driver: &str,
@@ -111,7 +107,7 @@ INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ 
             }
             "mysql" => {
                 r#"CREATE TABLE IF NOT EXISTS items (id INT AUTO_INCREMENT PRIMARY KEY, title VARCHAR(255) NOT NULL);
-INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ Explore Component Composition'), ('🚀 Build Zero-Boilerplate APIs');"#
+INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture');"#
             }
             _ => {
                 r#"CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL);
@@ -129,7 +125,7 @@ INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ 
             r#"<script server>
 {
     "get_items": "SELECT * FROM items ORDER BY id DESC;",
-    "post_items": "INSERT INTO items (title) VALUES ({{title}});",
+    "post_items": "SELECT 1;",
     "put_items": "UPDATE items SET title = {{title}} WHERE id = {{id}};",
     "delete_items": "DELETE FROM items WHERE id = {{id}};"
 }
@@ -160,64 +156,6 @@ INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ 
 </style>"#,
         )
         .expect("Failed to write BaseLayout.vlo");
-    }
-
-    let card_path = components_dir.join("Card.vlo");
-    if !card_path.exists() {
-        fs::write(
-            &card_path,
-            r#"<div class="vlo-card">
-    {{#if title}}
-        <h3>{{title}}</h3>
-    {{/#if}}
-    {{#if description}}
-        <p class="card-desc">{{description}}</p>
-    {{/#if}}
-    <slot></slot>
-</div>
-<style>.vlo-card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); margin-bottom: 1.5rem; }</style>"#,
-        )
-        .expect("Failed to write Card.vlo");
-    }
-
-    let home_path = pages_dir.join("home.vlo");
-    if !home_path.exists() {
-        fs::write(
-            &home_path,
-            r#"<BaseLayout title="VLO v0.7 Dashboard">
-    <Card>
-        <h2>Items (Zero-JS SSR CRUD)</h2>
-        <form action="/api/items" method="POST" class="crud-form">
-            <input name="title" placeholder="Add new task..." required/>
-            <button type="submit">+ Add</button>
-        </form>
-        <div data-source="/api/get_items">
-            {{#for item in items}}
-            <div class="item-row">
-                <span>{{item.title}}</span>
-                <div class="actions">
-                    <button v-put="/api/items/{{item.id}}" v-prompt="Update title:" v-param="title">✎</button>
-                    <button v-delete="/api/items/{{item.id}}" v-confirm="Delete this item?">✕</button>
-                </div>
-            </div>
-            {{#else}}
-            <p class="empty">No items found. Add one above!</p>
-            {{/#for}}
-        </div>
-    </Card>
-</BaseLayout>
-<style>
-    .crud-form { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; }
-    .crud-form input { flex: 1; padding: 0.625rem; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #f8fafc; }
-    .crud-form button { padding: 0.625rem 1.25rem; background: #38bdf8; color: #0f172a; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; }
-    .item-row { display: flex; justify-content: space-between; align-items: center; padding: 0.875rem; border-bottom: 1px solid #334155; }
-    .actions { display: flex; gap: 0.5rem; }
-    .actions button { background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; }
-    .actions button:hover { border-color: #38bdf8; color: #38bdf8; }
-    .empty { color: #64748b; text-align: center; padding: 1rem; }
-</style>"#,
-        )
-        .expect("Failed to write home.vlo");
     }
 
     println!("✅ Project initialized successfully!");

@@ -3,7 +3,7 @@ use crate::{
     state::{
         RenderedPage, CompiledTemplate, CLASS_RE, ELEMENT_RE, SLOT_RE, STYLE_RE, TEMPLATE_CACHE,
     },
-    template::{render_control_flow, render_interpolations},
+    template::{render_control_flow, render_interpolations, clean_empty_tags, escape_html_attribute},
 };
 use serde_json::Value;
 use std::{
@@ -12,10 +12,6 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-
-// ============================================================
-// 14. VLO COMPONENT SYSTEM
-// ============================================================
 
 pub fn component_path(name: &str) -> Option<PathBuf> {
     let root = crate::state::get_project_root();
@@ -103,7 +99,7 @@ pub fn render_components(
         {
             let mut end = index + 1;
             while end < chars.len()
-                && (chars[end].1.is_ascii_alphanumeric() || chars[end].1 == '_')
+                && (chars[end].1.is_ascii_alphanumeric() || chars[end].1 == '_' || chars[end].1 == '-')
             {
                 end += 1;
             }
@@ -141,9 +137,11 @@ pub fn find_tag(
     let start = source.find(&open)?;
     let mut index = start + open.len();
 
-    let next = source[index..].chars().next()?;
-    if !(next.is_whitespace() || next == '/' || next == '>') {
-        return None;
+    if index < source.len() {
+        let next = source[index..].chars().next()?;
+        if !(next.is_whitespace() || next == '/' || next == '>') {
+            return None;
+        }
     }
 
     let props_start = index;
@@ -168,7 +166,7 @@ pub fn find_tag(
 
     let open_end = open_end?;
     let props = source[props_start..open_end].to_string();
-    let self_closing = props.trim_end().ends_with('/');
+    let self_closing = props.trim_end().ends_with('/') || is_void_tag(name);
     index = open_end + 1;
 
     if self_closing {
@@ -212,7 +210,7 @@ pub fn find_tag(
             .unwrap_or(1);
     }
 
-    None
+    Some((start, index, props, source[children_start..].to_string()))
 }
 
 pub fn render_component_file(
@@ -350,10 +348,6 @@ pub fn render_component_file(
 
     rendered
 }
-
-// ============================================================
-// 15. VLO SLOT SYSTEM
-// ============================================================
 
 pub fn render_slots(
     template: &str,
@@ -586,7 +580,7 @@ pub fn find_matching_tag_end(
                 let opening_end = find_tag_opening_end(source, after_name)?;
                 let props = source[after_name..opening_end].trim();
 
-                if !props.ends_with('/') {
+                if !props.ends_with('/') && !is_void_tag(tag_name) {
                     depth += 1;
                 }
 
@@ -604,10 +598,6 @@ pub fn find_matching_tag_end(
 
     None
 }
-
-// ============================================================
-// 16. VLO PROP SYSTEM
-// ============================================================
 
 pub fn parse_props_v7(raw: &str) -> HashMap<String, Value> {
     let chars: Vec<char> = raw
@@ -803,15 +793,6 @@ pub fn is_boolean_attribute(name: &str) -> bool {
     )
 }
 
-pub fn escape_html_attribute(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
 pub fn render_nested_vlo_content(
     content: &str,
     context: &mut RenderedPage,
@@ -821,41 +802,15 @@ pub fn render_nested_vlo_content(
     }
 
     let mut source = strip_server_block(content);
-    for _ in 0..20 {
+
+    for _ in 0..5 {
         let previous = source.clone();
-        source = render_tag(&source, "BaseLayout", context);
         source = render_components(&source, context);
+
         if source == previous {
             break;
         }
     }
 
     source
-}
-
-// ============================================================
-// 19. VLO STYLE & EMPTY TAG ENGINE
-// ============================================================
-
-pub fn strip_blank_lines(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    for line in html.lines() {
-        if !line.trim().is_empty() {
-            out.push_str(line);
-            out.push('\n');
-        }
-    }
-    out
-}
-
-pub fn clean_empty_tags(html: &str) -> String {
-    let mut cleaned = html.to_string();
-    loop {
-        let result = crate::state::EMPTY_TAG_RE.replace_all(&cleaned, "");
-        if result == cleaned {
-            break;
-        }
-        cleaned = result.to_string();
-    }
-    cleaned
 }

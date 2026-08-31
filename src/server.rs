@@ -1,23 +1,20 @@
 use crate::{
     api::{api_handler_id, api_handler_path, api_handler_root},
-    router::{hmr_handler, home_handler, not_found_handler, page_handler, render_vlo, watch_files, wrap_html},
+    router::{hmr_handler, home_handler, not_found_handler, page_handler, watch_files},
     state::get_project_root,
+    template::escape_html_attribute,
 };
 use axum::{routing::get, Router};
 use clap::Subcommand;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::{Path},
     process::Command,
     sync::{Arc, Mutex},
     time::Instant,
 };
 use tokio::sync::broadcast;
 use tower_http::{compression::CompressionLayer, services::ServeDir};
-
-// ============================================================
-// 2. VLO CLI SUBCOMMANDS
-// ============================================================
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -54,10 +51,6 @@ pub enum Commands {
         provider: String,
     },
 }
-
-// ============================================================
-// 23. VLO DEVELOPMENT SERVER
-// ============================================================
 
 pub async fn dev(host: &str, port: u16) {
     let root = get_project_root();
@@ -103,9 +96,7 @@ pub async fn dev(host: &str, port: u16) {
         .route("/__vlo_hmr", get(move || hmr_handler(tx)))
         .nest_service(
             "/static",
-            ServeDir::new(public_path_service)
-                .precompressed_gzip()
-                .precompressed_br(),
+            ServeDir::new(public_path_service),
         )
         .layer(CompressionLayer::new())
         .fallback(not_found_handler);
@@ -132,10 +123,6 @@ async fn shutdown_signal() {
         .expect("Failed to listen for Ctrl+C");
     println!("\n⚡ Shutting down VLO dev server...");
 }
-
-// ============================================================
-// 24. VLO BUILD SYSTEM
-// ============================================================
 
 pub fn build() {
     println!("⚡ Building production site...");
@@ -164,8 +151,8 @@ pub fn build() {
                 .to_string();
 
             let content = fs::read_to_string(&path).unwrap_or_default();
-            let rendered = render_vlo(content);
-            let html = wrap_html(&stem, &rendered, false);
+            let rendered = crate::router::render_vlo(content);
+            let html = crate::router::wrap_html(&stem, &rendered, false);
 
             let output = if stem == "home" || stem == "index" {
                 dist.join("index.html")
@@ -198,10 +185,6 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     }
     Ok(())
 }
-
-// ============================================================
-// 25. VLO DEPLOYMENT
-// ============================================================
 
 pub async fn deploy(provider: &str) {
     let root = get_project_root();
@@ -267,10 +250,6 @@ pub async fn deploy(provider: &str) {
     }
 }
 
-// ============================================================
-// VLO DIRECTIVES
-// ============================================================
-
 pub fn js_string_literal(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
@@ -286,6 +265,10 @@ pub fn strip_vlo_directive_attrs(attrs: &str) -> String {
 pub fn resolve_directives(source: &str) -> String {
     let mut result = source.to_string();
 
+    // ============================================================
+    // v-delete
+    // ============================================================
+
     let re_del = regex::Regex::new(
         r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-delete\s*=\s*["']([^"']+)["']([^>]*?)>"#,
     )
@@ -295,12 +278,15 @@ pub fn resolve_directives(source: &str) -> String {
         .replace_all(&result, |caps: &regex::Captures| {
             let tag = caps.get(1).unwrap().as_str();
             let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-            let url = caps.get(3).unwrap().as_str();
+            let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
             let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+
             let all_attrs = format!("{} {}", attrs_before, attrs_after);
 
             let confirm_re =
-                regex::Regex::new(r#"(?is)v-confirm\s*=\s*["']([^"']*)["']"#).unwrap();
+                regex::Regex::new(r#"(?is)v-confirm\s*=\s*["']([^"']*)["']"#)
+                    .unwrap();
+
             let confirm_js = if let Some(c) = confirm_re.captures(&all_attrs) {
                 let msg = c.get(1).map(|m| m.as_str()).unwrap_or("");
                 format!("confirm({})", js_string_literal(msg))
@@ -314,10 +300,11 @@ pub fn resolve_directives(source: &str) -> String {
 
             let onclick = format!(
                 "if({}){{fetch({},{{method:'DELETE'}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO DELETE]',e))}}",
-                confirm_js, url_js
+                confirm_js,
+                url_js
             );
 
-            let onclick_attr = crate::component::escape_html_attribute(&onclick);
+            let onclick_attr = escape_html_attribute(&onclick);
 
             format!(
                 "<{} {} onclick=\"{}\">",
@@ -327,6 +314,25 @@ pub fn resolve_directives(source: &str) -> String {
             )
         })
         .into_owned();
+
+    // ============================================================
+    // v-put
+    //
+    // Supports:
+    //
+    // 1. Form:
+    //    <form v-put="/api/products/1">
+    //
+    //    Sends all form fields as PUT.
+    //
+    // 2. Normal element:
+    //    <button
+    //        v-put="/api/products/1"
+    //        v-param="title"
+    //        v-prompt="New title">
+    //
+    //    Sends one prompted value as JSON.
+    // ============================================================
 
     let re_put = regex::Regex::new(
         r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-put\s*=\s*["']([^"']+)["']([^>]*?)>"#,
@@ -337,49 +343,89 @@ pub fn resolve_directives(source: &str) -> String {
         .replace_all(&result, |caps: &regex::Captures| {
             let tag = caps.get(1).unwrap().as_str();
             let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-            let url = caps.get(3).unwrap().as_str();
+            let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
             let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+
             let all_attrs = format!("{} {}", attrs_before, attrs_after);
-
-            let param_re =
-                regex::Regex::new(r#"(?is)v-param\s*=\s*["']([^"']+)["']"#).unwrap();
-            let param = param_re
-                .captures(&all_attrs)
-                .and_then(|c| c.get(1))
-                .map(|m| m.as_str())
-                .unwrap_or("value");
-
-            let prompt_re =
-                regex::Regex::new(r#"(?is)v-prompt\s*=\s*["']([^"']*)["']"#).unwrap();
-            let prompt = prompt_re
-                .captures(&all_attrs)
-                .and_then(|c| c.get(1))
-                .map(|m| m.as_str())
-                .unwrap_or("Enter new value:");
 
             let clean_before = strip_vlo_directive_attrs(attrs_before);
             let clean_after = strip_vlo_directive_attrs(attrs_after);
 
-            let prompt_js = js_string_literal(prompt);
             let url_js = js_string_literal(url);
-            let param_js = js_string_literal(param);
 
-            let onclick = format!(
-                "let v=prompt({});if(v!==null){{fetch({},{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO PUT]',e))}}",
-                prompt_js, url_js, param_js
-            );
+            // ========================================================
+            // v-put on <form>
+            // ========================================================
 
-            let onclick_attr = crate::component::escape_html_attribute(&onclick);
+            if tag.eq_ignore_ascii_case("form") {
+                let onsubmit = format!(
+                    "event.preventDefault();fetch({},{{method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO PUT]',e));return false",
+                    url_js
+                );
 
-            format!(
-                "<{} {} onclick=\"{}\">",
-                tag,
-                format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
-                onclick_attr
-            )
+                let onsubmit_attr = escape_html_attribute(&onsubmit);
+
+                format!(
+                    "<{} {} onsubmit=\"{}\">",
+                    tag,
+                    format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
+                    onsubmit_attr
+                )
+            } else {
+                // ====================================================
+                // v-put on normal elements
+                // ====================================================
+
+                let param_re =
+                    regex::Regex::new(
+                        r#"(?is)v-param\s*=\s*["']([^"']+)["']"#,
+                    )
+                    .unwrap();
+
+                let param = param_re
+                    .captures(&all_attrs)
+                    .and_then(|c| c.get(1))
+                    .map(|m| m.as_str())
+                    .unwrap_or("value");
+
+                let prompt_re =
+                    regex::Regex::new(
+                        r#"(?is)v-prompt\s*=\s*["']([^"']*)["']"#,
+                    )
+                    .unwrap();
+
+                let prompt = prompt_re
+                    .captures(&all_attrs)
+                    .and_then(|c| c.get(1))
+                    .map(|m| m.as_str())
+                    .unwrap_or("Enter new value:");
+
+                let prompt_js = js_string_literal(prompt);
+                let param_js = js_string_literal(param);
+
+                let onclick = format!(
+                    "let v=prompt({});if(v!==null){{fetch({},{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO PUT]',e))}}",
+                    prompt_js,
+                    url_js,
+                    param_js
+                );
+
+                let onclick_attr = escape_html_attribute(&onclick);
+
+                format!(
+                    "<{} {} onclick=\"{}\">",
+                    tag,
+                    format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
+                    onclick_attr
+                )
+            }
         })
         .into_owned();
 
-    vlo_debug!("🧩 [VLO DIRECTIVES] Resolved HTML:\n{}", result);
+    vlo_debug!(
+        "🧩 [VLO DIRECTIVES] Resolved HTML:\n{}",
+        result
+    );
+
     result
 }

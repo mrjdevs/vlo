@@ -3,18 +3,18 @@ use crate::{
     component::{render_components, render_tag},
     database::DB_POOL,
     state::{RenderedPage, STYLE_RE},
-    template::render_control_flow,
+    template::{render_control_flow, clean_empty_tags},
 };
 use axum::{
-    extract::{Path as AxumPath},
+    extract::Path as AxumPath,
+    http::StatusCode,
     response::{
         sse::{Event, KeepAlive},
         Html, IntoResponse, Sse,
     },
-    routing::get,
-    Router,
 };
 use futures_util::stream::Stream;
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -25,11 +25,6 @@ use std::{
     time::Instant,
 };
 use tokio::sync::broadcast;
-use tower_http::services::ServeDir;
-
-// ============================================================
-// 20. VLO PAGE ROUTER & DATA SOURCE RESOLUTION
-// ============================================================
 
 pub fn resolve_data_sources(source: &str) -> String {
     let re = regex::Regex::new(
@@ -174,7 +169,7 @@ pub fn render_vlo(source: String) -> RenderedPage {
     }
 
     source = crate::server::resolve_directives(&source);
-    context.html = crate::component::strip_blank_lines(&source);
+    context.html = clean_empty_tags(&source);
     context
 }
 
@@ -225,6 +220,7 @@ pub async fn render_404(dev: bool) -> impl IntoResponse {
                 StatusCode::NOT_FOUND,
                 Html(wrap_html("404 - Page Not Found", &rendered, dev)),
             )
+                .into_response()
         } else {
             let rendered = RenderedPage {
                 html: r#"<div class="not-found"><h1>404</h1><p>Page Not Found</p><a href="/">Back to Home</a></div>"#
@@ -235,6 +231,7 @@ pub async fn render_404(dev: bool) -> impl IntoResponse {
                 StatusCode::NOT_FOUND,
                 Html(wrap_html("404 - Page Not Found", &rendered, dev)),
             )
+                .into_response()
         }
     })
     .await
@@ -283,10 +280,6 @@ window.addEventListener("beforeunload", () => es.close());
     )
 }
 
-// ============================================================
-// 22. VLO HMR / FILE WATCHER
-// ============================================================
-
 pub async fn hmr_handler(
     tx: broadcast::Sender<()>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
@@ -311,12 +304,12 @@ pub fn watch_files(
     let components = root.join("components");
 
     let (tx_notify, rx) = std::sync::mpsc::channel();
-    let mut watcher = notify::RecommendedWatcher::new(tx_notify, notify::Config::default())?;
+    let mut watcher = RecommendedWatcher::new(tx_notify, Config::default())?;
 
     let paths_to_watch = [&pages, &public, &layouts, &components];
     for path in paths_to_watch {
         if path.exists() {
-            watcher.watch(path, notify::RecursiveMode::Recursive)?;
+            watcher.watch(path, RecursiveMode::Recursive)?;
         }
     }
 

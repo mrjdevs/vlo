@@ -2,32 +2,33 @@ use crate::state::PROP_RE;
 use serde_json::Value;
 use std::collections::HashMap;
 
-// ============================================================
-// 17. VLO TEMPLATE ENGINE
-// ============================================================
-
 pub fn get_nested_value(
     path: &str,
     context: &HashMap<String, Value>,
 ) -> Value {
+    let path = path.trim();
+    if path.is_empty() {
+        return Value::Null;
+    }
+
     let parts: Vec<&str> = path.split('.').collect();
+    let mut current = context.get(parts[0]);
 
-    let mut val = Value::Object(
-        context
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect(),
-    );
-
-    for part in parts {
-        if let Value::Object(map) = val {
-            val = map.get(part).cloned().unwrap_or(Value::Null);
-        } else {
-            return Value::Null;
+    for part in &parts[1..] {
+        match current {
+            Some(Value::Object(map)) => current = map.get(*part),
+            Some(Value::Array(arr)) => {
+                if let Ok(idx) = part.parse::<usize>() {
+                    current = arr.get(idx);
+                } else {
+                    return Value::Null;
+                }
+            }
+            _ => return Value::Null,
         }
     }
 
-    val
+    current.cloned().unwrap_or(Value::Null)
 }
 
 pub fn evaluate_condition(
@@ -35,6 +36,14 @@ pub fn evaluate_condition(
     context: &HashMap<String, Value>,
 ) -> bool {
     let expr = expr.trim();
+    if expr.is_empty() {
+        return false;
+    }
+
+    if let Some(stripped) = expr.strip_prefix('!') {
+        return !evaluate_condition(stripped.trim(), context);
+    }
+
     let operators = ["==", "!=", "<=", ">=", "<", ">"];
 
     for op in operators {
@@ -127,7 +136,17 @@ pub fn find_next_token(
 ) -> Option<(usize, &'static str)> {
     let mut best: Option<(usize, &'static str)> = None;
 
-    for token in ["{for ", "{if ", "{{", "<script", "</script>"] {
+    for token in [
+        "{{#for ",
+        "{{for ",
+        "{{#if ",
+        "{{if ",
+        "{for ",
+        "{if ",
+        "{{",
+        "<script",
+        "</script>",
+    ] {
         if let Some(pos) = template[from..].find(token) {
             let absolute = from + pos;
             if best.map(|(p, _)| absolute < p).unwrap_or(true) {
@@ -139,37 +158,70 @@ pub fn find_next_token(
     best
 }
 
-pub fn find_modern_block_end(
+pub fn find_block_end(
     template: &str,
     start: usize,
-    kind: &str,
+    token: &str,
 ) -> Option<(usize, usize)> {
-    let open = format!("{{{} ", kind);
-    let close = format!("{{/{}}}", kind);
-    let mut depth = 1usize;
+    let is_double = token.starts_with("{{");
+    let kind = if token.contains("for") { "for" } else { "if" };
 
-    let header_end = template[start..].find('}')? + start + 1;
+    let header_end = if is_double {
+        template[start..].find("}}")? + start + 2
+    } else {
+        template[start..].find('}')? + start + 1
+    };
+
+    let open_patterns: Vec<String> = if is_double {
+        vec![format!("{{{{#{kind} ", kind = kind), format!("{{{{{kind} ", kind = kind)]
+    } else {
+        vec![format!("{{{kind} ", kind = kind)]
+    };
+
+    let close_patterns: Vec<String> = if is_double {
+        vec![
+            format!("{{{{/#{kind}}}}}", kind = kind),
+            format!("{{{{/{kind}}}}}", kind = kind),
+        ]
+    } else {
+        vec![format!("{{/{kind}}}", kind = kind)]
+    };
+
+    let mut depth = 1usize;
     let mut cursor = header_end;
 
     while cursor < template.len() {
-        let next_open = template[cursor..]
-            .find(&open)
-            .map(|p| cursor + p);
-        let next_close = template[cursor..]
-            .find(&close)
-            .map(|p| cursor + p);
+        let mut next_open: Option<(usize, usize)> = None;
+        for pat in &open_patterns {
+            if let Some(p) = template[cursor..].find(pat) {
+                let abs = cursor + p;
+                if next_open.map(|(op, _)| abs < op).unwrap_or(true) {
+                    next_open = Some((abs, pat.len()));
+                }
+            }
+        }
+
+        let mut next_close: Option<(usize, usize)> = None;
+        for pat in &close_patterns {
+            if let Some(p) = template[cursor..].find(pat) {
+                let abs = cursor + p;
+                if next_close.map(|(cp, _)| abs < cp).unwrap_or(true) {
+                    next_close = Some((abs, pat.len()));
+                }
+            }
+        }
 
         match (next_open, next_close) {
-            (Some(o), Some(c)) if o < c => {
+            (Some((o, len)), Some((c, _))) if o < c => {
                 depth += 1;
-                cursor = o + open.len();
+                cursor = o + len;
             }
-            (_, Some(c)) => {
+            (_, Some((c, len))) => {
                 depth -= 1;
                 if depth == 0 {
-                    return Some((header_end, c + close.len()));
+                    return Some((header_end, c + len));
                 }
-                cursor = c + close.len();
+                cursor = c + len;
             }
             _ => return None,
         }
@@ -178,44 +230,47 @@ pub fn find_modern_block_end(
     None
 }
 
-pub fn split_modern_else(inner: &str) -> (String, Option<String>) {
+pub fn split_else_branches(
+    inner: &str,
+) -> (String, Option<String>) {
     let mut depth = 0usize;
     let mut cursor = 0usize;
 
+    let targets = [
+        ("{{#if ", 0), ("{{if ", 0), ("{if ", 0),
+        ("{{#for ", 0), ("{{for ", 0), ("{for ", 0),
+        ("{{/#if}}", 1), ("{{/if}}", 1), ("{/if}", 1),
+        ("{{/#for}}", 1), ("{{/for}}", 1), ("{/for}", 1),
+        ("{{else if ", 2), ("{else if ", 2),
+        ("{{#else}}", 3), ("{{else}}", 3), ("{else}", 3),
+    ];
+
     while cursor < inner.len() {
-        let next_if = inner[cursor..].find("{if ").map(|p| cursor + p);
-        let next_close = inner[cursor..].find("{/if}").map(|p| cursor + p);
-        let next_else = inner[cursor..].find("{else}").map(|p| cursor + p);
-        let next_else_if = inner[cursor..].find("{else if ").map(|p| cursor + p);
+        let mut candidate: Option<(usize, usize, usize)> = None;
 
-        let mut candidates = Vec::new();
-        if let Some(p) = next_if {
-            candidates.push((p, 0));
-        }
-        if let Some(p) = next_close {
-            candidates.push((p, 1));
-        }
-        if let Some(p) = next_else_if {
-            candidates.push((p, 2));
-        }
-        if let Some(p) = next_else {
-            candidates.push((p, 3));
+        for (pat, kind) in targets {
+            if let Some(p) = inner[cursor..].find(pat) {
+                let abs = cursor + p;
+                if candidate.map(|(cp, _, _)| abs < cp).unwrap_or(true) {
+                    candidate = Some((abs, kind, pat.len()));
+                }
+            }
         }
 
-        let Some((pos, kind)) = candidates.into_iter().min_by_key(|x| x.0) else {
+        let Some((pos, kind, len)) = candidate else {
             break;
         };
 
         match kind {
             0 => {
                 depth += 1;
-                cursor = pos + 4;
+                cursor = pos + len;
             }
             1 => {
                 if depth > 0 {
                     depth -= 1;
                 }
-                cursor = pos + 5;
+                cursor = pos + len;
             }
             2 | 3 if depth == 0 => {
                 return (
@@ -224,7 +279,7 @@ pub fn split_modern_else(inner: &str) -> (String, Option<String>) {
                 );
             }
             _ => {
-                cursor = pos + if kind == 2 { 10 } else { 6 };
+                cursor = pos + len;
             }
         }
     }
@@ -232,101 +287,44 @@ pub fn split_modern_else(inner: &str) -> (String, Option<String>) {
     (inner.to_string(), None)
 }
 
-pub fn split_for_else(inner: &str) -> (String, Option<String>) {
-    let mut depth_for = 0usize;
-    let mut depth_if = 0usize;
-    let mut cursor = 0usize;
-
-    while cursor < inner.len() {
-        let mut candidates = Vec::new();
-        if let Some(p) = inner[cursor..].find("{for ") {
-            candidates.push((cursor + p, 0));
-        }
-        if let Some(p) = inner[cursor..].find("{/for}") {
-            candidates.push((cursor + p, 1));
-        }
-        if let Some(p) = inner[cursor..].find("{if ") {
-            candidates.push((cursor + p, 2));
-        }
-        if let Some(p) = inner[cursor..].find("{/if}") {
-            candidates.push((cursor + p, 3));
-        }
-        if let Some(p) = inner[cursor..].find("{else}") {
-            candidates.push((cursor + p, 4));
-        }
-        if let Some(p) = inner[cursor..].find("{else if ") {
-            candidates.push((cursor + p, 5));
-        }
-
-        let Some((pos, kind)) = candidates.into_iter().min_by_key(|x| x.0) else {
-            break;
-        };
-
-        match kind {
-            0 => {
-                depth_for += 1;
-                cursor = pos + 5;
-            }
-            1 => {
-                if depth_for > 0 {
-                    depth_for -= 1;
-                }
-                cursor = pos + 6;
-            }
-            2 => {
-                depth_if += 1;
-                cursor = pos + 4;
-            }
-            3 => {
-                if depth_if > 0 {
-                    depth_if -= 1;
-                }
-                cursor = pos + 5;
-            }
-            4 | 5 if depth_for == 0 && depth_if == 0 => {
-                return (
-                    inner[..pos].to_string(),
-                    Some(inner[pos..].to_string()),
-                );
-            }
-            _ => {
-                cursor = pos + if kind == 5 { 10 } else { 6 };
-            }
-        }
-    }
-
-    (inner.to_string(), None)
-}
-
-pub fn evaluate_modern_if(
+pub fn evaluate_if_block(
     inner: &str,
     expression: &str,
     context: &HashMap<String, Value>,
 ) -> String {
-    let (true_part, else_part) = split_modern_else(inner);
+    let (true_part, else_part) = split_else_branches(inner);
 
     if evaluate_condition(expression, context) {
         return render_control_flow(&true_part, context);
     }
 
     if let Some(rest) = else_part {
-        if let Some(v) = rest.strip_prefix("{else if ") {
-            if let Some(end) = v.find('}') {
+        let stripped = rest
+            .strip_prefix("{{else if ")
+            .or_else(|| rest.strip_prefix("{else if "));
+
+        if let Some(v) = stripped {
+            let delimiter = if rest.starts_with("{{") { "}}" } else { "}" };
+            if let Some(end) = v.find(delimiter) {
                 let expr = v[..end].trim();
-                return evaluate_modern_if(&v[end + 1..], expr, context);
+                let body = &v[end + delimiter.len()..];
+                return evaluate_if_block(body, expr, context);
             }
         }
 
-        return render_control_flow(
-            rest.strip_prefix("{else}").unwrap_or(&rest),
-            context,
-        );
+        let else_body = rest
+            .strip_prefix("{{#else}}")
+            .or_else(|| rest.strip_prefix("{{else}}"))
+            .or_else(|| rest.strip_prefix("{else}"))
+            .unwrap_or(&rest);
+
+        return render_control_flow(else_body, context);
     }
 
     String::new()
 }
 
-pub fn evaluate_modern_for(
+pub fn evaluate_for_block(
     inner: &str,
     expression: &str,
     context: &HashMap<String, Value>,
@@ -340,13 +338,16 @@ pub fn evaluate_modern_for(
     let array_path = parts[2];
     let array = get_nested_value(array_path, context);
 
-    let (body, else_part) = split_for_else(inner);
+    let (body, else_part) = split_else_branches(inner);
 
     let Value::Array(items) = array else {
         return else_part
             .map(|v| {
                 render_control_flow(
-                    v.strip_prefix("{else}").unwrap_or(&v),
+                    v.strip_prefix("{{#else}}")
+                        .or_else(|| v.strip_prefix("{{else}}"))
+                        .or_else(|| v.strip_prefix("{else}"))
+                        .unwrap_or(&v),
                     context,
                 )
             })
@@ -357,7 +358,10 @@ pub fn evaluate_modern_for(
         return else_part
             .map(|v| {
                 render_control_flow(
-                    v.strip_prefix("{else}").unwrap_or(&v),
+                    v.strip_prefix("{{#else}}")
+                        .or_else(|| v.strip_prefix("{{else}}"))
+                        .or_else(|| v.strip_prefix("{else}"))
+                        .unwrap_or(&v),
                     context,
                 )
             })
@@ -439,26 +443,45 @@ pub fn render_control_flow(
             continue;
         }
 
-        let kind = if token == "{for " { "for" } else { "if" };
-        let header_end = match template[pos..].find('}') {
-            Some(v) => pos + v,
-            None => {
-                result.push_str(&template[pos..]);
-                break;
+        let is_double = token.starts_with("{{");
+        let kind = if token.contains("for") { "for" } else { "if" };
+
+        let header_end = if is_double {
+            match template[pos..].find("}}") {
+                Some(v) => pos + v,
+                None => {
+                    result.push_str(&template[pos..]);
+                    break;
+                }
+            }
+        } else {
+            match template[pos..].find('}') {
+                Some(v) => pos + v,
+                None => {
+                    result.push_str(&template[pos..]);
+                    break;
+                }
             }
         };
 
-        let expression = template[pos + kind.len() + 2..header_end].trim();
-        let Some((content_start, block_end)) = find_modern_block_end(template, pos, kind) else {
+        let expression = template[pos + token.len()..header_end].trim();
+        let Some((content_start, block_end)) = find_block_end(template, pos, token) else {
             result.push_str(&template[pos..]);
             break;
         };
 
-        let inner = &template[content_start..block_end - (kind.len() + 3)];
-        let rendered = if kind == "for" {
-            evaluate_modern_for(inner, expression, context)
+        let slice = &template[..block_end];
+        let closing_len = if is_double {
+            slice.len() - slice.rfind("{{").unwrap_or(slice.len())
         } else {
-            evaluate_modern_if(inner, expression, context)
+            kind.len() + 3
+        };
+
+        let inner = &template[content_start..block_end - closing_len];
+        let rendered = if kind == "for" {
+            evaluate_for_block(inner, expression, context)
+        } else {
+            evaluate_if_block(inner, expression, context)
         };
 
         result.push_str(&rendered);
@@ -505,6 +528,23 @@ pub fn format_value(val: &Value) -> String {
         Value::String(s) => s.clone(),
         _ => serde_json::to_string(val).unwrap_or_default(),
     }
+}
+
+pub fn clean_empty_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+
+    for line in html.lines() {
+        if !line.trim().is_empty() {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+
+    if !result.is_empty() {
+        result.pop();
+    }
+
+    result
 }
 
 pub fn escape_html_attribute(value: &str) -> String {
