@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, LazyLock, Mutex},
 };
-
+use serde_json::Value;
 pub static STYLE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>(.*?)</style>").unwrap());
 
@@ -98,10 +98,34 @@ pub fn get_project_root() -> PathBuf {
     PROJECT_ROOT.clone()
 }
 
-#[derive(Default)]
+
 pub struct RenderedPage {
     pub html: String,
     pub styles: Vec<String>,
+    pub page_status: bool,
+}
+
+impl Default for RenderedPage {
+    fn default() -> Self {
+        Self {
+            html: String::new(),
+            styles: Vec::new(),
+            page_status: false,
+        }
+    }
+}
+
+impl RenderedPage {
+
+    pub fn insert(&mut self, key: &str, value: Value) {
+        self.page_status = key == "status" || key == "action";
+        // This part depends on how your current RenderedPage stores
+        // template context.
+    }
+
+    pub fn has_page_status(&self) -> bool {
+        self.page_status
+    }
 }
 
 impl RenderedPage {

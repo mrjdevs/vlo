@@ -1,5 +1,49 @@
-<BaseLayout title="Product Management">
+<BaseLayout title="Product Management home">
   <div class="products-page">
+
+    <!-- Toast Notifications -->
+
+<!-- Toast Notifications -->
+{if status == "success"}
+  {if action == "created"}
+    <Toast
+      variant="success"
+      icon="✅"
+      title="Product Created"
+      description="Your new product has been successfully added to the catalog."
+    />
+  {/if}
+
+  {if action == "updated"}
+    <Toast
+      variant="success"
+      icon="✏️"
+      title="Product Updated"
+      description="The product changes have been saved successfully."
+    />s
+  {/if}
+
+  {if action == "deleted"}
+    <Toast
+      variant="success"
+      icon="🗑️"
+      title="Product Deleted"
+      description="The product has been permanently removed from the catalog."
+    />
+  {/if}
+{/if}
+
+{if status == "error"}
+  {if affected_rows != 0}
+    <Toast
+      variant="error"
+      icon="⚠️"
+      title="Operation Failed"
+      description="An error occurred while processing your request. Please try again."
+    />
+  {/if}
+{/if}
+
     <div class="products-header">
       <div>
         <div class="products-eyebrow">VLO / API</div>
@@ -9,206 +53,204 @@
       <Badge variant="success" text="REST API" />
     </div>
 
-<Card title="Add Product" description="Create a new product and add it to your catalog.">
-  <form action="/api/products" method="POST" class="product-form">
-    <div class="form-field">
-      <label for="product-title">Product Title</label>
-      <input id="product-title" type="text" name="title" placeholder="e.g. Mechanical Keyboard" required />
-    </div>
+    <Card title="Add Product" description="Create a new product and add it to your catalog.">
+      <form action="/api/products" method="POST" class="product-form">
+        <div class="form-field">
+          <label for="product-title">Product Title</label>
+          <input id="product-title" type="text" name="title" placeholder="e.g. Mechanical Keyboard" required />
+        </div>
 
-    <div class="form-field">
-      <label for="product-description">Description</label>
-      <input id="product-description" type="text" name="description" placeholder="Product description" />
-    </div>
+        <div class="form-field">
+          <label for="product-description">Description</label>
+          <input id="product-description" type="text" name="description" placeholder="Product description" />
+        </div>
 
-    <div class="form-field">
-      <label for="product-price">Price</label>
-      <input id="product-price" type="number" name="price" placeholder="0.00" step="0.01" min="0" required />
-    </div>
+        <div class="form-field">
+          <label for="product-price">Price</label>
+          <input id="product-price" type="number" name="price" placeholder="0.00" step="0.01" min="0" required />
+        </div>
 
-    <div class="form-field">
-      <label for="product-stock">Stock</label>
-      <input id="product-stock" type="number" name="stock" placeholder="0" min="0" required />
-    </div>
+        <div class="form-field">
+          <label for="product-stock">Stock</label>
+          <input id="product-stock" type="number" name="stock" placeholder="0" min="0" required />
+        </div>
 
-    <div class="form-actions">
-      <button type="submit" class="vlo-btn vlo-btn-primary">+ Add Product</button>
-    </div>
-  </form>
-</Card>
+        <div class="form-actions">
+          <button type="submit" class="vlo-btn vlo-btn-primary">+ Add Product</button>
+        </div>
+      </form>
+    </Card>
 
-<div class="products-list-card">
-  <Card title="Products" description="All products currently stored in the database.">
-    <div class="products-toolbar">
-      <span>Live Database</span>
-      <Badge variant="success" text="Active" />
-    </div>
+    <div class="products-list-card">
+      <Card title="Products" description="All products currently stored in the database.">
+        <div class="products-toolbar">
+          <span>Live Database</span>
+          <Badge variant="success" text="Active" />
+        </div>
 
-    <div data-source="/api/get_products">
-      <div class="products-table-wrap">
-        <table class="products-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Product</th>
-              <th>Description</th>
-              <th>Price</th>
-              <th>Stock</th>
-              <th>Created</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
+        <div data-source="/api/get_products">
+          <div class="products-table-wrap">
+            <table class="products-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Product</th>
+                  <th>Description</th>
+                  <th>Price</th>
+                  <th>Stock</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
 
-          <tbody data-source="/api/get_products">
-            {for product in products}
-              <tr>
-                <td>#{ {product.id} }</td>
+              <tbody data-source="/api/get_products">
+                {for product in products}
+                  <tr>
+                    <td>#{{product.id}}</td>
 
-                <td>
-                  {if product.price > 500}
-                    <div class="product-title product-premium">{{product.title}}</div>
-                  {else}
-                    <div class="product-title">{{product.title}}</div>
-                  {/if}
-                </td>
+                    <td>
+                      {if product.price > 500}
+                        <div class="product-title product-premium">{{product.title}}</div>
+                      {else}
+                        <div class="product-title">{{product.title}}</div>
+                      {/if}
+                    </td>
 
-                <td>
-                  <div class="product-description">{{product.description}}</div>
-                </td>
+                    <td>
+                      <div class="product-description">{{product.description}}</div>
+                    </td>
 
-                <td>
-                  {if product.price > 500}
-                    <span class="product-price product-expensive">${{product.price}}</span>
-                  {else}
-                    <span class="product-price">${{product.price}}</span>
-                  {/if}
-                </td>
+                    <td>
+                      {if product.price > 500}
+                        <span class="product-price product-expensive">${{product.price}}</span>
+                      {else}
+                        <span class="product-price">${{product.price}}</span>
+                      {/if}
+                    </td>
 
-                <td>
-                  {if product.stock == 0}
-                    <span class="stock-empty">Out of Stock</span>
-                  {else}
-                    {if product.stock < 5}
-                      <span class="stock-low">{{product.stock}} left</span>
-                    {else}
-                      <span class="stock-good">{{product.stock}}</span>
-                    {/if}
-                  {/if}
-                </td>
+                    <td>
+                      {if product.stock == 0}
+                        <span class="stock-empty">Out of Stock</span>
+                      {else}
+                        {if product.stock < 5}
+                          <span class="stock-low">{{product.stock}} left</span>
+                        {else}
+                          <span class="stock-good">{{product.stock}}</span>
+                        {/if}
+                      {/if}
+                    </td>
 
-                <td>
-                  {if product.created_at < 5}
-                    <span class="date-recent">{{product.created_at}}</span>
-                  {else}
-                    <span>{{product.created_at}}</span>
-                  {/if}
-                </td>
+                    <td>
+                      {if product.created_at < 5}
+                        <span class="date-recent">{{product.created_at}}</span>
+                      {else}
+                        <span>{{product.created_at}}</span>
+                      {/if}
+                    </td>
 
-                <td>
-                  <div class="product-actions">
-                    <button
-                      type="button"
-                      class="vlo-btn vlo-btn-secondary"
-                      onclick="document.getElementById('edit-product-{{product.id}}').classList.add('active')"
-                      title="Edit Product">✎</button>
-
-                    <button
-                      type="button"
-                      class="vlo-btn vlo-btn-danger"
-                      onclick="document.getElementById('delete-product-{{product.id}}').classList.add('active')"
-                      title="Delete Product">✕</button>
-                  </div>
-
-                  <Modal id="edit-product-{{product.id}}" title="Edit Product">
-                    <form v-put="/api/products/{{product.id}}" class="modal-form">
-                      <div class="modal-product-name">
-                        Editing: <strong>{{product.title}}</strong>
-                      </div>
-
-                      <div class="form-field">
-                        <label>Product Title</label>
-                        <input type="text" name="title" value="{{product.title}}" required />
-                      </div>
-
-                      <div class="form-field">
-                        <label>Description</label>
-                        <input type="text" name="description" value="{{product.description}}" />
-                      </div>
-
-                      <div class="form-field">
-                        <label>Price</label>
-                        <input type="number" name="price" value="{{product.price}}" step="0.01" min="0" required />
-                      </div>
-
-                      <div class="form-field">
-                        <label>Stock</label>
-                        <input type="number" name="stock" value="{{product.stock}}" min="0" required />
-                      </div>
-
-                      <div class="modal-actions">
+                    <td>
+                      <div class="product-actions">
                         <button
                           type="button"
                           class="vlo-btn vlo-btn-secondary"
-                          onclick="document.getElementById('edit-product-{{product.id}}').classList.remove('active')">
-                          Cancel
-                        </button>
-
-                        <button type="submit" class="vlo-btn vlo-btn-primary">
-                          Save Changes
-                        </button>
-                      </div>
-                    </form>
-                  </Modal>
-
-                  <Modal id="delete-product-{{product.id}}" title="Delete Product">
-                    <div class="delete-confirmation">
-                      <p>
-                        Are you sure you want to delete
-                        <strong>{{product.title}}</strong>?
-                      </p>
-
-                      <p class="delete-warning">
-                        This action cannot be undone.
-                      </p>
-
-                      <div class="modal-actions">
-                        <button
-                          type="button"
-                          class="vlo-btn vlo-btn-secondary"
-                          onclick="document.getElementById('delete-product-{{product.id}}').classList.remove('active')">
-                          Cancel
-                        </button>
+                          onclick="document.getElementById('edit-product-{{product.id}}').classList.add('active')"
+                          title="Edit Product">✎</button>
 
                         <button
                           type="button"
                           class="vlo-btn vlo-btn-danger"
-                          v-delete="/api/products/{{product.id}}">
-                          Delete Product
-                        </button>
+                          onclick="document.getElementById('delete-product-{{product.id}}').classList.add('active')"
+                          title="Delete Product">✕</button>
                       </div>
-                    </div>
-                  </Modal>
-                </td>
-              </tr>
-            {else}
-              <tr>
-                <td colspan="7">
-                  <div class="empty-products">
-                    <div class="empty-icon">📦</div>
-                    <h3>No Products Found</h3>
-                    <p>Add your first product using the form above.</p>
-                  </div>
-                </td>
-              </tr>
-            {/for}
-          </tbody>
-        </table>
-      </div>
+
+                      <Modal id="edit-product-{{product.id}}" title="Edit Product">
+                        <form v-put="/api/products/{{product.id}}" class="modal-form">
+                          <div class="modal-product-name">
+                            Editing: <strong>{{product.title}}</strong>
+                          </div>
+
+                          <div class="form-field">
+                            <label>Product Title</label>
+                            <input type="text" name="title" value="{{product.title}}" required />
+                          </div>
+
+                          <div class="form-field">
+                            <label>Description</label>
+                            <input type="text" name="description" value="{{product.description}}" />
+                          </div>
+
+                          <div class="form-field">
+                            <label>Price</label>
+                            <input type="number" name="price" value="{{product.price}}" step="0.01" min="0" required />
+                          </div>
+
+                          <div class="form-field">
+                            <label>Stock</label>
+                            <input type="number" name="stock" value="{{product.stock}}" min="0" required />
+                          </div>
+
+                          <div class="modal-actions">
+                            <button
+                              type="button"
+                              class="vlo-btn vlo-btn-secondary"
+                              onclick="document.getElementById('edit-product-{{product.id}}').classList.remove('active')">
+                              Cancel
+                            </button>
+
+                            <button type="submit" class="vlo-btn vlo-btn-primary">
+                              Save Changes
+                            </button>
+                          </div>
+                        </form>
+                      </Modal>
+
+                      <Modal id="delete-product-{{product.id}}" title="Delete Product">
+                        <div class="delete-confirmation">
+                          <p>
+                            Are you sure you want to delete
+                            <strong>{{product.title}}</strong>?
+                          </p>
+
+                          <p class="delete-warning">
+                            This action cannot be undone.
+                          </p>
+
+                          <div class="modal-actions">
+                            <button
+                              type="button"
+                              class="vlo-btn vlo-btn-secondary"
+                              onclick="document.getElementById('delete-product-{{product.id}}').classList.remove('active')">
+                              Cancel
+                            </button>
+
+                            <button
+                              type="button"
+                              class="vlo-btn vlo-btn-danger"
+                              v-delete="/api/products/{{product.id}}">
+                              Delete Product
+                            </button>
+                          </div>
+                        </div>
+                      </Modal>
+                    </td>
+                  </tr>
+                {else}
+                  <tr>
+                    <td colspan="7">
+                      <div class="empty-products">
+                        <div class="empty-icon">📦</div>
+                        <h3>No Products Found</h3>
+                        <p>Add your first product using the form above.</p>
+                      </div>
+                    </td>
+                  </tr>
+                {/for}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Card>
     </div>
-  </Card>
-</div>
-
-
   </div>
 
   <style>
@@ -268,5 +310,4 @@
       .form-actions .vlo-btn { width: 100%; text-align: center; }
     }
   </style>
-
 </BaseLayout>

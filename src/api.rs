@@ -463,10 +463,18 @@ pub async fn api_route_handler(
         }
     };
 
+    let action_type = if action_name.starts_with("put") || method == Method::PUT {
+        "updated"
+    } else if action_name.starts_with("delete") || method == Method::DELETE {
+        "deleted"
+    } else {
+        "created"
+    };
+
     match execute_api_sql(pool, &sql, &params).await {
         Ok(data) => {
-            if method == Method::POST {
-                let redirect_url = format!("/{}", resource);
+            if method != Method::GET {
+                let redirect_url = format!("/{}?status=success&action={}", resource, action_type);
                 return Redirect::to(&redirect_url)
                     .into_response();
             }
@@ -485,6 +493,12 @@ pub async fn api_route_handler(
                 action_name,
                 error
             );
+
+            if method != Method::GET {
+                let redirect_url = format!("/{}?status=error&action={}", resource, action_type);
+                return Redirect::to(&redirect_url)
+                    .into_response();
+            }
 
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

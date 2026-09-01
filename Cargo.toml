@@ -2,6 +2,10 @@
 name = "vlo"
 version = "0.8.0"
 edition = "2021"
+authors = ["MRJDEV <mrjdev@gmail.com>"]
+description = "VLO - A zero-boilerplate full-stack web framework"
+license = "MIT"
+repository = "https://github.com/mrjdevs/vlo.git"
 
 [dependencies]
 # Web framework & HTTP routing
@@ -43,3 +47,7 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+[[bin]]
+name = "vlo"
+path = "src/main.rs"

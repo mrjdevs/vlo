@@ -8,7 +8,7 @@ use axum::{routing::get, Router};
 use clap::Subcommand;
 use std::{
     fs,
-    path::{Path},
+    path::Path,
     process::Command,
     sync::{Arc, Mutex},
     time::Instant,
@@ -298,8 +298,9 @@ pub fn resolve_directives(source: &str) -> String {
             let clean_after = strip_vlo_directive_attrs(attrs_after);
             let url_js = js_string_literal(url);
 
+            // Updated fetch handler with status & action query flags for toast notifications on deletion
             let onclick = format!(
-                "if({}){{fetch({},{{method:'DELETE'}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO DELETE]',e))}}",
+                "if({}){{fetch({},{{method:'DELETE'}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());window.location.href=window.location.pathname+'?status=success&action=deleted'}}).catch(e=>{{console.error('[VLO DELETE]',e);window.location.href=window.location.pathname+'?status=error'}})}}",
                 confirm_js,
                 url_js
             );
@@ -317,21 +318,6 @@ pub fn resolve_directives(source: &str) -> String {
 
     // ============================================================
     // v-put
-    //
-    // Supports:
-    //
-    // 1. Form:
-    //    <form v-put="/api/products/1">
-    //
-    //    Sends all form fields as PUT.
-    //
-    // 2. Normal element:
-    //    <button
-    //        v-put="/api/products/1"
-    //        v-param="title"
-    //        v-prompt="New title">
-    //
-    //    Sends one prompted value as JSON.
     // ============================================================
 
     let re_put = regex::Regex::new(
@@ -353,13 +339,10 @@ pub fn resolve_directives(source: &str) -> String {
 
             let url_js = js_string_literal(url);
 
-            // ========================================================
-            // v-put on <form>
-            // ========================================================
-
             if tag.eq_ignore_ascii_case("form") {
+                // Form submit handler with status & action query flags for toast notifications on update
                 let onsubmit = format!(
-                    "event.preventDefault();fetch({},{{method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO PUT]',e));return false",
+                    "event.preventDefault();fetch({},{{method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());window.location.href=window.location.pathname+'?status=success&action=updated'}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.href=window.location.pathname+'?status=error'}});return false",
                     url_js
                 );
 
@@ -372,10 +355,6 @@ pub fn resolve_directives(source: &str) -> String {
                     onsubmit_attr
                 )
             } else {
-                // ====================================================
-                // v-put on normal elements
-                // ====================================================
-
                 let param_re =
                     regex::Regex::new(
                         r#"(?is)v-param\s*=\s*["']([^"']+)["']"#,
@@ -404,7 +383,7 @@ pub fn resolve_directives(source: &str) -> String {
                 let param_js = js_string_literal(param);
 
                 let onclick = format!(
-                    "let v=prompt({});if(v!==null){{fetch({},{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());location.reload()}}).catch(e=>console.error('[VLO PUT]',e))}}",
+                    "let v=prompt({});if(v!==null){{fetch({},{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok)throw new Error(await r.text());window.location.href=window.location.pathname+'?status=success&action=updated'}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.href=window.location.pathname+'?status=error'}})}}",
                     prompt_js,
                     url_js,
                     param_js
