@@ -9,13 +9,12 @@
             <a href="/docs">Docs</a>
         </Navbar>'
 
-    hero='<HeroLayout
-        badge="v0.5.1 • Built in Rust"
-        title="Build Web Apps Without the Framework Overhead"
-        subtitle="VLO is a lightweight Rust-powered web framework with real components, server-side rendering, APIs, live reload, and a simple developer experience."
-        cta="<Button text=&quot;Start Building&quot; href=&quot;/docs&quot; variant=&quot;primary&quot; /><Button text=&quot;Explore Components&quot; href=&quot;/components&quot; variant=&quot;ghost&quot; />"
-    />'
-
+    hero="<HeroLayout
+        badge='v0.5.1 • Built in Rust'
+        title='Build Web Apps Without the Framework Overhead'
+        subtitle='VLO is a lightweight Rust-powered web framework with real components, server-side rendering, APIs, live reload, and a simple developer experience.'
+        cta='<Button text="Start Building" href="/docs" variant="primary" /><Button text="Explore Components" href="/components" variant="ghost" />'
+    />"
     footer="<Footer />"
     toasts='<Toast title="VLO Dev Server" description="Ready on http://localhost:3000" icon="⚡" variant="success" />'
 >

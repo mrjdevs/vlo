@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 use serde_json::Value;
+
 pub static STYLE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>(.*?)</style>").unwrap());
 
@@ -26,10 +27,6 @@ pub static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 pub static SQL_PARAM_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{{1,2}\s*([a-zA-Z0-9_-]+)\s*\}{1,2}").unwrap());
-
-//pub static EMPTY_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
-//    Regex::new(r"(?i)<([a-z1-6]+)(\s+[^>]*)?>\s*</[a-z1-6]+>").unwrap()
-//});
 
 #[derive(Debug)]
 pub struct CompiledTemplate {
@@ -98,11 +95,10 @@ pub fn get_project_root() -> PathBuf {
     PROJECT_ROOT.clone()
 }
 
-
 pub struct RenderedPage {
     pub html: String,
     pub styles: Vec<String>,
-    pub page_status: bool,
+    pub template_context: HashMap<String, Value>,
 }
 
 impl Default for RenderedPage {
@@ -110,33 +106,24 @@ impl Default for RenderedPage {
         Self {
             html: String::new(),
             styles: Vec::new(),
-            page_status: false,
+            template_context: HashMap::new(),
         }
     }
 }
 
 impl RenderedPage {
-
     pub fn insert(&mut self, key: &str, value: Value) {
-        self.page_status = key == "status" || key == "action";
-        // This part depends on how your current RenderedPage stores
-        // template context.
+        self.template_context.insert(key.to_string(), value);
     }
 
-    pub fn has_page_status(&self) -> bool {
-        self.page_status
-    }
-}
+   // pub fn has_page_status(&self) -> bool {
+   //     self.page_status
+   //}
 
-impl RenderedPage {
     pub fn add_style(&mut self, name: &str, css: &str) {
         let marker = format!("/* VLO:{} */", name);
 
-        if self
-            .styles
-            .iter()
-            .any(|style| style.contains(&marker))
-        {
+        if self.styles.iter().any(|style| style.contains(&marker)) {
             return;
         }
 

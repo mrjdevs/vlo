@@ -3,7 +3,7 @@ use crate::{
     component::{render_components, render_tag},
     database::DB_POOL,
     state::{RenderedPage, STYLE_RE},
-    template::{render_control_flow, clean_empty_tags},
+    template::{clean_empty_tags, render_control_flow},
 };
 use axum::{
     extract::{Path as AxumPath, Query},
@@ -26,9 +26,12 @@ use std::{
 };
 use tokio::sync::broadcast;
 
-pub fn resolve_data_sources(source: &str) -> String {
+pub fn resolve_data_sources(
+    source: &str,
+    page_context: &HashMap<String, Value>,
+) -> String {
     let re = regex::Regex::new(
-        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)data-source\s*=\s*[\"']([^\"']+)[\"']([^>]*?)>"#,
+        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)data-source\s*=\s*["']([^"']+)["']([^>]*?)>"#,
     )
     .unwrap();
 
@@ -113,11 +116,20 @@ pub fn resolve_data_sources(source: &str) -> String {
         result.push_str(&source[last_end..full.start()]);
 
         let inner = &source[full.end()..close_pos];
-        let rendered = evaluate_data_source_block(inner, &action);
+
+        let rendered = evaluate_data_source_block(
+            inner,
+            &action,
+            page_context,
+        );
 
         result.push_str(&format!(
             "<{}{}{}>{}</{}>",
-            tag, before, after, rendered, tag
+            tag,
+            before,
+            after,
+            rendered,
+            tag
         ));
 
         last_end = close_pos + close.len();
@@ -130,8 +142,6 @@ pub fn resolve_data_sources(source: &str) -> String {
 pub fn fetch_api_data_sync(action: &str) -> Value {
     let action = action.to_string();
 
-    let _handle = tokio::runtime::Handle::try_current();
-
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
 
@@ -142,9 +152,7 @@ pub fn fetch_api_data_sync(action: &str) -> Value {
                 if let Some(pool) = DB_POOL.get() {
                     let params = serde_json::Map::new();
 
-                    if let Ok(res) =
-                        execute_api_sql(pool, sql, &params).await
-                    {
+                    if let Ok(res) = execute_api_sql(pool, sql, &params).await {
                         if let Some(data) = res.get("data") {
                             return data.clone();
                         }
@@ -162,10 +170,11 @@ pub fn fetch_api_data_sync(action: &str) -> Value {
 pub fn evaluate_data_source_block(
     inner: &str,
     action: &str,
+    page_context: &HashMap<String, Value>,
 ) -> String {
     let data = fetch_api_data_sync(action);
 
-    let mut context = HashMap::new();
+    let mut context = page_context.clone();
 
     let var_name = action
         .trim_start_matches("get_")
@@ -188,6 +197,14 @@ pub fn render_vlo_with_query(
     query: &HashMap<String, String>,
 ) -> RenderedPage {
     let mut context = RenderedPage::default();
+
+    for (key, value) in query {
+        context.insert(
+            key,
+            Value::String(value.clone()),
+        );
+    }
+
     let mut source = strip_server_block(&source);
 
     for captures in STYLE_RE.captures_iter(&source) {
@@ -198,7 +215,10 @@ pub fn render_vlo_with_query(
 
     source = STYLE_RE.replace_all(&source, "").into_owned();
 
-    source = resolve_data_sources(&source);
+    source = resolve_data_sources(
+        &source,
+        &context.template_context,
+    );
 
     for _ in 0..20 {
         let previous = source.clone();
@@ -221,41 +241,11 @@ pub fn render_vlo_with_query(
 
     source = crate::server::resolve_directives(&source);
 
-    /*
-     * Query parameters become template variables.
-     *
-     * Example:
-     *
-     * /products?status=success&action=deleted
-     *
-     * becomes:
-     *
-     * status = "success"
-     * action = "deleted"
-     */
-    if !query.is_empty() {
-        let mut query_context = HashMap::new();
+    source = render_control_flow(
+        &source,
+        &context.template_context,
+    );
 
-        for (key, value) in query {
-            query_context.insert(
-                key.clone(),
-                Value::String(value.clone()),
-            );
-        }
-
-        source = render_control_flow(
-            &source,
-            &query_context,
-        );
-    }
-
-    /*
-     * Remove the query string from the browser URL after
-     * the server has rendered the toast.
-     *
-     * history.replaceState() does NOT make another HTTP request.
-     * It only changes the visible browser URL.
-     */
     if query.contains_key("status")
         || query.contains_key("action")
     {
@@ -278,11 +268,13 @@ pub fn render_vlo_with_query(
     context
 }
 
-pub async fn home_handler() -> impl IntoResponse {
+pub async fn home_handler(
+    Query(query): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
     render_page(
         "home".to_string(),
         true,
-        HashMap::new(),
+        query,
     )
     .await
 }
@@ -334,16 +326,11 @@ pub async fn render_page(
     .await
     {
         Ok(Some(response)) => response.into_response(),
-
-        _ => render_404(dev)
-            .await
-            .into_response(),
+        _ => render_404(dev).await.into_response(),
     }
 }
 
-pub async fn render_404(
-    dev: bool,
-) -> impl IntoResponse {
+pub async fn render_404(dev: bool) -> impl IntoResponse {
     tokio::task::spawn_blocking(move || {
         let file = crate::state::get_project_root()
             .join("pages")
@@ -446,8 +433,7 @@ pub async fn hmr_handler(
         }
     };
 
-    Sse::new(stream)
-        .keep_alive(KeepAlive::default())
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 pub fn watch_files(
@@ -457,12 +443,10 @@ pub fn watch_files(
     last: Arc<Mutex<Instant>>,
 ) -> notify::Result<()> {
     let root = crate::state::get_project_root();
-
     let layouts = root.join("layouts");
     let components = root.join("components");
 
-    let (tx_notify, rx) =
-        std::sync::mpsc::channel();
+    let (tx_notify, rx) = std::sync::mpsc::channel();
 
     let mut watcher =
         RecommendedWatcher::new(
@@ -470,8 +454,12 @@ pub fn watch_files(
             Config::default(),
         )?;
 
-    let paths_to_watch =
-        [&pages, &public, &layouts, &components];
+    let paths_to_watch = [
+        &pages,
+        &public,
+        &layouts,
+        &components,
+    ];
 
     for path in paths_to_watch {
         if path.exists() {
@@ -500,9 +488,7 @@ pub fn watch_files(
             continue;
         }
 
-        if let Ok(mut timestamp) =
-            last.try_lock()
-        {
+        if let Ok(mut timestamp) = last.try_lock() {
             if timestamp.elapsed().as_millis() > 200 {
                 *timestamp = Instant::now();
 
@@ -513,7 +499,6 @@ pub fn watch_files(
                 }
 
                 let _ = tx.send(());
-
                 println!("⚡ Reload");
             }
         }

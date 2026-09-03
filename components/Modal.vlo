@@ -1,0 +1,14 @@
+<div class="vlo-modal-overlay" id="{{id}}">
+    <div class="vlo-modal-box">
+        {{#if title}}
+            <h2>{{title}}</h2>
+        {{/#if}}
+        <slot></slot>
+    </div>
+</div>
+
+<style>
+    .vlo-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; }
+    .vlo-modal-overlay.active { display: flex; }
+    .vlo-modal-box { background: #1e293b; padding: 2rem; border-radius: 12px; border: 1px solid #334155; width: 100%; max-width: 500px; }
+</style>

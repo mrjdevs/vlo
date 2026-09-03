@@ -20,7 +20,7 @@
       icon="✏️"
       title="Product Updated"
       description="The product changes have been saved successfully."
-    />s
+    />
   {/if}
 
   {if action == "deleted"}
@@ -34,14 +34,12 @@
 {/if}
 
 {if status == "error"}
-  {if affected_rows != 0}
-    <Toast
-      variant="error"
-      icon="⚠️"
-      title="Operation Failed"
-      description="An error occurred while processing your request. Please try again."
-    />
-  {/if}
+  <Toast
+    variant="error"
+    icon="⚠️"
+    title="Operation Failed"
+    description="An error occurred while processing your request. Please try again."
+  />
 {/if}
 
     <div class="products-header">
