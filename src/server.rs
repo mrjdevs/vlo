@@ -1,7 +1,7 @@
 use crate::{
     api::{api_handler_id, api_handler_path, api_handler_root},
     router::{hmr_handler, home_handler, not_found_handler, page_handler, watch_files},
-    state::get_project_root,
+    state::{self, get_project_root},
     template::escape_html_attribute,
 };
 use axum::{routing::get, Router};
@@ -34,13 +34,26 @@ pub enum Commands {
         #[arg(long)]
         no_db: bool,
     },
+
     Dev {
         #[arg(short, long, default_value = "3000")]
         port: u16,
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
     },
-    Build,
+
+    Build {
+        #[arg(long)]
+        release: bool,
+    },
+
+    Serve {
+        #[arg(short, long, default_value = "3000")]
+        port: u16,
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+    },
+
     Deploy {
         #[arg(
             short,
@@ -53,6 +66,7 @@ pub enum Commands {
 }
 
 pub async fn dev(host: &str, port: u16) {
+    state::set_app_mode(state::AppMode::Development);
     let root = get_project_root();
     let pages_path = root.join("pages");
     let public_path = root.join("public");
@@ -109,7 +123,61 @@ pub async fn dev(host: &str, port: u16) {
         .await
         .expect("Failed to bind port");
 
-    println!("⚡ VLO v0.7 dev server running at http://{}", addr);
+    println!("⚡ VLO dev server: http://{}", addr);
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("Server error");
+}
+
+pub async fn serve(host: &str, port: u16) {
+    state::set_app_mode(state::AppMode::Production);
+
+    let root = get_project_root();
+    let public_path = root.join("public");
+    let public_path_service = public_path.clone();
+
+    let app = Router::new()
+        .route("/", get(home_handler))
+        .route("/:path", get(page_handler))
+        .route(
+            "/api",
+            get(api_handler_root)
+                .post(api_handler_root)
+                .put(api_handler_root)
+                .patch(api_handler_root)
+                .delete(api_handler_root),
+        )
+        .route(
+            "/api/:resource",
+            get(api_handler_path)
+                .post(api_handler_path)
+                .put(api_handler_path)
+                .patch(api_handler_path)
+                .delete(api_handler_path),
+        )
+        .route(
+            "/api/:resource/:id",
+            get(api_handler_id)
+                .post(api_handler_id)
+                .put(api_handler_id)
+                .patch(api_handler_id)
+                .delete(api_handler_id),
+        )
+        .nest_service("/static", ServeDir::new(public_path_service))
+        .layer(CompressionLayer::new())
+        .fallback(not_found_handler);
+
+    let host_str = std::env::var("VLO_HOST").unwrap_or_else(|_| host.to_string());
+    let port_str = std::env::var("VLO_PORT").unwrap_or_else(|_| port.to_string());
+    let addr = format!("{}:{}", host_str, port_str);
+
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .expect("Failed to bind port");
+
+    println!("⚡ VLO production server: http://{}", addr);
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -124,8 +192,12 @@ async fn shutdown_signal() {
     println!("\n⚡ Shutting down VLO dev server...");
 }
 
-pub fn build() {
-    println!("⚡ Building production site...");
+pub fn build(release: bool) {
+    if release {
+    println!("⚡ VLO release build...");
+    } else {
+        println!("⚡ VLO production build...");
+    }
     let root = get_project_root();
     let pages = root.join("pages");
     let public = root.join("public");
@@ -152,7 +224,7 @@ pub fn build() {
 
             let content = fs::read_to_string(&path).unwrap_or_default();
             let rendered = crate::router::render_vlo(content);
-            let html = crate::router::wrap_html(&stem, &rendered, false);
+            let html = crate::router::wrap_html(&stem, &rendered);
 
             let output = if stem == "home" || stem == "index" {
                 dist.join("index.html")
@@ -191,7 +263,7 @@ pub async fn deploy(provider: &str) {
     let dist = root.join("dist");
 
     if !dist.exists() {
-        build();
+    build(true);
     }
 
     let provider = provider.to_lowercase();
@@ -402,8 +474,9 @@ pub fn resolve_directives(source: &str) -> String {
         .into_owned();
 
     vlo_debug!(
-        "🧩 [VLO DIRECTIVES] Resolved HTML:\n{}",
-        result
+        "🧩 [VLO DIRECTIVES] Resolved HTML: {} chars, {} rows",
+        result.len(),
+        result.lines().count()
     );
 
     result

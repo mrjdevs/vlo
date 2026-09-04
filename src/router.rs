@@ -2,7 +2,7 @@ use crate::{
     api::{execute_api_sql, load_api_actions, strip_server_block},
     component::{render_components, render_tag},
     database::DB_POOL,
-    state::{RenderedPage, STYLE_RE},
+    state::{self, RenderedPage, STYLE_RE},
     template::{clean_empty_tags, render_control_flow},
 };
 use axum::{
@@ -273,7 +273,6 @@ pub async fn home_handler(
 ) -> impl IntoResponse {
     render_page(
         "home".to_string(),
-        true,
         query,
     )
     .await
@@ -285,19 +284,17 @@ pub async fn page_handler(
 ) -> impl IntoResponse {
     render_page(
         path,
-        true,
         query,
     )
     .await
 }
 
 pub async fn not_found_handler() -> impl IntoResponse {
-    render_404(true).await
+    render_404().await
 }
 
 pub async fn render_page(
     path: String,
-    dev: bool,
     query: HashMap<String, String>,
 ) -> impl IntoResponse {
     let page_path = path.clone();
@@ -318,7 +315,6 @@ pub async fn render_page(
                 Html(wrap_html(
                     &page_path,
                     &rendered,
-                    dev,
                 )),
             )
         })
@@ -326,11 +322,11 @@ pub async fn render_page(
     .await
     {
         Ok(Some(response)) => response.into_response(),
-        _ => render_404(dev).await.into_response(),
+        _ => render_404().await.into_response(),
     }
 }
 
-pub async fn render_404(dev: bool) -> impl IntoResponse {
+pub async fn render_404() -> impl IntoResponse {
     tokio::task::spawn_blocking(move || {
         let file = crate::state::get_project_root()
             .join("pages")
@@ -344,7 +340,6 @@ pub async fn render_404(dev: bool) -> impl IntoResponse {
                 Html(wrap_html(
                     "404 - Page Not Found",
                     &rendered,
-                    dev,
                 )),
             )
                 .into_response()
@@ -360,7 +355,6 @@ pub async fn render_404(dev: bool) -> impl IntoResponse {
                 Html(wrap_html(
                     "404 - Page Not Found",
                     &rendered,
-                    dev,
                 )),
             )
                 .into_response()
@@ -379,8 +373,9 @@ pub async fn render_404(dev: bool) -> impl IntoResponse {
 pub fn wrap_html(
     title: &str,
     rendered: &RenderedPage,
-    dev: bool,
 ) -> String {
+    let dev = state::app_mode().is_dev();
+
     let hmr = if dev {
         r#"<script>
 const es = new EventSource("/__vlo_hmr");

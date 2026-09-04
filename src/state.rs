@@ -37,6 +37,38 @@ pub struct CompiledTemplate {
 pub static TEMPLATE_CACHE: LazyLock<Mutex<HashMap<PathBuf, Arc<CompiledTemplate>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppMode {
+    Development,
+    Production,
+}
+
+impl AppMode {
+    pub fn is_dev(self) -> bool {
+        matches!(self, Self::Development)
+    }
+
+    pub fn is_production(self) -> bool {
+        matches!(self, Self::Production)
+    }
+}
+
+pub static APP_MODE: LazyLock<Mutex<AppMode>> =
+    LazyLock::new(|| Mutex::new(AppMode::Development));
+
+pub fn set_app_mode(mode: AppMode) {
+    if let Ok(mut current) = APP_MODE.lock() {
+        *current = mode;
+    }
+}
+
+pub fn app_mode() -> AppMode {
+    APP_MODE
+        .lock()
+        .map(|mode| *mode)
+        .unwrap_or(AppMode::Development)
+}
+
 pub static VLO_DEBUG: LazyLock<bool> = LazyLock::new(|| {
     std::env::var("VLO_DEBUG")
         .map(|value| env_bool_from_value(&value))
@@ -115,10 +147,6 @@ impl RenderedPage {
     pub fn insert(&mut self, key: &str, value: Value) {
         self.template_context.insert(key.to_string(), value);
     }
-
-   // pub fn has_page_status(&self) -> bool {
-   //     self.page_status
-   //}
 
     pub fn add_style(&mut self, name: &str, css: &str) {
         let marker = format!("/* VLO:{} */", name);

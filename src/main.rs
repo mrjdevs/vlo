@@ -1,7 +1,3 @@
-// ============================================================
-// 1. VLO IMPORTS & MODULE DECLARATIONS
-// ============================================================
-
 #[macro_use]
 mod state;
 mod database;
@@ -14,17 +10,13 @@ mod utils;
 
 use clap::Parser;
 
-// ============================================================
-// 2. VLO CLI & APPLICATION ENTRY
-// ============================================================
-
 #[derive(Parser)]
 #[command(
     name = "vlo",
     author = "VLO Team",
     version,
-    about = "⚡ VLO v0.7 - Ultra-fast, component-driven Web Framework",
-    long_about = "VLO combines component rendering, instant dynamic SQL APIs, hot module reloading (HMR), and simple static deployment into a single high-performance CLI framework."
+    about = "⚡ VLO - Ultra-fast, component-driven Web Framework",
+    long_about = "VLO combines component rendering, SSR, dynamic SQL APIs, hot module reloading, and production deployment into a single runtime."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -44,15 +36,27 @@ async fn main() {
         } => {
             utils::init_project(name, db, db_name.as_deref(), no_db);
         }
+
         server::Commands::Dev { port, ref host } => {
+            state::set_app_mode(state::AppMode::Development);
             database::init_db().await;
             server::dev(host, port).await;
         }
-        server::Commands::Build => {
+
+        server::Commands::Build { release } => {
+            state::set_app_mode(state::AppMode::Production);
             database::init_db().await;
-            server::build();
+            server::build(release);
         }
+
+        server::Commands::Serve { port, ref host } => {
+            state::set_app_mode(state::AppMode::Production);
+            database::init_db().await;
+            server::serve(host, port).await;
+        }
+
         server::Commands::Deploy { ref provider } => {
+            state::set_app_mode(state::AppMode::Production);
             database::init_db().await;
             server::deploy(provider).await;
         }
