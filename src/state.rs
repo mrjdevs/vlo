@@ -47,10 +47,6 @@ impl AppMode {
     pub fn is_dev(self) -> bool {
         matches!(self, Self::Development)
     }
-
-    pub fn is_production(self) -> bool {
-        matches!(self, Self::Production)
-    }
 }
 
 pub static APP_MODE: LazyLock<Mutex<AppMode>> =
