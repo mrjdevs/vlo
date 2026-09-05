@@ -156,6 +156,18 @@ pub async fn serve(host: &str, port: u16) {
     let app = Router::new()
         .route("/", get(home_handler))
         .route("/:path", get(page_handler))
+        
+        .route("/uploads/*path", get(serve_file))
+        .route("/api/files/upload", axum::routing::post(upload_file))
+        .route(
+            "/api/files/:id/download",
+            get(download_file),
+        )
+        .route(
+            "/api/files/:id",
+            get(get_file)
+                .delete(delete_file),
+        )
         .route(
             "/api",
             get(api_handler_root)
