@@ -87,6 +87,14 @@ macro_rules! vlo_debug {
     };
 }
 
+pub fn max_upload_bytes() -> u64 {
+    dotenvy::var("VLO_MAX_UPLOAD_MB")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(50)
+        .saturating_mul(1024 * 1024)
+}
+
 pub static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
     let mut starts = Vec::new();
 

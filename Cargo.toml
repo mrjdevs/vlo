@@ -9,11 +9,12 @@ repository = "https://github.com/mrjdevs/vlo.git"
 
 [dependencies]
 # Web framework & HTTP routing
-axum = { version = "0.7", features = ["macros", "http1", "json", "query", "tokio"] }
+axum = { version = "0.7", features = ["macros", "http1", "json", "query", "tokio", "multipart"] }
 
 # Asynchronous runtime & streaming
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "fs"] }
 async-stream = "0.3"
+multer = "3.1"
 futures-util = "0.3"
 
 # Command line interface

@@ -1,0 +1,85 @@
+<input
+    id="{{id}}"
+    class="vlo-file-input {{variant}}"
+    type="file"
+    name="{{name}}"
+    accept="{{accept}}"
+    {if multiple}
+        multiple
+    {/if}
+    {if disabled}
+        disabled
+    {/if}
+>
+
+<style>
+.vlo-file-input {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: #374151;
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.vlo-file-input:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.vlo-file-input:disabled {
+    background: #f3f4f6;
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
+.vlo-file-input::file-selector-button {
+    padding: 8px 14px;
+    margin-right: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: #ffffff;
+    background: #2563eb;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.vlo-file-input.primary::file-selector-button {
+    background: #2563eb;
+}
+
+.vlo-file-input.primary:hover:not(:disabled)::file-selector-button {
+    background: #1d4ed8;
+}
+
+.vlo-file-input.secondary::file-selector-button {
+    color: #374151;
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
+}
+
+.vlo-file-input.secondary:hover:not(:disabled)::file-selector-button {
+    background: #e5e7eb;
+}
+
+.vlo-file-input.danger::file-selector-button {
+    background: #dc2626;
+}
+
+.vlo-file-input.danger:hover:not(:disabled)::file-selector-button {
+    background: #b91c1c;
+}
+
+.vlo-file-input:disabled::file-selector-button {
+    cursor: not-allowed;
+}
+</style>

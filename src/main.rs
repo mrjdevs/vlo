@@ -7,6 +7,8 @@ mod template;
 mod router;
 mod server;
 mod utils;
+mod files;
+mod files_api;
 
 use clap::Parser;
 
