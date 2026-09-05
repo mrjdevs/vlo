@@ -156,7 +156,7 @@ pub async fn serve(host: &str, port: u16) {
     let app = Router::new()
         .route("/", get(home_handler))
         .route("/:path", get(page_handler))
-        
+
         .route("/uploads/*path", get(serve_file))
         .route("/api/files/upload", axum::routing::post(upload_file))
         .route(
@@ -193,6 +193,7 @@ pub async fn serve(host: &str, port: u16) {
                 .delete(api_handler_id),
         )
         .nest_service("/static", ServeDir::new(public_path_service))
+        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(CompressionLayer::new())
         .fallback(not_found_handler);
 
