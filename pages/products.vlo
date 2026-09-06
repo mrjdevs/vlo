@@ -112,6 +112,7 @@
             accept="image/*"
             variant="primary"
             button="Choose Image"
+            required
           />
         </div>
 

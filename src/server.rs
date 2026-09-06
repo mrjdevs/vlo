@@ -6,6 +6,7 @@ use crate::{
     template::escape_html_attribute,
 };
 use axum::{
+    response::{Html, IntoResponse},
     routing::get,
     Router,
 };
@@ -150,15 +151,20 @@ pub async fn serve(host: &str, port: u16) {
     state::set_app_mode(state::AppMode::Production);
 
     let root = get_project_root();
-    let public_path = root.join("public");
-    let public_path_service = public_path.clone();
+    let build_dir = root.join(".vlo").join("build");
+    let static_dir = build_dir.join("static");
+
+    if !build_dir.exists() {
+        eprintln!("❌ Production build not found.");
+        eprintln!("   Run `vlo build` first.");
+        return;
+    }
 
     let app = Router::new()
-        .route("/", get(home_handler))
-        .route("/:path", get(page_handler))
-
-        .route("/uploads/*path", get(serve_file))
-        .route("/api/files/upload", axum::routing::post(upload_file))
+        .route(
+            "/api/files/upload",
+            axum::routing::post(upload_file),
+        )
         .route(
             "/api/files/:id/download",
             get(download_file),
@@ -192,13 +198,26 @@ pub async fn serve(host: &str, port: u16) {
                 .patch(api_handler_id)
                 .delete(api_handler_id),
         )
-        .nest_service("/static", ServeDir::new(public_path_service))
+        .route(
+            "/uploads/*path",
+            get(serve_file),
+        )
+        .nest_service(
+            "/static",
+            ServeDir::new(static_dir),
+        )
+        .fallback(move |uri: axum::http::Uri| {
+            serve_build_page(build_dir.clone(), uri)
+        })
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
-        .layer(CompressionLayer::new())
-        .fallback(not_found_handler);
+        .layer(CompressionLayer::new());
 
-    let host_str = std::env::var("VLO_HOST").unwrap_or_else(|_| host.to_string());
-    let port_str = std::env::var("VLO_PORT").unwrap_or_else(|_| port.to_string());
+    let host_str =
+        std::env::var("VLO_HOST").unwrap_or_else(|_| host.to_string());
+
+    let port_str =
+        std::env::var("VLO_PORT").unwrap_or_else(|_| port.to_string());
+
     let addr = format!("{}:{}", host_str, port_str);
 
     let listener = tokio::net::TcpListener::bind(&addr)
@@ -213,6 +232,60 @@ pub async fn serve(host: &str, port: u16) {
         .expect("Server error");
 }
 
+async fn serve_build_page(
+    build_dir: std::path::PathBuf,
+    uri: axum::http::Uri,
+) -> impl IntoResponse {
+    let path = uri.path();
+
+    let filename = if path == "/" {
+        "index.html".to_string()
+    } else {
+        let name = path.trim_start_matches('/');
+
+        if name.contains('/')
+            || name.contains('\\')
+            || name.contains("..")
+        {
+            return (
+                axum::http::StatusCode::NOT_FOUND,
+                Html("404 - Page Not Found".to_string()),
+            )
+                .into_response();
+        }
+
+        format!("{}.html", name)
+    };
+
+    let file = build_dir.join(&filename);
+
+    match fs::read_to_string(&file) {
+        Ok(html) => (
+            axum::http::StatusCode::OK,
+            Html(html),
+        )
+            .into_response(),
+
+        Err(_) => {
+            let not_found = build_dir.join("404.html");
+
+            match fs::read_to_string(not_found) {
+                Ok(html) => (
+                    axum::http::StatusCode::NOT_FOUND,
+                    Html(html),
+                )
+                    .into_response(),
+
+                Err(_) => (
+                    axum::http::StatusCode::NOT_FOUND,
+                    Html("404 - Page Not Found".to_string()),
+                )
+                    .into_response(),
+            }
+        }
+    }
+}
+
 async fn shutdown_signal() {
     tokio::signal::ctrl_c()
         .await
@@ -222,24 +295,28 @@ async fn shutdown_signal() {
 
 pub fn build(release: bool) {
     if release {
-    println!("⚡ VLO release build...");
+        println!("⚡ VLO release build...");
     } else {
         println!("⚡ VLO production build...");
     }
+
     let root = get_project_root();
     let pages = root.join("pages");
     let public = root.join("public");
-    let dist = root.join("dist");
+    let build_dir = root.join(".vlo").join("build");
 
-    if dist.exists() {
-        let _ = fs::remove_dir_all(&dist);
+    if build_dir.exists() {
+        fs::remove_dir_all(&build_dir)
+            .expect("Failed to clean previous build");
     }
 
-    fs::create_dir_all(dist.join("static")).expect("Failed to create dist directory");
+    fs::create_dir_all(build_dir.join("static"))
+        .expect("Failed to create .vlo/build directory");
 
     if let Ok(entries) = fs::read_dir(&pages) {
         for entry in entries.flatten() {
             let path = entry.path();
+
             if path.extension().and_then(|e| e.to_str()) != Some("vlo") {
                 continue;
             }
@@ -250,23 +327,32 @@ pub fn build(release: bool) {
                 .to_string_lossy()
                 .to_string();
 
-            let content = fs::read_to_string(&path).unwrap_or_default();
+            let content = fs::read_to_string(&path)
+                .unwrap_or_default();
+
             let rendered = crate::router::render_vlo(content);
             let html = crate::router::wrap_html(&stem, &rendered);
 
             let output = if stem == "home" || stem == "index" {
-                dist.join("index.html")
+                build_dir.join("index.html")
             } else {
-                dist.join(format!("{}.html", stem))
+                build_dir.join(format!("{}.html", stem))
             };
 
-            fs::write(&output, html).expect("Failed to write generated HTML");
+            fs::write(&output, html)
+                .expect("Failed to write generated HTML");
+
             println!("  ├─ Generated: {}", output.display());
         }
     }
 
     if public.exists() {
-        copy_dir_all(&public, &dist.join("static")).expect("Failed to copy static assets");
+        copy_dir_all(
+            &public,
+            &build_dir.join("static"),
+        )
+        .expect("Failed to copy static assets");
+
         println!("  └─ Copied static assets");
     }
 
@@ -288,17 +374,24 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 pub async fn deploy(provider: &str) {
     let root = get_project_root();
-    let dist = root.join("dist");
+    let build_dir = root.join(".vlo").join("build");
 
-    if !dist.exists() {
-    build(true);
+    if !build_dir.exists() {
+        println!("⚡ Production build not found. Running build...");
+        build(true);
+    }
+
+    if !build_dir.exists() {
+        eprintln!("❌ Production build failed.");
+        return;
     }
 
     let provider = provider.to_lowercase();
-    println!("⚡ Deploying /dist to {}...", provider);
+    println!("⚡ Deploying /.vlo/build to {}...", provider);
 
     if provider == "railway" {
-        let caddy = dist.join("Caddyfile");
+        let caddy = build_dir.join("Caddyfile");
+
         if !caddy.exists() {
             fs::write(
                 &caddy,
@@ -309,9 +402,24 @@ pub async fn deploy(provider: &str) {
     }
 
     let args: Vec<&str> = match provider.as_str() {
-        "netlify" => vec!["netlify-cli", "deploy", "--dir=dist", "--prod"],
-        "vercel" => vec!["vercel", "deploy", "dist", "--prod"],
-        "cloudflare" | "pages" => vec!["wrangler", "pages", "deploy", "dist"],
+        "netlify" => vec![
+            "netlify-cli",
+            "deploy",
+            "--dir=.vlo/build",
+            "--prod",
+        ],
+        "vercel" => vec![
+            "vercel",
+            "deploy",
+            ".vlo/build",
+            "--prod",
+        ],
+        "cloudflare" | "pages" => vec![
+            "wrangler",
+            "pages",
+            "deploy",
+            ".vlo/build",
+        ],
         "railway" => vec!["@railway/cli", "up"],
         _ => {
             eprintln!("❌ Unsupported provider '{}'.", provider);
@@ -319,7 +427,11 @@ pub async fn deploy(provider: &str) {
         }
     };
 
-    let working_dir = if provider == "railway" { &dist } else { &root };
+    let working_dir = if provider == "railway" {
+        &build_dir
+    } else {
+        &root
+    };
 
     let status = if cfg!(target_os = "windows") {
         Command::new("cmd")
