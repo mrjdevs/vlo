@@ -71,7 +71,7 @@ pub enum Commands {
     },
 }
 
-pub async fn dev(host: &str, port: u16) {
+pub async fn dev(host: &str, port: u16) -> Result<(), String> {
     state::set_app_mode(state::AppMode::Development);
     let root = get_project_root();
     let pages_path = root.join("pages");
@@ -135,19 +135,33 @@ pub async fn dev(host: &str, port: u16) {
     let port_str = std::env::var("VLO_PORT").unwrap_or_else(|_| port.to_string());
     let addr = format!("{}:{}", host_str, port_str);
 
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .expect("Failed to bind port");
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            return Err(format!(
+                "Failed to start VLO dev server.\n   Address: {}\n   Error: {}\n   Try another port with: vlo dev --port 3001",
+                addr,
+                error
+            ));
+        }
+    };
 
     println!("⚡ VLO dev server: http://{}", addr);
 
-    axum::serve(listener, app)
+    if let Err(error) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .expect("Server error");
+    {
+        return Err(format!(
+            "VLO dev server stopped unexpectedly.\n   Error: {}",
+            error
+        ));
+    }
+
+    Ok(())
 }
 
-pub async fn serve(host: &str, port: u16) {
+pub async fn serve(host: &str, port: u16) -> Result<(), String> {
     state::set_app_mode(state::AppMode::Production);
 
     let root = get_project_root();
@@ -155,25 +169,15 @@ pub async fn serve(host: &str, port: u16) {
     let static_dir = build_dir.join("static");
 
     if !build_dir.exists() {
-        eprintln!("❌ Production build not found.");
-        eprintln!("   Run `vlo build` first.");
-        return;
+        return Err(
+            "Production build not found.\n   Run `vlo build` first.".to_string()
+        );
     }
 
     let app = Router::new()
-        .route(
-            "/api/files/upload",
-            axum::routing::post(upload_file),
-        )
-        .route(
-            "/api/files/:id/download",
-            get(download_file),
-        )
-        .route(
-            "/api/files/:id",
-            get(get_file)
-                .delete(delete_file),
-        )
+        .route("/api/files/upload", axum::routing::post(upload_file))
+        .route("/api/files/:id/download", get(download_file))
+        .route("/api/files/:id", get(get_file).delete(delete_file))
         .route(
             "/api",
             get(api_handler_root)
@@ -198,38 +202,48 @@ pub async fn serve(host: &str, port: u16) {
                 .patch(api_handler_id)
                 .delete(api_handler_id),
         )
-        .route(
-            "/uploads/*path",
-            get(serve_file),
-        )
-        .nest_service(
-            "/static",
-            ServeDir::new(static_dir),
-        )
+        .route("/uploads/*path", get(serve_file))
+        .nest_service("/static", ServeDir::new(static_dir))
         .fallback(move |uri: axum::http::Uri| {
             serve_build_page(build_dir.clone(), uri)
         })
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(CompressionLayer::new());
 
-    let host_str =
-        std::env::var("VLO_HOST").unwrap_or_else(|_| host.to_string());
+    let host_str = std::env::var("VLO_HOST")
+        .unwrap_or_else(|_| host.to_string());
 
-    let port_str =
-        std::env::var("VLO_PORT").unwrap_or_else(|_| port.to_string());
+    let port_str = std::env::var("VLO_PORT")
+        .unwrap_or_else(|_| port.to_string());
 
     let addr = format!("{}:{}", host_str, port_str);
 
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .expect("Failed to bind port");
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            return Err(format!(
+                "Failed to start VLO production server.\n\
+                 Address: {}\n\
+                 Error: {}\n\
+                 Try another port with: vlo serve --port 3001",
+                addr, error
+            ));
+        }
+    };
 
     println!("⚡ VLO production server: http://{}", addr);
 
-    axum::serve(listener, app)
+    if let Err(error) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .expect("Server error");
+    {
+        return Err(format!(
+            "VLO production server stopped unexpectedly.\n   Error: {}",
+            error
+        ));
+    }
+
+    Ok(())
 }
 
 async fn serve_build_page(
@@ -293,7 +307,7 @@ async fn shutdown_signal() {
     println!("\n⚡ Shutting down VLO dev server...");
 }
 
-pub fn build(release: bool) {
+pub fn build(release: bool) -> Result<(), String> {
     if release {
         println!("⚡ VLO release build...");
     } else {
@@ -356,7 +370,9 @@ pub fn build(release: bool) {
         println!("  └─ Copied static assets");
     }
 
-    println!("⚡ Build completed successfully!");
+        println!("⚡ Build completed successfully!");
+
+        Ok(())
 }
 
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -372,21 +388,21 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-pub async fn deploy(provider: &str) {
+pub async fn deploy(provider: &str) -> Result<(), String> {
     let root = get_project_root();
     let build_dir = root.join(".vlo").join("build");
 
     if !build_dir.exists() {
         println!("⚡ Production build not found. Running build...");
-        build(true);
+        build(true)?;
     }
 
     if !build_dir.exists() {
-        eprintln!("❌ Production build failed.");
-        return;
+        return Err("Production build failed.".to_string());
     }
 
     let provider = provider.to_lowercase();
+
     println!("⚡ Deploying /.vlo/build to {}...", provider);
 
     if provider == "railway" {
@@ -397,7 +413,7 @@ pub async fn deploy(provider: &str) {
                 &caddy,
                 ":$PORT {\n    root * .\n    file_server\n}\n",
             )
-            .expect("Failed to write Caddyfile");
+            .map_err(|e| format!("Failed to write Caddyfile: {}", e))?;
         }
     }
 
@@ -421,10 +437,7 @@ pub async fn deploy(provider: &str) {
             ".vlo/build",
         ],
         "railway" => vec!["@railway/cli", "up"],
-        _ => {
-            eprintln!("❌ Unsupported provider '{}'.", provider);
-            return;
-        }
+        _ => return Err(format!("Unsupported provider '{}'.", provider)),
     };
 
     let working_dir = if provider == "railway" {
@@ -447,19 +460,19 @@ pub async fn deploy(provider: &str) {
             .args(&args)
             .current_dir(working_dir)
             .status()
-    };
-
-    match status {
-        Ok(status) if status.success() => {
-            println!("⚡ Deployment completed successfully!");
-        }
-        Ok(status) => {
-            eprintln!("❌ Deployment exited with status: {}", status);
-        }
-        Err(error) => {
-            eprintln!("❌ Failed to execute deployment command: {}", error);
-        }
     }
+    .map_err(|e| format!("Failed to execute deployment command: {}", e))?;
+
+    if !status.success() {
+        return Err(format!(
+            "Deployment exited with status: {}",
+            status
+        ));
+    }
+
+    println!("⚡ Deployment completed successfully!");
+
+    Ok(())
 }
 
 pub fn js_string_literal(value: &str) -> String {

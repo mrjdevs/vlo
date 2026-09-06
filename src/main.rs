@@ -27,6 +27,13 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
+    if let Err(error) = run().await {
+        eprintln!("❌ {}", error);
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), String> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -36,31 +43,33 @@ async fn main() {
             ref db_name,
             no_db,
         } => {
-            utils::init_project(name, db, db_name.as_deref(), no_db);
+            utils::init_project(name, db, db_name.as_deref(), no_db)?;
         }
 
         server::Commands::Dev { port, ref host } => {
             state::set_app_mode(state::AppMode::Development);
-            database::init_db().await;
-            server::dev(host, port).await;
+            database::init_db().await?;
+            server::dev(host, port).await?;
         }
 
         server::Commands::Build { release } => {
             state::set_app_mode(state::AppMode::Production);
-            database::init_db().await;
-            server::build(release);
+            database::init_db().await?;
+            server::build(release)?;
         }
 
         server::Commands::Serve { port, ref host } => {
             state::set_app_mode(state::AppMode::Production);
-            database::init_db().await;
-            server::serve(host, port).await;
+            database::init_db().await?;
+            server::serve(host, port).await?;
         }
 
         server::Commands::Deploy { ref provider } => {
             state::set_app_mode(state::AppMode::Production);
-            database::init_db().await;
-            server::deploy(provider).await;
+            database::init_db().await?;
+            server::deploy(provider).await?;
         }
     }
+
+    Ok(())
 }

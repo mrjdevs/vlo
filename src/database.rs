@@ -10,7 +10,7 @@ pub enum DbPool {
 
 pub static DB_POOL: OnceLock<DbPool> = OnceLock::new();
 
-pub async fn init_db() {
+pub async fn init_db() -> Result<(), String> {
     let root = get_project_root();
     let env_path = root.join(".env");
 
@@ -18,101 +18,59 @@ pub async fn init_db() {
         if let Err(err) = dotenvy::from_path(&env_path) {
             eprintln!("⚠️ Failed to load .env: {}", err);
         } else {
-            crate::vlo_debug!(
-                "🔧 VLO DEBUG: Loaded .env from {}",
-                env_path.display()
-            );
+            crate::vlo_debug!("🔧 VLO DEBUG: Loaded .env from {}", env_path.display());
         }
     } else {
-        crate::vlo_debug!(
-            "⚠️ VLO DEBUG: .env not found at {}",
-            env_path.display()
-        );
+        crate::vlo_debug!("⚠️ VLO DEBUG: .env not found at {}", env_path.display());
     }
 
-    crate::vlo_debug!(
-        "🔧 VLO DEBUG: Project root = {}",
-        root.display()
-    );
+    crate::vlo_debug!("🔧 VLO DEBUG: Project root = {}", root.display());
 
     let db_url = match std::env::var("DATABASE_URL") {
-        Ok(url) => {
-            crate::vlo_debug!(
-                "🔧 VLO DEBUG: DATABASE_URL = {}",
-                url
-            );
+        Ok(url) if !url.is_empty() => {
+            crate::vlo_debug!("🔧 VLO DEBUG: DATABASE_URL = {}", url);
             url
         }
-        Err(_) => {
+        _ => {
             eprintln!("⚠️ DATABASE_URL not set. DB features disabled.");
-            return;
+            return Ok(());
         }
     };
 
     let driver = std::env::var("DB_DRIVER")
-        .unwrap_or_else(|_| "sqlite".to_string());
+        .unwrap_or_else(|_| "sqlite".to_string())
+        .to_lowercase();
 
-    crate::vlo_debug!(
-        "🔧 VLO DEBUG: DB_DRIVER = {}",
-        driver
-    );
+    crate::vlo_debug!("🔧 VLO DEBUG: DB_DRIVER = {}", driver);
 
-    let pool = match driver.to_lowercase().as_str() {
+    let pool = match driver.as_str() {
         "postgres" | "postgresql" => {
-            crate::vlo_debug!(
-                "🔧 VLO DEBUG: Connecting to PostgreSQL..."
-            );
+            crate::vlo_debug!("🔧 VLO DEBUG: Connecting to PostgreSQL...");
 
-            match sqlx::PgPool::connect(&db_url).await {
-                Ok(pool) => {
-                    crate::vlo_debug!(
-                        "✅ VLO DEBUG: PostgreSQL connected"
-                    );
-                    DbPool::Postgres(pool)
-                }
-                Err(err) => {
-                    eprintln!(
-                        "❌ Failed to connect to PostgreSQL: {}",
-                        err
-                    );
-                    return;
-                }
-            }
+            let pool = sqlx::PgPool::connect(&db_url)
+                .await
+                .map_err(|err| format!("Failed to connect to PostgreSQL: {}", err))?;
+
+            crate::vlo_debug!("✅ VLO DEBUG: PostgreSQL connected");
+            DbPool::Postgres(pool)
         }
 
         "mysql" => {
-            crate::vlo_debug!(
-                "🔧 VLO DEBUG: Connecting to MySQL..."
-            );
+            crate::vlo_debug!("🔧 VLO DEBUG: Connecting to MySQL...");
 
-            match sqlx::MySqlPool::connect(&db_url).await {
-                Ok(pool) => {
-                    crate::vlo_debug!(
-                        "✅ VLO DEBUG: MySQL connected"
-                    );
-                    DbPool::MySql(pool)
-                }
-                Err(err) => {
-                    eprintln!(
-                        "❌ Failed to connect to MySQL: {}",
-                        err
-                    );
-                    return;
-                }
-            }
+            let pool = sqlx::MySqlPool::connect(&db_url)
+                .await
+                .map_err(|err| format!("Failed to connect to MySQL: {}", err))?;
+
+            crate::vlo_debug!("✅ VLO DEBUG: MySQL connected");
+            DbPool::MySql(pool)
         }
 
         _ => {
-            crate::vlo_debug!(
-                "🔧 VLO DEBUG: Connecting to SQLite..."
-            );
+            crate::vlo_debug!("🔧 VLO DEBUG: Connecting to SQLite...");
 
-            let db_path = db_url
-                .strip_prefix("sqlite://")
-                .unwrap_or(&db_url);
-
+            let db_path = db_url.strip_prefix("sqlite://").unwrap_or(&db_url);
             let path = Path::new(db_path);
-
             let absolute_path = if path.is_absolute() {
                 path.to_path_buf()
             } else {
@@ -128,26 +86,22 @@ pub async fn init_db() {
                 .filename(&absolute_path)
                 .create_if_missing(true);
 
-            match sqlx::SqlitePool::connect_with(options).await {
-                Ok(pool) => {
-                    crate::vlo_debug!(
-                        "✅ VLO DEBUG: SQLite connected: {}",
-                        absolute_path.display()
-                    );
-                    DbPool::Sqlite(pool)
-                }
-                Err(err) => {
-                    eprintln!(
-                        "❌ Failed to connect to SQLite: {}",
-                        err
-                    );
+            let pool = sqlx::SqlitePool::connect_with(options)
+                .await
+                .map_err(|err| {
                     crate::vlo_debug!(
                         "🔧 VLO DEBUG: SQLite path attempted = {}",
                         absolute_path.display()
                     );
-                    return;
-                }
-            }
+                    format!("Failed to connect to SQLite: {}", err)
+                })?;
+
+            crate::vlo_debug!(
+                "✅ VLO DEBUG: SQLite connected: {}",
+                absolute_path.display()
+            );
+
+            DbPool::Sqlite(pool)
         }
     };
 
@@ -159,29 +113,17 @@ pub async fn init_db() {
     );
 
     if schema_path.exists() {
-        crate::vlo_debug!(
-            "🔧 VLO DEBUG: Loading schema.sql..."
-        );
+        crate::vlo_debug!("🔧 VLO DEBUG: Loading schema.sql...");
 
-        let sql = match fs::read_to_string(&schema_path) {
-            Ok(sql) => sql,
-            Err(err) => {
-                eprintln!(
-                    "⚠️ Failed to read schema.sql: {}",
-                    err
-                );
-                return;
-            }
-        };
+        let sql = fs::read_to_string(&schema_path)
+            .map_err(|err| format!("Failed to read schema.sql: {}", err))?;
 
         let mut statement_count = 0usize;
 
         for statement in sql.split(';') {
             let stmt = statement.trim();
 
-            if stmt.is_empty()
-                || stmt.to_uppercase().starts_with("INSERT")
-            {
+            if stmt.is_empty() || stmt.to_uppercase().starts_with("INSERT") {
                 continue;
             }
 
@@ -229,12 +171,10 @@ pub async fn init_db() {
     }
 
     if DB_POOL.set(pool).is_ok() {
-        crate::vlo_debug!(
-            "✅ VLO DEBUG: Database pool initialized"
-        );
+        crate::vlo_debug!("✅ VLO DEBUG: Database pool initialized");
     } else {
-        crate::vlo_debug!(
-            "⚠️ VLO DEBUG: Database pool was already initialized"
-        );
+        crate::vlo_debug!("⚠️ VLO DEBUG: Database pool was already initialized");
     }
+
+    Ok(())
 }

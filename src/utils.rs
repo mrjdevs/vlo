@@ -8,7 +8,7 @@ pub fn init_project(
     db_driver: &str,
     db_name_opt: Option<&str>,
     no_db: bool,
-) {
+) -> Result<(), String> {
     let target_dir = if name == "." {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     } else {
@@ -159,4 +159,5 @@ INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ 
     }
 
     println!("✅ Project initialized successfully!");
+    Ok(())
 }
