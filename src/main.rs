@@ -61,7 +61,13 @@ async fn run() -> Result<(), String> {
         server::Commands::Serve { port, ref host } => {
             state::set_app_mode(state::AppMode::Production);
             database::init_db().await?;
-            server::serve(host, port).await?;
+            let port = port
+                .map(|value| {
+                    value.parse::<u16>()
+                        .map_err(|_| format!("Invalid port '{}'.", value))
+                })
+                .transpose()?;
+            server::serve(host.as_deref(), port).await?;
         }
 
         server::Commands::Deploy { ref provider } => {

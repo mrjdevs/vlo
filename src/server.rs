@@ -1,10 +1,9 @@
 use crate::{
     api::{api_handler_id, api_handler_path, api_handler_root},
     files_api::{delete_file, download_file, get_file, serve_file, upload_file},
-    router::{hmr_handler, home_handler, not_found_handler, page_handler, watch_files},
+    router::{hmr_handler, home_handler, not_found_handler, page_handler, watch_files, resolve_data_sources},
     state::{self, get_project_root},
-    template::escape_html_attribute,
-};
+    template::{escape_html_attribute, render_control_flow}};
 use axum::{
     response::{Html, IntoResponse},
     routing::get,
@@ -54,10 +53,10 @@ pub enum Commands {
     },
 
     Serve {
-        #[arg(short, long, default_value = "3000")]
-        port: u16,
-        #[arg(long, default_value = "127.0.0.1")]
-        host: String,
+        #[arg(short, long)]
+        port: Option<String>,
+        #[arg(long)]
+        host: Option<String>,
     },
 
     Deploy {
@@ -161,7 +160,7 @@ pub async fn dev(host: &str, port: u16) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn serve(host: &str, port: u16) -> Result<(), String> {
+pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
     state::set_app_mode(state::AppMode::Production);
 
     let root = get_project_root();
@@ -210,13 +209,21 @@ pub async fn serve(host: &str, port: u16) -> Result<(), String> {
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(CompressionLayer::new());
 
-    let host_str = std::env::var("VLO_HOST")
-        .unwrap_or_else(|_| host.to_string());
+    // CLI arguments override .env values.
+    let host_str = host
+        .map(str::to_string)
+        .or_else(|| std::env::var("VLO_HOST").ok())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
 
-    let port_str = std::env::var("VLO_PORT")
-        .unwrap_or_else(|_| port.to_string());
+    let port_num = port
+        .or_else(|| {
+            std::env::var("VLO_PORT")
+                .ok()
+                .and_then(|value| value.parse::<u16>().ok())
+        })
+        .unwrap_or(3000);
 
-    let addr = format!("{}:{}", host_str, port_str);
+    let addr = format!("{}:{}", host_str, port_num);
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,
@@ -274,11 +281,60 @@ async fn serve_build_page(
     let file = build_dir.join(&filename);
 
     match fs::read_to_string(&file) {
-        Ok(html) => (
-            axum::http::StatusCode::OK,
-            Html(html),
-        )
-            .into_response(),
+        Ok(html) => {
+            let query = uri
+                .query()
+                .unwrap_or("")
+                .split('&')
+                .filter_map(|pair| {
+                    let mut parts = pair.splitn(2, '=');
+                    let key = parts.next()?;
+                    let value = parts.next().unwrap_or("");
+
+                    Some((
+                        key.to_string(),
+                        urlencoding::decode(value)
+                            .unwrap_or_else(|_| value.into())
+                            .to_string(),
+                    ))
+                })
+                .collect::<std::collections::HashMap<_, _>>();
+
+            let mut context = std::collections::HashMap::new();
+
+            for (key, value) in &query {
+                context.insert(
+                    key.clone(),
+                    serde_json::Value::String(value.clone()),
+                );
+            }
+
+            // Resolve data-source blocks from the live database.
+            let html = resolve_data_sources(&html, &context);
+
+            let rendered = render_control_flow(
+                &html,
+                &context,
+            );
+
+            let rendered = rendered.replacen(
+                "</body>",
+                &format!(
+                    r#"<script>
+            history.replaceState(null, "", {});
+            </script>
+            </body>"#,
+                    serde_json::to_string(path).unwrap()
+                ),
+                1,
+            );
+
+            (
+                axum::http::StatusCode::OK,
+                Html(rendered),
+            )
+                .into_response()
+        }
 
         Err(_) => {
             let not_found = build_dir.join("404.html");
@@ -344,7 +400,7 @@ pub fn build(release: bool) -> Result<(), String> {
             let content = fs::read_to_string(&path)
                 .unwrap_or_default();
 
-            let rendered = crate::router::render_vlo(content);
+            let rendered = crate::router::render_vlo_for_build(content);
             let html = crate::router::wrap_html(&stem, &rendered);
 
             let output = if stem == "home" || stem == "index" {
@@ -370,9 +426,9 @@ pub fn build(release: bool) -> Result<(), String> {
         println!("  └─ Copied static assets");
     }
 
-        println!("⚡ Build completed successfully!");
+    println!("⚡ Build completed successfully!");
 
-        Ok(())
+    Ok(())
 }
 
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {

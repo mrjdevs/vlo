@@ -3,8 +3,9 @@ use crate::{
     component::{render_components, render_tag},
     database::DB_POOL,
     state::{self, RenderedPage, STYLE_RE},
-    template::{clean_empty_tags, render_control_flow},
+    template::{clean_empty_tags, preserve_runtime_query_interpolations, render_control_flow, render_control_flow_for_build, restore_runtime_query_interpolations}
 };
+
 use axum::{
     extract::{Path as AxumPath, Query},
     http::StatusCode,
@@ -192,6 +193,80 @@ pub fn render_vlo(source: String) -> RenderedPage {
     render_vlo_with_query(source, &HashMap::new())
 }
 
+pub fn render_vlo_for_build(
+    source: String,
+) -> RenderedPage {
+    let mut context = RenderedPage::default();
+
+    let mut source = strip_server_block(&source);
+
+    let (
+        source_with_protected_interpolations,
+        runtime_interpolations,
+    ) = preserve_runtime_query_interpolations(
+        &source,
+    );
+
+    source = source_with_protected_interpolations;
+
+        for captures in STYLE_RE.captures_iter(&source) {
+        if let Some(style) = captures.get(1) {
+            context.add_style(
+                "page",
+                style.as_str(),
+            );
+        }
+    }
+
+    source = STYLE_RE
+        .replace_all(&source, "")
+        .into_owned();
+
+    source = resolve_data_sources(
+        &source,
+        &context.template_context,
+    );
+
+    source = render_tag(
+        &source,
+        "BaseLayout",
+        &mut context,
+    );
+
+    for _ in 0..20 {
+        let previous = source.clone();
+
+        source = render_components(
+            &source,
+            &mut context,
+        );
+
+        if source == previous {
+            break;
+        }
+    }
+
+    source = crate::server::resolve_directives(
+        &source,
+    );
+
+    source = render_control_flow_for_build(
+        &source,
+        &context.template_context,
+    );
+
+    source = restore_runtime_query_interpolations(
+        &source,
+        &runtime_interpolations,
+    );
+
+    context.html = clean_empty_tags(
+        &source,
+    );
+
+    context
+}
+
 pub fn render_vlo_with_query(
     source: String,
     query: &HashMap<String, String>,
@@ -376,6 +451,15 @@ pub fn wrap_html(
 ) -> String {
     let dev = state::app_mode().is_dev();
 
+    let component_styles = if rendered.styles.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n<style>\n{}\n</style>",
+            rendered.styles.join("\n")
+        )
+    };
+
     let hmr = if dev {
         r#"<script>
 const es = new EventSource("/__vlo_hmr");
@@ -386,35 +470,34 @@ window.addEventListener("beforeunload", () => es.close());
         ""
     };
 
-    let component_styles = if rendered.styles.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\n<style>\n{}\n</style>",
-            rendered.styles.join("\n")
-        )
-    };
+    let mut html = rendered.html.clone();
 
-    format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{}</title>
-    <link rel="icon" href="/static/favicon.ico">
-    <link rel="stylesheet" href="/static/style.css">{}
-</head>
-<body>
-{}
-{}
-</body>
-</html>"#,
+    // BaseLayout owns the document shell.
+    // Use the title passed through <BaseLayout title="...">.
+    html = html.replace(
+        "{{title}}",
         title,
-        component_styles,
-        rendered.html,
-        hmr
-    )
+    );
+
+    // Inject extracted component CSS inside <head>.
+    if !component_styles.is_empty() {
+        html = html.replacen(
+            "</head>",
+            &format!("{}\n</head>", component_styles),
+            1,
+        );
+    }
+
+    // Inject HMR inside <body>.
+    if !hmr.is_empty() {
+        html = html.replacen(
+            "</body>",
+            &format!("{}\n</body>", hmr),
+            1,
+        );
+    }
+
+    html
 }
 
 pub async fn hmr_handler(

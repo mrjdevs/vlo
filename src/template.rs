@@ -71,7 +71,7 @@ fn resolve_operand(
         || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
     {
         return Value::String(
-            trimmed[1..trimmed.len() - 1].to_string()
+            trimmed[1..trimmed.len() - 1].to_string(),
         );
     }
 
@@ -148,13 +148,23 @@ pub fn find_next_token(
     let mut best = None;
 
     for token in [
-        "{{#for ", "{{for ", "{{#if ", "{{if ",
-        "{for ", "{if ", "{{", "<script", "</script>",
+        "{{#for ",
+        "{{for ",
+        "{{#if ",
+        "{{if ",
+        "{for ",
+        "{if ",
+        "{{",
+        "<script",
+        "</script>",
     ] {
         if let Some(pos) = template[from..].find(token) {
             let absolute = from + pos;
 
-            if best.map(|(p, _)| absolute < p).unwrap_or(true) {
+            if best
+                .map(|(p, _)| absolute < p)
+                .unwrap_or(true)
+            {
                 best = Some((absolute, token));
             }
         }
@@ -169,7 +179,11 @@ pub fn find_block_end(
     token: &str,
 ) -> Option<(usize, usize)> {
     let is_double = token.starts_with("{{");
-    let kind = if token.contains("for") { "for" } else { "if" };
+    let kind = if token.contains("for") {
+        "for"
+    } else {
+        "if"
+    };
 
     let header_end = if is_double {
         template[start..].find("}}")? + start + 2
@@ -257,12 +271,23 @@ pub fn split_else_branches(
     let mut cursor = 0usize;
 
     let targets = [
-        ("{{#if ", 0), ("{{if ", 0), ("{if ", 0),
-        ("{{#for ", 0), ("{{for ", 0), ("{for ", 0),
-        ("{{/#if}}", 1), ("{{/if}}", 1), ("{/if}", 1),
-        ("{{/#for}}", 1), ("{{/for}}", 1), ("{/for}", 1),
-        ("{{else if ", 2), ("{else if ", 2),
-        ("{{#else}}", 3), ("{{else}}", 3), ("{else}", 3),
+        ("{{#if ", 0),
+        ("{{if ", 0),
+        ("{if ", 0),
+        ("{{#for ", 0),
+        ("{{for ", 0),
+        ("{for ", 0),
+        ("{{/#if}}", 1),
+        ("{{/if}}", 1),
+        ("{/if}", 1),
+        ("{{/#for}}", 1),
+        ("{{/for}}", 1),
+        ("{/for}", 1),
+        ("{{else if ", 2),
+        ("{else if ", 2),
+        ("{{#else}}", 3),
+        ("{{else}}", 3),
+        ("{else}", 3),
     ];
 
     while cursor < inner.len() {
@@ -303,7 +328,9 @@ pub fn split_else_branches(
                     Some(inner[pos..].to_string()),
                 );
             }
-            _ => cursor = pos + len,
+            _ => {
+                cursor = pos + len;
+            }
         }
     }
 
@@ -332,7 +359,11 @@ pub fn evaluate_if_block(
 
         if let Some(v) = stripped {
             let delimiter =
-                if rest.starts_with("{{") { "}}" } else { "}" };
+                if rest.starts_with("{{") {
+                    "}}"
+                } else {
+                    "}"
+                };
 
             if let Some(end) = v.find(delimiter) {
                 let expr = v[..end].trim();
@@ -374,47 +405,72 @@ pub fn evaluate_for_block(
     }
 
     let item_var = parts[0];
-    let array = get_nested_value(parts[2], context);
+
+    let array =
+        get_nested_value(parts[2], context);
+
     let (body, else_part) =
         split_else_branches(inner);
 
     let Value::Array(items) = array else {
-        return render_else(else_part, context);
+        return render_else(
+            else_part,
+            context,
+        );
     };
 
     if items.is_empty() {
-        return render_else(else_part, context);
+        return render_else(
+            else_part,
+            context,
+        );
     }
 
     let mut result =
-        String::with_capacity(body.len() * items.len());
+        String::with_capacity(
+            body.len() * items.len(),
+        );
 
     for (idx, item) in items.iter().enumerate() {
-        let mut child = context.clone();
+        let mut child =
+            context.clone();
 
         child.insert(
             item_var.to_string(),
             item.clone(),
         );
+
         child.insert(
             "@index".to_string(),
-            Value::Number((idx as i64).into()),
+            Value::Number(
+                (idx as i64).into(),
+            ),
         );
+
         child.insert(
             "@number".to_string(),
-            Value::Number(((idx + 1) as i64).into()),
+            Value::Number(
+                ((idx + 1) as i64).into(),
+            ),
         );
+
         child.insert(
             "@first".to_string(),
             Value::Bool(idx == 0),
         );
+
         child.insert(
             "@last".to_string(),
-            Value::Bool(idx + 1 == items.len()),
+            Value::Bool(
+                idx + 1 == items.len(),
+            ),
         );
 
         result.push_str(
-            &render_control_flow(&body, &child)
+            &render_control_flow(
+                &body,
+                &child,
+            ),
         );
     }
 
@@ -433,9 +489,431 @@ fn render_else(
                 .or_else(|| v.strip_prefix("{else}"))
                 .unwrap_or(&v);
 
-            render_control_flow(body, context)
+            render_control_flow(
+                body,
+                context,
+            )
         })
         .unwrap_or_default()
+}
+
+fn expression_uses_runtime_query(
+    expression: &str,
+) -> bool {
+    let mut current = String::new();
+
+    for ch in expression.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            current.push(ch);
+            continue;
+        }
+
+        if !current.is_empty() {
+            match current.as_str() {
+                "status" | "action" | "message" => {
+                    return true;
+                }
+                _ => {}
+            }
+
+            current.clear();
+        }
+    }
+
+    if matches!(
+        current.as_str(),
+        "status" | "action" | "message"
+    ) {
+        return true;
+    }
+
+    false
+}
+
+fn block_uses_runtime_query(
+    block: &str,
+) -> bool {
+    if expression_uses_runtime_query(block) {
+        return true;
+    }
+
+    let mut cursor = 0usize;
+
+    while cursor < block.len() {
+        let Some((pos, token)) =
+            find_next_token(block, cursor)
+        else {
+            break;
+        };
+
+        if token == "{{" {
+            if let Some(end_rel) =
+                block[pos + 2..].find("}}")
+            {
+                let end =
+                    pos + 2 + end_rel;
+
+                let expression =
+                    block[pos + 2..end].trim();
+
+                if expression_uses_runtime_query(
+                    expression,
+                ) {
+                    return true;
+                }
+
+                cursor = end + 2;
+                continue;
+            }
+
+            break;
+        }
+
+        let is_double =
+            token.starts_with("{{");
+
+        if token.contains("if") {
+            let header_end = if is_double {
+                match block[pos..].find("}}") {
+                    Some(v) => pos + v,
+                    None => break,
+                }
+            } else {
+                match block[pos..].find('}') {
+                    Some(v) => pos + v,
+                    None => break,
+                }
+            };
+
+            let expression =
+                block[pos + token.len()..header_end]
+                    .trim();
+
+            if expression_uses_runtime_query(
+                expression,
+            ) {
+                return true;
+            }
+
+            cursor = header_end
+                + if is_double { 2 } else { 1 };
+            continue;
+        }
+
+        cursor = pos + token.len();
+    }
+
+    false
+}
+
+pub fn preserve_runtime_query_interpolations(
+    template: &str,
+) -> (String, Vec<String>) {
+    let mut result = String::with_capacity(template.len());
+    let mut values = Vec::new();
+    let mut cursor = 0usize;
+
+    while cursor < template.len() {
+        let Some(start_rel) = template[cursor..].find("{{") else {
+            result.push_str(&template[cursor..]);
+            break;
+        };
+
+        let start = cursor + start_rel;
+
+        result.push_str(&template[cursor..start]);
+
+        let Some(end_rel) = template[start + 2..].find("}}") else {
+            result.push_str(&template[start..]);
+            break;
+        };
+
+        let end = start + 2 + end_rel;
+        let expression = template[start + 2..end].trim();
+
+        if matches!(
+            expression,
+            "status" | "action" | "message"
+        ) {
+            let index = values.len();
+
+            values.push(
+                template[start..end + 2].to_string(),
+            );
+
+            result.push_str(
+                &format!(
+                    "__VLO_RUNTIME_INTERPOLATION_{}__",
+                    index
+                ),
+            );
+        } else {
+            result.push_str(
+                &template[start..end + 2],
+            );
+        }
+
+        cursor = end + 2;
+    }
+
+    (result, values)
+}
+
+pub fn restore_runtime_query_interpolations(
+    template: &str,
+    values: &[String],
+) -> String {
+    let mut result = template.to_string();
+
+    for (index, value) in values.iter().enumerate() {
+        let marker =
+            format!(
+                "__VLO_RUNTIME_INTERPOLATION_{}__",
+                index
+            );
+
+        result = result.replace(
+            &marker,
+            value,
+        );
+    }
+
+    result
+}
+
+pub fn preserve_runtime_query_blocks(
+    template: &str,
+) -> (String, Vec<String>) {
+    let mut result =
+        String::with_capacity(template.len());
+
+    let mut blocks = Vec::new();
+    let mut cursor = 0usize;
+
+    while cursor < template.len() {
+        let Some((pos, token)) =
+            find_next_token(
+                template,
+                cursor,
+            )
+        else {
+            result.push_str(
+                &template[cursor..],
+            );
+            break;
+        };
+
+        if pos > cursor {
+            result.push_str(
+                &template[cursor..pos],
+            );
+        }
+
+        let is_double =
+            token.starts_with("{{");
+
+        let kind =
+            if token.contains("for") {
+                "for"
+            } else if token.contains("if") {
+                "if"
+            } else {
+                ""
+            };
+
+        if kind != "if" {
+            result.push_str(
+                &template[pos..pos + token.len()],
+            );
+
+            cursor =
+                pos + token.len();
+
+            continue;
+        }
+
+        let header_end = if is_double {
+            match template[pos..].find("}}") {
+                Some(v) => pos + v,
+                None => {
+                    result.push_str(
+                        &template[pos..],
+                    );
+                    break;
+                }
+            }
+        } else {
+            match template[pos..].find('}') {
+                Some(v) => pos + v,
+                None => {
+                    result.push_str(
+                        &template[pos..],
+                    );
+                    break;
+                }
+            }
+        };
+
+        let expression =
+            template[
+                pos + token.len()
+                ..header_end
+            ]
+            .trim();
+
+        let Some((_, block_end)) =
+            find_block_end(
+                template,
+                pos,
+                token,
+            )
+        else {
+            result.push_str(
+                &template[pos..],
+            );
+            break;
+        };
+
+        let block =
+            &template[pos..block_end];
+
+        if expression_uses_runtime_query(
+            expression,
+        ) || block_uses_runtime_query(block)
+        {
+            let index =
+                blocks.len();
+
+            blocks.push(
+                block.to_string(),
+            );
+
+            result.push_str(
+                &format!(
+                    "__VLO_RUNTIME_QUERY_BLOCK_{}__",
+                    index
+                ),
+            );
+
+            cursor =
+                block_end;
+
+            continue;
+        }
+
+        result.push_str(
+            &template[pos..pos + token.len()],
+        );
+
+        cursor =
+            pos + token.len();
+    }
+
+    (result, blocks)
+}
+
+pub fn restore_runtime_query_blocks(
+    template: &str,
+    blocks: &[String],
+) -> String {
+    let mut result =
+        template.to_string();
+
+    for (index, block) in
+        blocks.iter().enumerate()
+    {
+        let marker =
+            format!(
+                "__VLO_RUNTIME_QUERY_BLOCK_{}__",
+                index
+            );
+
+        result =
+            result.replace(
+                &marker,
+                block,
+            );
+    }
+
+    result
+}
+
+pub fn render_control_flow_for_build(
+    template: &str,
+    context: &HashMap<String, Value>,
+) -> String {
+    let (
+        protected,
+        blocks,
+    ) = preserve_runtime_query_blocks(template);
+
+    let mut protected_interpolations = Vec::new();
+    let mut source = protected;
+    let mut cursor = 0usize;
+
+    while let Some(start_rel) = source[cursor..].find("{{") {
+        let start = cursor + start_rel;
+
+        let Some(end_rel) = source[start + 2..].find("}}") else {
+            break;
+        };
+
+        let end = start + 2 + end_rel;
+        let expression = source[start + 2..end].trim();
+
+        if matches!(
+            expression,
+            "status" | "action" | "message"
+        ) {
+            let index = protected_interpolations.len();
+
+            protected_interpolations.push(
+                source[start..end + 2].to_string(),
+            );
+
+            let marker =
+                format!(
+                    "__VLO_RUNTIME_INTERPOLATION_{}__",
+                    index
+                );
+
+            source.replace_range(
+                start..end + 2,
+                &marker,
+            );
+
+            cursor = start + marker.len();
+        } else {
+            cursor = end + 2;
+        }
+    }
+
+    let mut rendered =
+        render_control_flow(
+            &source,
+            context,
+        );
+
+    for (index, interpolation) in
+        protected_interpolations.iter().enumerate()
+    {
+        let marker =
+            format!(
+                "__VLO_RUNTIME_INTERPOLATION_{}__",
+                index
+            );
+
+        rendered =
+            rendered.replace(
+                &marker,
+                interpolation,
+            );
+    }
+
+    restore_runtime_query_blocks(
+        &rendered,
+        &blocks,
+    )
 }
 
 pub fn render_control_flow(
@@ -443,37 +921,54 @@ pub fn render_control_flow(
     context: &HashMap<String, Value>,
 ) -> String {
     let mut result =
-        String::with_capacity(template.len());
+        String::with_capacity(
+            template.len(),
+        );
+
     let mut cursor = 0usize;
 
     while cursor < template.len() {
         let Some((pos, token)) =
-            find_next_token(template, cursor)
+            find_next_token(
+                template,
+                cursor,
+            )
         else {
-            result.push_str(&template[cursor..]);
+            result.push_str(
+                &template[cursor..],
+            );
             break;
         };
 
         if pos > cursor {
-            result.push_str(&template[cursor..pos]);
+            result.push_str(
+                &template[cursor..pos],
+            );
         }
 
         if token == "<script" {
             if let Some(end_rel) =
-                template[pos..].find("</script>")
+                template[pos..].find(
+                    "</script>",
+                )
             {
                 let end =
-                    pos + end_rel + "</script>".len();
+                    pos
+                    + end_rel
+                    + "</script>".len();
 
                 result.push_str(
-                    &template[pos..end]
+                    &template[pos..end],
                 );
 
                 cursor = end;
                 continue;
             }
 
-            result.push_str(&template[pos..]);
+            result.push_str(
+                &template[pos..],
+            );
+
             break;
         }
 
@@ -485,21 +980,36 @@ pub fn render_control_flow(
                     pos + 2 + end_rel;
 
                 let key =
-                    template[pos + 2..end].trim();
+                    template[
+                        pos + 2..end
+                    ]
+                    .trim();
 
-                let value = format_value(
-                    &get_nested_value(key, context)
-                );
+                let value =
+                    format_value(
+                        &get_nested_value(
+                            key,
+                            context,
+                        ),
+                    );
 
-                let before = &template[..pos];
-                let mut quote = None;
+                let before =
+                    &template[..pos];
+
+                let mut quote =
+                    None;
 
                 for ch in before.chars() {
                     match quote {
-                        Some(active) if ch == active => {
+                        Some(active)
+                            if ch == active =>
+                        {
                             quote = None;
                         }
-                        None if ch == '"' || ch == '\'' => {
+                        None
+                            if ch == '"'
+                                || ch == '\'' =>
+                        {
                             quote = Some(ch);
                         }
                         _ => {}
@@ -508,82 +1018,127 @@ pub fn render_control_flow(
 
                 if quote.is_some() {
                     result.push_str(
-                        &escape_html_attribute(&value)
+                        &escape_html_attribute(
+                            &value,
+                        ),
                     );
                 } else {
-                    result.push_str(&value);
+                    result.push_str(
+                        &value,
+                    );
                 }
 
-                cursor = end + 2;
+                cursor =
+                    end + 2;
             } else {
-                result.push_str(&template[pos..]);
+                result.push_str(
+                    &template[pos..],
+                );
                 break;
             }
 
             continue;
         }
 
-        let is_double = token.starts_with("{{");
+        let is_double =
+            token.starts_with("{{");
+
         let kind =
-            if token.contains("for") { "for" } else { "if" };
+            if token.contains("for") {
+                "for"
+            } else {
+                "if"
+            };
 
         let header_end = if is_double {
             match template[pos..].find("}}") {
-                Some(v) => pos + v,
+                Some(v) =>
+                    pos + v,
                 None => {
-                    result.push_str(&template[pos..]);
+                    result.push_str(
+                        &template[pos..],
+                    );
                     break;
                 }
             }
         } else {
             match template[pos..].find('}') {
-                Some(v) => pos + v,
+                Some(v) =>
+                    pos + v,
                 None => {
-                    result.push_str(&template[pos..]);
+                    result.push_str(
+                        &template[pos..],
+                    );
                     break;
                 }
             }
         };
 
         let expression =
-            template[pos + token.len()..header_end]
-                .trim();
+            template[
+                pos + token.len()
+                ..header_end
+            ]
+            .trim();
 
-        let Some((content_start, block_end)) =
-            find_block_end(template, pos, token)
+        let Some((
+            content_start,
+            block_end,
+        )) = find_block_end(
+            template,
+            pos,
+            token,
+        )
         else {
-            result.push_str(&template[pos..]);
+            result.push_str(
+                &template[pos..],
+            );
             break;
         };
 
-        let closing_len = if is_double {
-            let slice = &template[..block_end];
+        let closing_len =
+            if is_double {
+                let slice =
+                    &template[..block_end];
 
-            slice.len()
-                - slice.rfind("{{").unwrap_or(slice.len())
-        } else {
-            kind.len() + 3
-        };
+                slice.len()
+                    - slice
+                        .rfind("{{")
+                        .unwrap_or(
+                            slice.len(),
+                        )
+            } else {
+                kind.len() + 3
+            };
 
         let inner =
-            &template[content_start..block_end - closing_len];
+            &template[
+                content_start
+                    ..block_end
+                        - closing_len
+            ];
 
-        let rendered = if kind == "for" {
-            evaluate_for_block(
-                inner,
-                expression,
-                context,
-            )
-        } else {
-            evaluate_if_block(
-                inner,
-                expression,
-                context,
-            )
-        };
+        let rendered =
+            if kind == "for" {
+                evaluate_for_block(
+                    inner,
+                    expression,
+                    context,
+                )
+            } else {
+                evaluate_if_block(
+                    inner,
+                    expression,
+                    context,
+                )
+            };
 
-        result.push_str(&rendered);
-        cursor = block_end;
+        result.push_str(
+            &rendered,
+        );
+
+        cursor =
+            block_end;
     }
 
     result
@@ -594,51 +1149,89 @@ pub fn render_interpolations(
     context: &HashMap<String, Value>,
 ) -> String {
     PROP_RE
-        .replace_all(template, |captures: &regex::Captures| {
-            let full = captures.get(0).unwrap();
-            let key = captures[1].trim();
+        .replace_all(
+            template,
+            |captures: &regex::Captures| {
+                let full =
+                    captures
+                        .get(0)
+                        .unwrap();
 
-            let value = format_value(
-                &get_nested_value(key, context)
-            );
+                let key =
+                    captures[1].trim();
 
-            let before = &template[..full.start()];
-            let mut quote = None;
+                let value =
+                    format_value(
+                        &get_nested_value(
+                            key,
+                            context,
+                        ),
+                    );
 
-            for ch in before.chars() {
-                match quote {
-                    Some(active) if ch == active => {
-                        quote = None;
+                let before =
+                    &template[..full.start()];
+
+                let mut quote =
+                    None;
+
+                for ch in before.chars() {
+                    match quote {
+                        Some(active)
+                            if ch == active =>
+                        {
+                            quote = None;
+                        }
+                        None
+                            if ch == '"'
+                                || ch == '\'' =>
+                        {
+                            quote = Some(ch);
+                        }
+                        _ => {}
                     }
-                    None if ch == '"' || ch == '\'' => {
-                        quote = Some(ch);
-                    }
-                    _ => {}
                 }
-            }
 
-            if quote.is_some() {
-                escape_html_attribute(&value)
-            } else {
-                value
-            }
-        })
+                if quote.is_some() {
+                    escape_html_attribute(
+                        &value,
+                    )
+                } else {
+                    value
+                }
+            },
+        )
         .into_owned()
 }
 
-pub fn format_value(val: &Value) -> String {
+pub fn format_value(
+    val: &Value,
+) -> String {
     match val {
-        Value::Null => String::new(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::String(s) => s.clone(),
-        _ => serde_json::to_string(val).unwrap_or_default(),
+        Value::Null =>
+            String::new(),
+
+        Value::Bool(b) =>
+            b.to_string(),
+
+        Value::Number(n) =>
+            n.to_string(),
+
+        Value::String(s) =>
+            s.clone(),
+
+        _ =>
+            serde_json::to_string(val)
+                .unwrap_or_default(),
     }
 }
 
-pub fn clean_empty_tags(html: &str) -> String {
+pub fn clean_empty_tags(
+    html: &str,
+) -> String {
     let mut result =
-        String::with_capacity(html.len());
+        String::with_capacity(
+            html.len(),
+        );
 
     for line in html.lines() {
         if !line.trim().is_empty() {
@@ -654,7 +1247,9 @@ pub fn clean_empty_tags(html: &str) -> String {
     result
 }
 
-pub fn escape_html_attribute(value: &str) -> String {
+pub fn escape_html_attribute(
+    value: &str,
+) -> String {
     value
         .replace('&', "&amp;")
         .replace('"', "&quot;")

@@ -1,6 +1,6 @@
 [package]
 name = "vlo"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2021"
 authors = ["MRJDEV <mrjdev@gmail.com>"]
 description = "VLO - A zero-boilerplate full-stack web framework"
@@ -16,6 +16,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal
 async-stream = "0.3"
 multer = "3.1"
 futures-util = "0.3"
+urlencoding = "2"
 
 # Command line interface
 clap = { version = "4", features = ["derive"] }
