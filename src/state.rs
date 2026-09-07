@@ -1,10 +1,10 @@
 use regex::Regex;
+use serde_json::Value;
 use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{Arc, LazyLock, Mutex},
 };
-use serde_json::Value;
 
 pub static STYLE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>(.*?)</style>").unwrap());
@@ -27,6 +27,7 @@ pub static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 pub static SQL_PARAM_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\{{1,2}\s*([a-zA-Z0-9_-]+)\s*\}{1,2}").unwrap());
+
 
 #[derive(Debug)]
 pub struct CompiledTemplate {

@@ -641,12 +641,8 @@ pub fn preserve_runtime_query_interpolations(
                 template[start..end + 2].to_string(),
             );
 
-            result.push_str(
-                &format!(
-                    "__VLO_RUNTIME_INTERPOLATION_{}__",
-                    index
-                ),
-            );
+           result.push_str(&format!("__VLO_RUNTIME_QUERY_INTERPOLATION_{}__", index));
+
         } else {
             result.push_str(
                 &template[start..end + 2],
@@ -666,11 +662,7 @@ pub fn restore_runtime_query_interpolations(
     let mut result = template.to_string();
 
     for (index, value) in values.iter().enumerate() {
-        let marker =
-            format!(
-                "__VLO_RUNTIME_INTERPOLATION_{}__",
-                index
-            );
+        let marker = format!("__VLO_RUNTIME_QUERY_INTERPOLATION_{}__", index);
 
         result = result.replace(
             &marker,
@@ -838,6 +830,130 @@ pub fn restore_runtime_query_blocks(
     result
 }
 
+pub fn preserve_runtime_data_sources(
+    template: &str,
+) -> (String, Vec<String>) {
+    let re = regex::Regex::new(
+        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)data-source\s*=\s*["']([^"']+)["']([^>]*?)>"#,
+    )
+    .unwrap();
+
+    let mut result = String::with_capacity(template.len());
+    let mut blocks = Vec::new();
+    let mut last_end = 0usize;
+
+    for cap in re.captures_iter(template) {
+        let full = cap.get(0).unwrap();
+
+        if full.start() < last_end {
+            continue;
+        }
+
+        let tag = cap.get(1).unwrap().as_str();
+
+        let close = format!("</{}>", tag);
+        let open = format!("<{}", tag);
+
+        let mut depth = 1usize;
+        let mut cursor = full.end();
+        let mut close_start = None;
+
+        while cursor < template.len() {
+            let next_open = template[cursor..]
+                .find(&open)
+                .map(|p| cursor + p);
+
+            let next_close = template[cursor..]
+                .find(&close)
+                .map(|p| cursor + p);
+
+            match (next_open, next_close) {
+                (Some(o), Some(c)) if o < c => {
+                    let after_open = o + open.len();
+
+                    if template
+                        .get(after_open..)
+                        .map(|v| {
+                            v.starts_with('>')
+                                || v.starts_with(' ')
+                                || v.starts_with('/')
+                        })
+                        .unwrap_or(false)
+                    {
+                        depth += 1;
+                    }
+
+                    cursor = after_open;
+                }
+
+                (_, Some(c)) => {
+                    depth -= 1;
+
+                    if depth == 0 {
+                        close_start = Some(c);
+                        break;
+                    }
+
+                    cursor = c + close.len();
+                }
+
+                _ => break,
+            }
+        }
+
+        let Some(close_pos) = close_start else {
+            continue;
+        };
+
+        result.push_str(
+            &template[last_end..full.end()],
+        );
+
+        let inner = &template[full.end()..close_pos];
+
+        let index = blocks.len();
+
+        blocks.push(inner.to_string());
+
+        result.push_str(
+            &format!(
+                "__VLO_RUNTIME_DATA_SOURCE_{}__",
+                index
+            ),
+        );
+
+        result.push_str(&close);
+
+        last_end = close_pos + close.len();
+    }
+
+    result.push_str(&template[last_end..]);
+
+    (result, blocks)
+}
+
+pub fn restore_runtime_data_sources(
+    template: &str,
+    blocks: &[String],
+) -> String {
+    let mut result = template.to_string();
+
+    for (index, block) in blocks.iter().enumerate() {
+        let marker =
+            format!(
+                "__VLO_RUNTIME_DATA_SOURCE_{}__",
+                index
+            );
+
+        result = result.replace(
+            &marker,
+            block,
+        );
+    }
+
+    result
+}
+
 pub fn render_control_flow_for_build(
     template: &str,
     context: &HashMap<String, Value>,
@@ -861,10 +977,14 @@ pub fn render_control_flow_for_build(
         let end = start + 2 + end_rel;
         let expression = source[start + 2..end].trim();
 
-        if matches!(
-            expression,
-            "status" | "action" | "message"
-        ) {
+        let is_runtime_interpolation =
+            expression.contains('.')
+            || matches!(
+                expression,
+                "status" | "action" | "message"
+            );
+
+        if is_runtime_interpolation {
             let index = protected_interpolations.len();
 
             protected_interpolations.push(
@@ -915,7 +1035,6 @@ pub fn render_control_flow_for_build(
         &blocks,
     )
 }
-
 pub fn render_control_flow(
     template: &str,
     context: &HashMap<String, Value>,

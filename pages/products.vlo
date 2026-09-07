@@ -16,6 +16,7 @@
         <Toast
           variant="success"
           icon="✏️"
+          title="Product Updated"
           description="{{message}}"
         />
       {/if}

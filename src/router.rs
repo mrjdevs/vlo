@@ -3,7 +3,15 @@ use crate::{
     component::{render_components, render_tag},
     database::DB_POOL,
     state::{self, RenderedPage, STYLE_RE},
-    template::{clean_empty_tags, preserve_runtime_query_interpolations, render_control_flow, render_control_flow_for_build, restore_runtime_query_interpolations}
+    template::{
+        clean_empty_tags,
+        preserve_runtime_data_sources,
+        preserve_runtime_query_interpolations,
+        render_control_flow,
+        render_control_flow_for_build,
+        restore_runtime_data_sources,
+        restore_runtime_query_interpolations,
+    },
 };
 
 use axum::{
@@ -193,6 +201,7 @@ pub fn render_vlo(source: String) -> RenderedPage {
     render_vlo_with_query(source, &HashMap::new())
 }
 
+
 pub fn render_vlo_for_build(
     source: String,
 ) -> RenderedPage {
@@ -201,15 +210,62 @@ pub fn render_vlo_for_build(
     let mut source = strip_server_block(&source);
 
     let (
-        source_with_protected_interpolations,
-        runtime_interpolations,
+        source_with_protected_query,
+        runtime_query_interpolations,
     ) = preserve_runtime_query_interpolations(
         &source,
     );
 
-    source = source_with_protected_interpolations;
+    source = source_with_protected_query;
 
-        for captures in STYLE_RE.captures_iter(&source) {
+    let mut runtime_interpolations = Vec::new();
+
+    let interpolation_re =
+        regex::Regex::new(
+            r"\{\{\s*([a-zA-Z0-9_@.-]+)\s*\}\}",
+        )
+        .unwrap();
+
+    let mut protected_source = String::with_capacity(
+        source.len(),
+    );
+
+    let mut last_end = 0usize;
+
+    for capture in interpolation_re.captures_iter(&source) {
+        let full = capture.get(0).unwrap();
+        let expression = capture.get(1).unwrap().as_str();
+
+        if expression.contains('.') {
+            protected_source.push_str(
+                &source[last_end..full.start()],
+            );
+
+            let index =
+                runtime_interpolations.len();
+
+            runtime_interpolations.push(
+                full.as_str().to_string(),
+            );
+
+            protected_source.push_str(
+                &format!(
+                "__VLO_RUNTIME_DOTTED_INTERPOLATION_{}__",
+                index
+            )
+            );
+
+            last_end = full.end();
+        }
+    }
+
+    protected_source.push_str(
+        &source[last_end..],
+    );
+
+    source = protected_source;
+
+    for captures in STYLE_RE.captures_iter(&source) {
         if let Some(style) = captures.get(1) {
             context.add_style(
                 "page",
@@ -221,11 +277,6 @@ pub fn render_vlo_for_build(
     source = STYLE_RE
         .replace_all(&source, "")
         .into_owned();
-
-    source = resolve_data_sources(
-        &source,
-        &context.template_context,
-    );
 
     source = render_tag(
         &source,
@@ -250,14 +301,43 @@ pub fn render_vlo_for_build(
         &source,
     );
 
+    let (
+        source_with_runtime_data_sources,
+        runtime_data_sources,
+    ) = preserve_runtime_data_sources(
+        &source,
+    );
+
+    source = source_with_runtime_data_sources;
+
     source = render_control_flow_for_build(
         &source,
         &context.template_context,
     );
 
+    source = restore_runtime_data_sources(
+        &source,
+        &runtime_data_sources,
+    );
+
+    for (index, interpolation) in
+        runtime_interpolations.iter().enumerate()
+    {
+        let marker =
+            format!(
+                "__VLO_RUNTIME_DOTTED_INTERPOLATION_{}__",
+                index
+            );
+
+        source = source.replace(
+            &marker,
+            interpolation,
+        );
+    }
+
     source = restore_runtime_query_interpolations(
         &source,
-        &runtime_interpolations,
+        &runtime_query_interpolations,
     );
 
     context.html = clean_empty_tags(
@@ -266,6 +346,7 @@ pub fn render_vlo_for_build(
 
     context
 }
+
 
 pub fn render_vlo_with_query(
     source: String,
@@ -284,11 +365,16 @@ pub fn render_vlo_with_query(
 
     for captures in STYLE_RE.captures_iter(&source) {
         if let Some(style) = captures.get(1) {
-            context.add_style("page", style.as_str());
+            context.add_style(
+                "page",
+                style.as_str(),
+            );
         }
     }
 
-    source = STYLE_RE.replace_all(&source, "").into_owned();
+    source = STYLE_RE
+        .replace_all(&source, "")
+        .into_owned();
 
     source = resolve_data_sources(
         &source,
@@ -314,7 +400,9 @@ pub fn render_vlo_with_query(
         }
     }
 
-    source = crate::server::resolve_directives(&source);
+    source = crate::server::resolve_directives(
+        &source,
+    );
 
     source = render_control_flow(
         &source,
@@ -339,7 +427,10 @@ pub fn render_vlo_with_query(
         );
     }
 
-    context.html = clean_empty_tags(&source);
+    context.html = clean_empty_tags(
+        &source,
+    );
+
     context
 }
 
@@ -472,14 +563,11 @@ window.addEventListener("beforeunload", () => es.close());
 
     let mut html = rendered.html.clone();
 
-    // BaseLayout owns the document shell.
-    // Use the title passed through <BaseLayout title="...">.
     html = html.replace(
         "{{title}}",
         title,
     );
 
-    // Inject extracted component CSS inside <head>.
     if !component_styles.is_empty() {
         html = html.replacen(
             "</head>",
@@ -488,7 +576,6 @@ window.addEventListener("beforeunload", () => es.close());
         );
     }
 
-    // Inject HMR inside <body>.
     if !hmr.is_empty() {
         html = html.replacen(
             "</body>",
@@ -511,7 +598,9 @@ pub async fn hmr_handler(
         }
     };
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream).keep_alive(
+        KeepAlive::default(),
+    )
 }
 
 pub fn watch_files(
@@ -524,7 +613,8 @@ pub fn watch_files(
     let layouts = root.join("layouts");
     let components = root.join("components");
 
-    let (tx_notify, rx) = std::sync::mpsc::channel();
+    let (tx_notify, rx) =
+        std::sync::mpsc::channel();
 
     let mut watcher =
         RecommendedWatcher::new(
@@ -553,20 +643,23 @@ pub fn watch_files(
             continue;
         };
 
-        let relevant = event.paths.iter().any(|path| {
-            path.extension()
-                .and_then(|e| e.to_str())
-                == Some("vlo")
-                || path.starts_with(&public)
-                || path.starts_with(&layouts)
-                || path.starts_with(&components)
-        });
+        let relevant =
+            event.paths.iter().any(|path| {
+                path.extension()
+                    .and_then(|e| e.to_str())
+                    == Some("vlo")
+                    || path.starts_with(&public)
+                    || path.starts_with(&layouts)
+                    || path.starts_with(&components)
+            });
 
         if !relevant {
             continue;
         }
 
-        if let Ok(mut timestamp) = last.try_lock() {
+        if let Ok(mut timestamp) =
+            last.try_lock()
+        {
             if timestamp.elapsed().as_millis() > 200 {
                 *timestamp = Instant::now();
 
