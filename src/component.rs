@@ -19,14 +19,29 @@ use std::{
 
 pub fn component_path(name: &str) -> Option<PathBuf> {
     let root = crate::state::get_project_root();
-    let layout = root.join("layouts").join(format!("{}.vlo", name));
+    let layouts = root.join("layouts");
 
-    if layout.exists() {
-        return Some(layout);
+    // 1. layouts/{name}.vlo
+    let direct = layouts.join(format!("{}.vlo", name));
+    if direct.exists() {
+        return Some(direct);
     }
 
-    let component = root.join("components").join(format!("{}.vlo", name));
+    // 2. layouts/*/{name}.vlo  (nested layouts, e.g. layouts/admin/DashboardLayout.vlo)
+    if let Ok(entries) = fs::read_dir(&layouts) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let candidate = path.join(format!("{}.vlo", name));
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
 
+    // 3. components/{name}.vlo
+    let component = root.join("components").join(format!("{}.vlo", name));
     if component.exists() {
         return Some(component);
     }

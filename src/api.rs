@@ -9,7 +9,7 @@ use axum::{
     response::{IntoResponse, Json, Redirect, Response},
 };
 use serde_json::Value;
-use sqlx::{Column, Row, ValueRef}; // Removed unused TypeInfo
+use sqlx::{Column, Row, TypeInfo, ValueRef};
 use std::{
     collections::HashMap,
     fs,
@@ -43,55 +43,63 @@ pub fn extract_server_block(content: &str) -> Option<String> {
 }
 
 pub fn strip_server_block(content: &str) -> String {
+    crate::vlo_debug!("🔧 VLO DEBUG: Stripping <script server> block");
     if let Some(start) = content.find("<script server>") {
         if let Some(end) = content[start..].find("</script>") {
             let end = start + end + "</script>".len();
+            crate::vlo_debug!(
+                "🔧 VLO DEBUG: Server block removed ({} bytes)",
+                end - start
+            );
             return format!("{}{}", &content[..start], &content[end..]);
         }
     }
+    crate::vlo_debug!("🔧 VLO DEBUG: No server block found");
     content.to_string()
 }
 
 pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
     let file = get_project_root().join("pages/api/api.vlo");
-    crate::vlo_debug!(
-        "🔧 VLO DEBUG: Loading API definitions from {}",
-        file.display()
-    );
-    if !file.exists() {
-        return Err(format!("API file not found: {}", file.display()));
-    }
 
-    // Get file modification time for cache invalidation
-    let modified = fs::metadata(&file)
-        .and_then(|m| m.modified())
-        .unwrap_or(UNIX_EPOCH);
+    // 1. Get file modified time
+    let metadata = fs::metadata(&file)
+        .map_err(|_| format!("API file not found: {}", file.display()))?;
+    let modified = metadata.modified().unwrap_or(UNIX_EPOCH);
 
-    // Fast path: Return from cache if file hasn't changed
+    // 2. Check memory cache
     if let Ok(cache) = API_ACTIONS_CACHE.lock() {
         if let Some(cached) = cache.as_ref() {
             if cached.modified == modified {
-                crate::vlo_debug!("✅ VLO DEBUG: API actions served from cache");
+                crate::vlo_debug!("⚡ API actions served from memory cache");
                 return Ok(cached.actions.clone());
             }
         }
     }
 
-    // Slow path: Read from disk and parse JSON
+    crate::vlo_debug!(
+        "🔧 VLO DEBUG: Loading API definitions from {}",
+        file.display()
+    );
+
+    // 3. Read and parse from disk
     let content = fs::read_to_string(&file)
         .map_err(|e| format!("Could not read {}: {}", file.display(), e))?;
+
     let block = extract_server_block(&content)
         .ok_or_else(|| format!("No <script server> block found in {}", file.display()))?;
+
     let clean = block
         .trim_start_matches('\u{feff}')
         .replace('\u{a0}', " ")
         .replace('\r', "");
+
     let json: Value = serde_json::from_str(&clean)
         .map_err(|e| format!("Invalid JSON in {}: {}", file.display(), e))?;
+
     let object = json
         .as_object()
         .ok_or_else(|| "API definitions must be a JSON object".to_string())?;
-    
+
     let mut actions = HashMap::new();
     for (name, value) in object {
         if let Some(sql) = value.as_str() {
@@ -99,9 +107,10 @@ pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
             actions.insert(name.clone(), sql.to_string());
         }
     }
+
     crate::vlo_debug!("✅ VLO DEBUG: Loaded {} API actions", actions.len());
 
-    // Update cache
+    // 4. Update memory cache
     if let Ok(mut cache) = API_ACTIONS_CACHE.lock() {
         *cache = Some(CachedActions {
             actions: actions.clone(),
@@ -114,18 +123,25 @@ pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
 
 pub async fn api_handler_root(req: Request) -> Response {
     match prepare_api_request(req).await {
-        Ok((method, query)) => api_route_handler(None, None, method, query)
-            .await
-            .into_response(),
+        Ok((method, query)) => {
+            api_route_handler(None, None, method, query)
+                .await
+                .into_response()
+        }
         Err(response) => response,
     }
 }
 
-pub async fn api_handler_path(AxumPath(resource): AxumPath<String>, req: Request) -> Response {
+pub async fn api_handler_path(
+    AxumPath(resource): AxumPath<String>,
+    req: Request,
+) -> Response {
     match prepare_api_request(req).await {
-        Ok((method, query)) => api_route_handler(Some(resource), None, method, query)
-            .await
-            .into_response(),
+        Ok((method, query)) => {
+            api_route_handler(Some(resource), None, method, query)
+                .await
+                .into_response()
+        }
         Err(response) => response,
     }
 }
@@ -135,9 +151,11 @@ pub async fn api_handler_id(
     req: Request,
 ) -> Response {
     match prepare_api_request(req).await {
-        Ok((method, query)) => api_route_handler(Some(resource), Some(id), method, query)
-            .await
-            .into_response(),
+        Ok((method, query)) => {
+            api_route_handler(Some(resource), Some(id), method, query)
+                .await
+                .into_response()
+        }
         Err(response) => response,
     }
 }
@@ -171,9 +189,10 @@ async fn prepare_api_request(
                         "details": error.to_string()
                     })),
                 )
-                .into_response());
+                    .into_response());
             }
         };
+
         if let Err(response) = parse_multipart_body(&mut multipart, &mut query).await {
             return Err(response);
         }
@@ -189,9 +208,10 @@ async fn prepare_api_request(
                         "details": error.to_string()
                     })),
                 )
-                .into_response());
+                    .into_response());
             }
         };
+
         if !body.is_empty() {
             if content_type.contains("application/json") {
                 match serde_json::from_slice::<Value>(&body) {
@@ -210,7 +230,7 @@ async fn prepare_api_request(
                                 "details": error.to_string()
                             })),
                         )
-                        .into_response());
+                            .into_response());
                     }
                 }
             } else if content_type.contains("application/x-www-form-urlencoded") {
@@ -222,6 +242,7 @@ async fn prepare_api_request(
             }
         }
     }
+
     Ok((method, query))
 }
 
@@ -230,6 +251,7 @@ async fn parse_multipart_body(
     query: &mut HashMap<String, String>,
 ) -> Result<(), Response> {
     let max_size = crate::state::max_upload_bytes();
+
     loop {
         let field = match multipart.next_field().await {
             Ok(Some(field)) => field,
@@ -243,11 +265,13 @@ async fn parse_multipart_body(
                         "details": error.to_string()
                     })),
                 )
-                .into_response());
+                    .into_response());
             }
         };
+
         let name = field.name().unwrap_or("").to_string();
         let file_name = field.file_name().map(|name| name.to_string());
+
         let bytes = match field.bytes().await {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -259,9 +283,10 @@ async fn parse_multipart_body(
                         "details": error.to_string()
                     })),
                 )
-                .into_response());
+                    .into_response());
             }
         };
+
         if bytes.len() as u64 > max_size {
             let max_mb = max_size / (1024 * 1024);
             return Err((
@@ -269,30 +294,60 @@ async fn parse_multipart_body(
                 Json(serde_json::json!({
                     "success": false,
                     "error": "File too large",
-                    "details": format!("Maximum allowed upload size is {} MB", max_mb)
+                    "details": format!(
+                        "Maximum allowed upload size is {} MB",
+                        max_mb
+                    )
                 })),
             )
-            .into_response());
-        }
-        if let Some(original_name) = file_name {
-            let upload_name = generate_upload_name(&original_name);
-            if let Err(error) = crate::files::save(&upload_name, &bytes) {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                        "success": false,
-                        "error": "Failed to save uploaded file",
-                        "details": error.to_string()
-                    })),
-                )
                 .into_response());
-            }
-            query.insert(name, format!("/uploads/{}", upload_name));
+        }
+
+     if let Some(original_name) = file_name {
+         let upload_name = generate_upload_name(&original_name);
+         let upload_name_clone = upload_name.clone();
+         let bytes_clone = bytes.clone();
+
+         let save_result = tokio::task::spawn_blocking(move || {
+             crate::files::save(&upload_name_clone, &bytes_clone)
+         }).await;
+
+         match save_result {
+             Ok(Ok(_)) => {}
+             Ok(Err(error)) => {
+                 return Err((
+                     StatusCode::INTERNAL_SERVER_ERROR,
+                     Json(serde_json::json!({
+                         "success": false,
+                         "error": "Failed to save uploaded file",
+                         "details": error.to_string()
+                     })),
+                 )
+                     .into_response());
+             }
+             Err(join_error) => {
+                 return Err((
+                     StatusCode::INTERNAL_SERVER_ERROR,
+                     Json(serde_json::json!({
+                         "success": false,
+                         "error": "Failed to save uploaded file",
+                         "details": join_error.to_string()
+                     })),
+                 )
+                     .into_response());
+             }
+         }
+
+         query.insert(
+             name,
+             format!("/uploads/{}", upload_name),
+         );
         } else {
             let value = String::from_utf8_lossy(&bytes).to_string();
             query.insert(name, value);
         }
     }
+
     Ok(())
 }
 
@@ -305,17 +360,26 @@ fn crud_operation(method: &Method) -> Option<&'static str> {
         Method::DELETE => Some("delete"),
         _ => None,
     };
+
     crate::vlo_debug!(
         "🔧 VLO DEBUG: HTTP method '{}' mapped to operation {:?}",
         method,
         operation
     );
+
     operation
 }
 
 fn normalize_resource(endpoint: &str) -> String {
     let value = endpoint.trim().trim_matches('/');
-    for prefix in ["get_", "post_", "put_", "patch_", "delete_"] {
+
+    for prefix in [
+        "get_",
+        "post_",
+        "put_",
+        "patch_",
+        "delete_",
+    ] {
         if let Some(rest) = value.strip_prefix(prefix) {
             crate::vlo_debug!(
                 "🔧 VLO DEBUG: Normalized endpoint '{}' -> '{}'",
@@ -325,23 +389,29 @@ fn normalize_resource(endpoint: &str) -> String {
             return rest.to_string();
         }
     }
+
     value.to_string()
 }
 
 fn valid_identifier(value: &str) -> bool {
-    !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
+
     while i < bytes.len() {
         if bytes[i] == b'+' {
             out.push(b' ');
             i += 1;
             continue;
         }
+
         if bytes[i] == b'%' && i + 2 < bytes.len() {
             let h = |c: u8| -> Option<u8> {
                 match c {
@@ -351,15 +421,20 @@ fn percent_decode(value: &str) -> String {
                     _ => None,
                 }
             };
-            if let (Some(a), Some(b)) = (h(bytes[i + 1]), h(bytes[i + 2])) {
+
+            if let (Some(a), Some(b)) =
+                (h(bytes[i + 1]), h(bytes[i + 2]))
+            {
                 out.push(a * 16 + b);
                 i += 3;
                 continue;
             }
         }
+
         out.push(bytes[i]);
         i += 1;
     }
+
     String::from_utf8_lossy(&out).into_owned()
 }
 
@@ -369,10 +444,15 @@ fn parse_form_body(body: &str) -> HashMap<String, String> {
         .filter_map(|part| {
             let mut pair = part.splitn(2, '=');
             let key = percent_decode(pair.next().unwrap_or(""));
+
             if key.is_empty() {
                 return None;
             }
-            Some((key, percent_decode(pair.next().unwrap_or(""))))
+
+            Some((
+                key,
+                percent_decode(pair.next().unwrap_or("")),
+            ))
         })
         .collect()
 }
@@ -382,14 +462,25 @@ fn generate_upload_name(original: &str) -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default();
+
     let extension = Path::new(original)
         .extension()
         .and_then(|v| v.to_str())
         .map(|v| v.to_ascii_lowercase())
         .filter(|v| !v.is_empty());
+
     match extension {
-        Some(ext) => format!("vlo_{}_{}.{}", timestamp, std::process::id(), ext),
-        None => format!("vlo_{}_{}", timestamp, std::process::id()),
+        Some(ext) => format!(
+            "vlo_{}_{}.{}",
+            timestamp,
+            std::process::id(),
+            ext
+        ),
+        None => format!(
+            "vlo_{}_{}",
+            timestamp,
+            std::process::id()
+        ),
     }
 }
 
@@ -402,8 +493,14 @@ pub async fn api_route_handler(
     crate::vlo_debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     crate::vlo_debug!("🔧 VLO DEBUG: API request started");
     crate::vlo_debug!("🔧 VLO DEBUG: Method = {}", method);
-    crate::vlo_debug!("🔧 VLO DEBUG: Initial endpoint = {:?}", endpoint);
-    crate::vlo_debug!("🔧 VLO DEBUG: Initial ID = {:?}", id);
+    crate::vlo_debug!(
+        "🔧 VLO DEBUG: Initial endpoint = {:?}",
+        endpoint
+    );
+    crate::vlo_debug!(
+        "🔧 VLO DEBUG: Initial ID = {:?}",
+        id
+    );
 
     if endpoint.is_none() {
         if let Some(action) = query.get("action").cloned() {
@@ -412,7 +509,9 @@ pub async fn api_route_handler(
     }
 
     let endpoint = match endpoint {
-        Some(value) => value.trim().trim_matches('/').to_string(),
+        Some(value) => {
+            value.trim().trim_matches('/').to_string()
+        }
         None => {
             return match load_api_actions() {
                 Ok(actions) => (
@@ -422,7 +521,7 @@ pub async fn api_route_handler(
                         "actions": actions
                     })),
                 )
-                .into_response(),
+                    .into_response(),
                 Err(error) => (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(serde_json::json!({
@@ -431,12 +530,13 @@ pub async fn api_route_handler(
                         "details": error
                     })),
                 )
-                .into_response(),
+                    .into_response(),
             };
         }
     };
 
     let resource = normalize_resource(&endpoint);
+
     if !valid_identifier(&resource) {
         return (
             StatusCode::BAD_REQUEST,
@@ -445,7 +545,7 @@ pub async fn api_route_handler(
                 "error": "Invalid API resource"
             })),
         )
-        .into_response();
+            .into_response();
     }
 
     let operation = match crud_operation(&method) {
@@ -458,13 +558,20 @@ pub async fn api_route_handler(
                     "error": "Unsupported HTTP method"
                 })),
             )
-            .into_response();
+                .into_response();
         }
     };
 
-    let explicit_action = ["get_", "post_", "put_", "patch_", "delete_"]
-        .iter()
-        .any(|prefix| endpoint.starts_with(prefix));
+    let explicit_action = [
+        "get_",
+        "post_",
+        "put_",
+        "patch_",
+        "delete_",
+    ]
+    .iter()
+    .any(|prefix| endpoint.starts_with(prefix));
+
     let action_name = if explicit_action {
         endpoint.clone()
     } else {
@@ -489,7 +596,7 @@ pub async fn api_route_handler(
                     "details": error
                 })),
             )
-            .into_response();
+                .into_response();
         }
     };
 
@@ -504,7 +611,7 @@ pub async fn api_route_handler(
                     "action": action_name
                 })),
             )
-            .into_response();
+                .into_response();
         }
     };
 
@@ -518,32 +625,63 @@ pub async fn api_route_handler(
         && !sql.contains("{id}")
     {
         let upper = sql.to_uppercase();
+
         if let Some(pos) = upper.find(" ORDER BY ") {
             let before = sql[..pos].trim_end();
             let order = &sql[pos..];
-            sql = if before.to_uppercase().contains(" WHERE ") {
-                format!("{} AND id = {{id}}{}", before, order)
+
+            sql = if before
+                .to_uppercase()
+                .contains(" WHERE ")
+            {
+                format!(
+                    "{} AND id = {{id}}{}",
+                    before,
+                    order
+                )
             } else {
-                format!("{} WHERE id = {{id}}{}", before, order)
+                format!(
+                    "{} WHERE id = {{id}}{}",
+                    before,
+                    order
+                )
             };
         } else {
-            let trimmed = sql.trim_end_matches(';').trim();
-            sql = if trimmed.to_uppercase().contains(" WHERE ") {
-                format!("{} AND id = {{id}}", trimmed)
+            let trimmed =
+                sql.trim_end_matches(';').trim();
+
+            sql = if trimmed
+                .to_uppercase()
+                .contains(" WHERE ")
+            {
+                format!(
+                    "{} AND id = {{id}}",
+                    trimmed
+                )
             } else {
-                format!("{} WHERE id = {{id}}", trimmed)
+                format!(
+                    "{} WHERE id = {{id}}",
+                    trimmed
+                )
             };
         }
     }
 
     let mut params = serde_json::Map::new();
+
     for (key, value) in query {
         if key != "action" {
-            params.insert(key, query_string_to_value(&value));
+            params.insert(
+                key,
+                query_string_to_value(&value),
+            );
         }
     }
 
-    crate::vlo_debug!("🔧 VLO DEBUG: Final SQL parameters = {:?}", params);
+    crate::vlo_debug!(
+        "🔧 VLO DEBUG: Final SQL parameters = {:?}",
+        params
+    );
 
     let pool = match DB_POOL.get() {
         Some(p) => p,
@@ -555,48 +693,73 @@ pub async fn api_route_handler(
                     "error": "Database not configured"
                 })),
             )
-            .into_response();
+                .into_response();
         }
     };
 
-    let action_type = if action_name.starts_with("put")
-        || action_name.starts_with("patch")
-        || method == Method::PUT
-        || method == Method::PATCH
-    {
-        "updated"
-    } else if action_name.starts_with("delete") || method == Method::DELETE {
-        "deleted"
-    } else {
-        "created"
-    };
+    let action_type =
+        if action_name.starts_with("put")
+            || action_name.starts_with("patch")
+            || method == Method::PUT
+            || method == Method::PATCH
+        {
+            "updated"
+        } else if action_name.starts_with("delete")
+            || method == Method::DELETE
+        {
+            "deleted"
+        } else {
+            "created"
+        };
 
-    crate::vlo_debug!("🔧 VLO DEBUG: Executing SQL = {}", sql);
+    crate::vlo_debug!(
+        "🔧 VLO DEBUG: Executing SQL = {}",
+        sql
+    );
 
     match execute_api_sql(pool, &sql, &params).await {
         Ok(data) => {
             crate::vlo_debug!(
-                "✅ VLO DEBUG: SQL execution successful ({} rows)",
-                data.get("data")
-                    .and_then(|v| v.as_array())
-                    .map(|rows| rows.len())
-                    .unwrap_or(0)
+                "✅ VLO DEBUG: SQL execution successful: {}",
+                data
             );
+
             if method != Method::GET {
-                let redirect_url = format!("/{}?status=success&action={}", resource, action_type);
-                return Redirect::to(&redirect_url).into_response();
+                let redirect_url = format!(
+                    "/{}?status=success&action={}",
+                    resource,
+                    action_type
+                );
+
+                return Redirect::to(&redirect_url)
+                    .into_response();
             }
-            (StatusCode::OK, Json(data)).into_response()
+
+            (
+                StatusCode::OK,
+                Json(data),
+            )
+                .into_response()
         }
         Err(error) => {
             eprintln!(
                 "❌ [VLO API] {} {} -> SQL error: {}",
-                method, action_name, error
+                method,
+                action_name,
+                error
             );
+
             if method != Method::GET {
-                let redirect_url = format!("/{}?status=error&action={}", resource, action_type);
-                return Redirect::to(&redirect_url).into_response();
+                let redirect_url = format!(
+                    "/{}?status=error&action={}",
+                    resource,
+                    action_type
+                );
+
+                return Redirect::to(&redirect_url)
+                    .into_response();
             }
+
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({
@@ -606,7 +769,7 @@ pub async fn api_route_handler(
                     "action": action_name
                 })),
             )
-            .into_response()
+                .into_response()
         }
     }
 }
@@ -645,81 +808,136 @@ fn prepare_sql(
 ) -> Result<(String, Vec<QueryParam>), String> {
     let mut values = Vec::new();
     let mut param_index = 1;
-    let is_postgres = matches!(pool, DbPool::Postgres(_));
-    
+
+    let is_postgres =
+        matches!(pool, DbPool::Postgres(_));
+
     let prepared = crate::state::SQL_PARAM_RE
-        .replace_all(sql, |caps: &regex::Captures| {
-            let key = &caps[1];
-            let placeholder = if is_postgres {
-                let value = format!("${}", param_index);
-                param_index += 1;
-                value
-            } else {
-                param_index += 1;
-                "?".to_string()
-            };
-            values.push(match params.get(key) {
-                Some(value) => value_to_any_param(value),
-                None => QueryParam::Null,
-            });
-            placeholder
-        })
+        .replace_all(
+            sql,
+            |caps: &regex::Captures| {
+                let key = &caps[1];
+
+                let placeholder = if is_postgres {
+                    let value =
+                        format!("${}", param_index);
+                    param_index += 1;
+                    value
+                } else {
+                    param_index += 1;
+                    "?".to_string()
+                };
+
+                values.push(match params.get(key) {
+                    Some(value) => {
+                        value_to_any_param(value)
+                    }
+                    None => QueryParam::Null,
+                });
+
+                placeholder
+            },
+        )
         .into_owned();
 
-    if prepared.contains('{') || prepared.contains('}') {
-        return Err(format!("Unresolved parameter in SQL: {}", prepared));
+    if prepared.contains('{')
+        || prepared.contains('}')
+    {
+        return Err(format!(
+            "Unresolved parameter in SQL: {}",
+            prepared
+        ));
     }
+
     Ok((prepared, values))
 }
 
-// ============================================================================
-// IMPROVED MACRO: Uses a fallback chain to handle SQLite's dynamic typing 
-// and empty type names for aggregate functions like COUNT() or SUM().
-// ============================================================================
 macro_rules! convert_row_to_json {
     ($row:expr) => {{
         let mut map = serde_json::Map::new();
+
         for (i, column) in $row.columns().iter().enumerate() {
             let name = column.name().to_string();
-            let raw = $row.try_get_raw(i);
-            let is_null = raw.map(|r| r.is_null()).unwrap_or(true);
+
+            let is_null = $row
+                .try_get_raw(i)
+                .map(|r| r.is_null())
+                .unwrap_or(true);
 
             let val: serde_json::Value = if is_null {
                 serde_json::Value::Null
             } else {
-                if let Ok(v) = $row.try_get::<i64, _>(i) {
-                    serde_json::Value::Number(v.into())
-                } else if let Ok(v) = $row.try_get::<f64, _>(i) {
-                    serde_json::Number::from_f64(v)
-                        .map(serde_json::Value::Number)
+                let type_name =
+                    column.type_info().name().to_lowercase();
+
+                if type_name.contains("int") {
+                    $row.try_get::<i64, _>(i)
+                        .or_else(|_| {
+                            $row.try_get::<i32, _>(i)
+                                .map(|v| v as i64)
+                        })
+                        .map(|v| {
+                            serde_json::Value::Number(v.into())
+                        })
                         .unwrap_or(serde_json::Value::Null)
-                } else if let Ok(v) = $row.try_get::<bool, _>(i) {
-                    serde_json::Value::Bool(v)
-                } else if let Ok(v) = $row.try_get::<String, _>(i) {
-                    serde_json::Value::String(v)
-                } else if let Ok(v) = $row.try_get::<sqlx::types::Json<serde_json::Value>, _>(i) {
-                    v.0
-                } else if let Ok(v) = $row.try_get::<Vec<u8>, _>(i) {
-                    serde_json::Value::String(format!("blob {}b", v.len()))
+                } else if type_name.contains("bool") {
+                    $row.try_get::<bool, _>(i)
+                        .map(serde_json::Value::Bool)
+                        .unwrap_or(serde_json::Value::Null)
+                } else if type_name.contains("float")
+                    || type_name.contains("double")
+                    || type_name.contains("real")
+                    || type_name.contains("numeric")
+                    || type_name.contains("decimal")
+                {
+                    $row.try_get::<f64, _>(i)
+                        .ok()
+                        .and_then(|v| {
+                            serde_json::Number::from_f64(v)
+                                .map(serde_json::Value::Number)
+                        })
+                        .unwrap_or(serde_json::Value::Null)
+                } else if type_name.contains("json") {
+                    $row.try_get::<sqlx::types::Json<serde_json::Value>, _>(i)
+                        .map(|j| j.0)
+                        .unwrap_or(serde_json::Value::Null)
                 } else {
-                    serde_json::Value::Null
+                    $row.try_get::<String, _>(i)
+                        .map(serde_json::Value::String)
+                        .unwrap_or_else(|_| {
+                            $row.try_get::<Vec<u8>, _>(i)
+                                .map(|v| {
+                                    serde_json::Value::String(
+                                        format!("blob {}b", v.len()),
+                                    )
+                                })
+                                .unwrap_or(serde_json::Value::Null)
+                        })
                 }
             };
+
             map.insert(name, val);
         }
+
         serde_json::Value::Object(map)
     }};
 }
 
-fn sqlite_row_to_json(row: &sqlx::sqlite::SqliteRow) -> Value {
+fn sqlite_row_to_json(
+    row: &sqlx::sqlite::SqliteRow,
+) -> Value {
     convert_row_to_json!(row)
 }
 
-fn pg_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
+fn pg_row_to_json(
+    row: &sqlx::postgres::PgRow,
+) -> Value {
     convert_row_to_json!(row)
 }
 
-fn mysql_row_to_json(row: &sqlx::mysql::MySqlRow) -> Value {
+fn mysql_row_to_json(
+    row: &sqlx::mysql::MySqlRow,
+) -> Value {
     convert_row_to_json!(row)
 }
 
@@ -733,50 +951,99 @@ pub async fn execute_api_sql(
 
     macro_rules! exec_db {
         ($pool:expr, $to_json:ident) => {{
-            let mut tx = $pool.begin().await.map_err(|e| e.to_string())?;
+            let mut tx = $pool
+                .begin()
+                .await
+                .map_err(|e| e.to_string())?;
+
             for statement in sql.split(';') {
                 let statement = statement.trim();
+
                 if statement.is_empty() {
                     continue;
                 }
-                let (prepared_sql, values) = prepare_sql(statement, params, pool)?;
-                let upper = prepared_sql.trim_start().to_uppercase();
-                let is_select = upper.starts_with("SELECT")
-                    || upper.starts_with("PRAGMA")
-                    || upper.starts_with("WITH");
 
-                let mut query = sqlx::query(&prepared_sql);
+                let (prepared_sql, values) =
+                    prepare_sql(
+                        statement,
+                        params,
+                        pool,
+                    )?;
+
+                let upper = prepared_sql
+                    .trim_start()
+                    .to_uppercase();
+
+                let is_select =
+                    upper.starts_with("SELECT")
+                        || upper.starts_with("PRAGMA")
+                        || upper.starts_with("WITH");
+
+                let mut query =
+                    sqlx::query(&prepared_sql);
+
                 for value in &values {
                     query = match value {
-                        QueryParam::Null => query.bind(Option::<String>::None),
-                        QueryParam::Bool(v) => query.bind(*v),
-                        QueryParam::Int(v) => query.bind(*v),
-                        QueryParam::Float(v) => query.bind(*v),
-                        QueryParam::Text(v) => query.bind(v.clone()),
-                        QueryParam::Json(v) => query.bind(sqlx::types::Json(v.clone())),
+                        QueryParam::Null => {
+                            query.bind(
+                                Option::<String>::None,
+                            )
+                        }
+                        QueryParam::Bool(v) =>
+                            query.bind(*v),
+                        QueryParam::Int(v) =>
+                            query.bind(*v),
+                        QueryParam::Float(v) =>
+                            query.bind(*v),
+                        QueryParam::Text(v) =>
+                            query.bind(v.clone()),
+                        QueryParam::Json(v) =>
+                            query.bind(
+                                sqlx::types::Json(
+                                    v.clone(),
+                                ),
+                            ),
                     };
                 }
 
                 if is_select {
-                    let rows = query.fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
-                    let mut data = Vec::with_capacity(rows.len());
+                    let rows = query
+                        .fetch_all(&mut *tx)
+                        .await
+                        .map_err(|e| e.to_string())?;
+
+                    let mut data =
+                        Vec::with_capacity(rows.len());
+
                     for row in &rows {
                         data.push($to_json(row));
                     }
+
                     last_data = Some(data);
                 } else {
-                    let result = query.execute(&mut *tx).await.map_err(|e| e.to_string())?;
-                    affected_rows += result.rows_affected();
+                    let result = query
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|e| e.to_string())?;
+
+                    affected_rows +=
+                        result.rows_affected();
                 }
             }
-            tx.commit().await.map_err(|e| e.to_string())?;
+
+            tx.commit()
+                .await
+                .map_err(|e| e.to_string())?;
         }};
     }
 
     match pool {
-        DbPool::Sqlite(p) => exec_db!(p, sqlite_row_to_json),
-        DbPool::Postgres(p) => exec_db!(p, pg_row_to_json),
-        DbPool::MySql(p) => exec_db!(p, mysql_row_to_json),
+        DbPool::Sqlite(p) =>
+            exec_db!(p, sqlite_row_to_json),
+        DbPool::Postgres(p) =>
+            exec_db!(p, pg_row_to_json),
+        DbPool::MySql(p) =>
+            exec_db!(p, mysql_row_to_json),
     }
 
     if let Some(data) = last_data {
@@ -806,19 +1073,26 @@ fn query_string_to_value(value: &str) -> Value {
     if value.is_empty() {
         return Value::String(value.to_string());
     }
+
     if value.eq_ignore_ascii_case("true") {
         return Value::Bool(true);
     }
+
     if value.eq_ignore_ascii_case("false") {
         return Value::Bool(false);
     }
+
     if let Ok(integer) = value.parse::<i64>() {
         return Value::Number(integer.into());
     }
+
     if let Ok(float) = value.parse::<f64>() {
-        if let Some(number) = serde_json::Number::from_f64(float) {
+        if let Some(number) =
+            serde_json::Number::from_f64(float)
+        {
             return Value::Number(number);
         }
     }
+
     Value::String(value.to_string())
 }

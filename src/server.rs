@@ -21,6 +21,11 @@ use std::{
 };
 use tokio::sync::broadcast;
 use tower_http::{compression::CompressionLayer, services::ServeDir};
+use axum::middleware::{self, Next};
+use axum::extract::Request;
+use axum::response::Response;
+use axum::http::header::{CACHE_CONTROL, HeaderValue};
+
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -42,10 +47,10 @@ pub enum Commands {
     },
 
     Dev {
-        #[arg(short, long, default_value = "3000")]
-        port: u16,
-        #[arg(long, default_value = "127.0.0.1")]
-        host: String,
+        #[arg(short, long)]
+        port: Option<String>,  // <--- Clap parses this as u16 automatically
+        #[arg(long)]
+        host: Option<String>,
     },
 
     Build {
@@ -59,7 +64,9 @@ pub enum Commands {
         #[arg(long)]
         host: Option<String>,
     },
+
     Cgi,
+
     Deploy {
         #[arg(
             short,
@@ -70,8 +77,7 @@ pub enum Commands {
         provider: String,
     },
 }
-
-pub async fn dev(host: &str, port: u16) -> Result<(), String> {
+pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
     state::set_app_mode(state::AppMode::Development);
     let root = get_project_root();
     let pages_path = root.join("pages");
@@ -89,17 +95,12 @@ pub async fn dev(host: &str, port: u16) -> Result<(), String> {
     let app = Router::new()
         .route("/", get(home_handler))
         .route("/:path", get(page_handler))
-        
         .route("/uploads/*path", get(serve_file))
         .route("/api/files/upload", axum::routing::post(upload_file))
-        .route(
-            "/api/files/:id/download",
-            get(download_file),
-        )
+        .route("/api/files/:id/download", get(download_file))
         .route(
             "/api/files/:id",
-            get(get_file)
-                .delete(delete_file),
+            get(get_file).delete(delete_file),
         )
         .route(
             "/api",
@@ -129,11 +130,24 @@ pub async fn dev(host: &str, port: u16) -> Result<(), String> {
         .nest_service("/static", ServeDir::new(public_path_service))
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(CompressionLayer::new())
+        .layer(middleware::from_fn(cache_middleware))
         .fallback(not_found_handler);
 
-    let host_str = std::env::var("VLO_HOST").unwrap_or_else(|_| host.to_string());
-    let port_str = std::env::var("VLO_PORT").unwrap_or_else(|_| port.to_string());
-    let addr = format!("{}:{}", host_str, port_str);
+    // CLI arguments override .env values.
+    let host_str = host
+        .map(str::to_string)
+        .or_else(|| std::env::var("VLO_HOST").ok())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let port_num = port
+        .or_else(|| {
+            std::env::var("VLO_PORT")
+                .ok()
+                .and_then(|value| value.parse::<u16>().ok())
+        })
+        .unwrap_or(3000);
+
+    let addr = format!("{}:{}", host_str, port_num);
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,
@@ -208,7 +222,8 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
             serve_build_page(build_dir.clone(), uri)
         })
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
-        .layer(CompressionLayer::new());
+        .layer(CompressionLayer::new())
+        .layer(middleware::from_fn(cache_middleware)); // <--- Semicolon moved to the very end
 
     // CLI arguments override .env values.
     let host_str = host
@@ -469,6 +484,36 @@ async fn shutdown_signal() {
     println!("\n⚡ Shutting down VLO dev server...");
 }
 
+async fn cache_middleware(req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
+    let mut response = next.run(req).await;
+    
+    // 1. Static assets and uploads are immutable (cached for 1 year)
+    if path.starts_with("/static/") || path.starts_with("/uploads/") {
+        response.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    } 
+    // 2. Fallback for direct asset extensions
+    else if path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".png") 
+         || path.ends_with(".jpg") || path.ends_with(".svg") || path.ends_with(".woff2") {
+        response.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    } 
+    // 3. HTML pages and API routes should never be cached aggressively
+    else {
+        response.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+        );
+    }
+    
+    response
+}
+
 pub fn build(release: bool) -> Result<(), String> {
     if release {
         println!("⚡ VLO release build...");
@@ -489,51 +534,86 @@ pub fn build(release: bool) -> Result<(), String> {
     fs::create_dir_all(build_dir.join("static"))
         .expect("Failed to create .vlo/build directory");
 
-    if let Ok(entries) = fs::read_dir(&pages) {
-        for entry in entries.flatten() {
-            let path = entry.path();
+    // Recursive page builder
+    fn build_pages(
+        dir: &Path,
+        pages_root: &Path,
+        build_dir: &Path,
+    ) -> Result<(), String> {
+        let entries = fs::read_dir(dir)
+            .map_err(|e| format!("Failed to read pages directory: {}", e))?;
 
-            if path.extension().and_then(|e| e.to_str()) != Some("vlo") {
+        for entry in entries.flatten() {
+            let file_path = entry.path();
+
+            // Recurse into subdirectories (e.g., pages/admin/)
+            if file_path.is_dir() {
+                build_pages(&file_path, pages_root, build_dir)?;
                 continue;
             }
 
-            let stem = path
-                .file_stem()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
+            if file_path.extension().and_then(|e| e.to_str()) != Some("vlo") {
+                continue;
+            }
 
-            let content = fs::read_to_string(&path)
+            // Calculate relative page path: "docs", "admin/dashboard", etc.
+            let relative_page_path = file_path
+                .strip_prefix(pages_root)
+                .map_err(|e| format!("Failed to resolve page path: {}", e))?
+                .with_extension("")
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            let content = fs::read_to_string(&file_path)
                 .unwrap_or_default();
 
-            let rendered = crate::router::render_vlo_for_build(content);
-            let html = crate::router::wrap_html(&stem, &rendered);
+            // Pass the page path so layout hierarchy is applied!
+            let rendered = crate::router::render_vlo_for_build_at(
+                &relative_page_path,
+                content,
+            );
 
-            let output = if stem == "home" || stem == "index" {
+            let html = crate::router::wrap_html(
+                &relative_page_path,
+                &rendered,
+            );
+
+            let output = if relative_page_path == "home"
+                || relative_page_path == "index"
+            {
                 build_dir.join("index.html")
             } else {
-                build_dir.join(format!("{}.html", stem))
+                build_dir.join(format!("{}.html", relative_page_path))
             };
 
+            // Create subdirectories in build output if needed
+            if let Some(parent) = output.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| {
+                        format!("Failed to create build directory: {}", e)
+                    })?;
+            }
+
             fs::write(&output, html)
-                .expect("Failed to write generated HTML");
+                .map_err(|e| {
+                    format!("Failed to write generated HTML: {}", e)
+                })?;
 
             println!("  ├─ Generated: {}", output.display());
         }
+
+        Ok(())
     }
 
-    if public.exists() {
-        copy_dir_all(
-            &public,
-            &build_dir.join("static"),
-        )
-        .expect("Failed to copy static assets");
+    build_pages(&pages, &pages, &build_dir)?;
 
+    if public.exists() {
+        copy_dir_all(&public, &build_dir.join("static"))
+            .expect("Failed to copy static assets");
         println!("  └─ Copied static assets");
     }
 
     println!("⚡ Build completed successfully!");
-
     Ok(())
 }
 

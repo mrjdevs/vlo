@@ -100,16 +100,34 @@ pub async fn upload_file(mut multipart: Multipart) -> impl IntoResponse {
 
         let relative_path = stored_name.clone();
 
-        if let Err(error) = files::save(&relative_path, &data) {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "success": false,
-                    "error": format!("Could not save file: {}", error)
-                })),
-            )
-                .into_response();
-        }
+     let save_path = relative_path.clone();
+     let save_data = data.clone();
+     
+     let save_result = tokio::task::spawn_blocking(move || {
+         files::save(&save_path, &save_data)
+     }).await;
+
+     match save_result {
+         Ok(Ok(_)) => {}
+         Ok(Err(error)) => {
+             return (
+                 StatusCode::INTERNAL_SERVER_ERROR,
+                 Json(json!({
+                     "success": false,
+                     "error": format!("Could not save file: {}", error)
+                 })),
+             ).into_response();
+         }
+         Err(join_error) => {
+             return (
+                 StatusCode::INTERNAL_SERVER_ERROR,
+                 Json(json!({
+                     "success": false,
+                     "error": format!("File save task failed: {}", join_error)
+                 })),
+             ).into_response();
+         }
+     }
 
         uploaded.push(json!({
             "id": stored_name,
@@ -225,22 +243,34 @@ pub async fn delete_file(
         );
     }
 
-    match files::delete(&relative_path) {
-        Ok(_) => (
-            StatusCode::OK,
-            Json(json!({
-                "success": true,
-                "id": relative_path
-            })),
-        ),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "success": false,
-                "error": format!("Could not delete file: {}", error)
-            })),
-        ),
-    }
+ let delete_path = relative_path.clone();
+ let delete_result = tokio::task::spawn_blocking(move || {
+     files::delete(&delete_path)
+ }).await;
+
+ match delete_result {
+     Ok(Ok(_)) => (
+         StatusCode::OK,
+         Json(json!({
+             "success": true,
+             "id": relative_path
+         })),
+     ),
+     Ok(Err(error)) => (
+         StatusCode::INTERNAL_SERVER_ERROR,
+         Json(json!({
+             "success": false,
+             "error": format!("Could not delete file: {}", error)
+         })),
+     ),
+     Err(join_error) => (
+         StatusCode::INTERNAL_SERVER_ERROR,
+         Json(json!({
+             "success": false,
+             "error": format!("File delete task failed: {}", join_error)
+         })),
+     ),
+ }
 }
 
 async fn serve_file_by_id(id: &str, download: bool) -> Response {
