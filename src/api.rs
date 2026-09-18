@@ -9,13 +9,25 @@ use axum::{
     response::{IntoResponse, Json, Redirect, Response},
 };
 use serde_json::Value;
-use sqlx::{Column, Row, TypeInfo, ValueRef};
+use sqlx::{Column, Row, ValueRef}; // Removed unused TypeInfo
 use std::{
     collections::HashMap,
     fs,
     path::Path,
+    sync::{LazyLock, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+// ---------------------------------------------------------------------------
+// API Action Cache
+// ---------------------------------------------------------------------------
+struct CachedActions {
+    actions: HashMap<String, String>,
+    modified: SystemTime,
+}
+
+static API_ACTIONS_CACHE: LazyLock<Mutex<Option<CachedActions>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 pub fn extract_server_block(content: &str) -> Option<String> {
     crate::vlo_debug!("🔧 VLO DEBUG: Extracting <script server> block");
@@ -31,18 +43,12 @@ pub fn extract_server_block(content: &str) -> Option<String> {
 }
 
 pub fn strip_server_block(content: &str) -> String {
-    crate::vlo_debug!("🔧 VLO DEBUG: Stripping <script server> block");
     if let Some(start) = content.find("<script server>") {
         if let Some(end) = content[start..].find("</script>") {
             let end = start + end + "</script>".len();
-            crate::vlo_debug!(
-                "🔧 VLO DEBUG: Server block removed ({} bytes)",
-                end - start
-            );
             return format!("{}{}", &content[..start], &content[end..]);
         }
     }
-    crate::vlo_debug!("🔧 VLO DEBUG: No server block found");
     content.to_string()
 }
 
@@ -55,6 +61,23 @@ pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
     if !file.exists() {
         return Err(format!("API file not found: {}", file.display()));
     }
+
+    // Get file modification time for cache invalidation
+    let modified = fs::metadata(&file)
+        .and_then(|m| m.modified())
+        .unwrap_or(UNIX_EPOCH);
+
+    // Fast path: Return from cache if file hasn't changed
+    if let Ok(cache) = API_ACTIONS_CACHE.lock() {
+        if let Some(cached) = cache.as_ref() {
+            if cached.modified == modified {
+                crate::vlo_debug!("✅ VLO DEBUG: API actions served from cache");
+                return Ok(cached.actions.clone());
+            }
+        }
+    }
+
+    // Slow path: Read from disk and parse JSON
     let content = fs::read_to_string(&file)
         .map_err(|e| format!("Could not read {}: {}", file.display(), e))?;
     let block = extract_server_block(&content)
@@ -68,6 +91,7 @@ pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
     let object = json
         .as_object()
         .ok_or_else(|| "API definitions must be a JSON object".to_string())?;
+    
     let mut actions = HashMap::new();
     for (name, value) in object {
         if let Some(sql) = value.as_str() {
@@ -76,6 +100,15 @@ pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
         }
     }
     crate::vlo_debug!("✅ VLO DEBUG: Loaded {} API actions", actions.len());
+
+    // Update cache
+    if let Ok(mut cache) = API_ACTIONS_CACHE.lock() {
+        *cache = Some(CachedActions {
+            actions: actions.clone(),
+            modified,
+        });
+    }
+
     Ok(actions)
 }
 
@@ -542,7 +575,13 @@ pub async fn api_route_handler(
 
     match execute_api_sql(pool, &sql, &params).await {
         Ok(data) => {
-            crate::vlo_debug!("✅ VLO DEBUG: SQL execution successful: {}", data);
+            crate::vlo_debug!(
+                "✅ VLO DEBUG: SQL execution successful ({} rows)",
+                data.get("data")
+                    .and_then(|v| v.as_array())
+                    .map(|rows| rows.len())
+                    .unwrap_or(0)
+            );
             if method != Method::GET {
                 let redirect_url = format!("/{}?status=success&action={}", resource, action_type);
                 return Redirect::to(&redirect_url).into_response();
@@ -648,9 +687,6 @@ macro_rules! convert_row_to_json {
             let val: serde_json::Value = if is_null {
                 serde_json::Value::Null
             } else {
-                // Fallback chain: try the most common types first.
-                // This ensures COUNT() (which often has an empty type_name in SQLite) 
-                // is correctly captured as an i64.
                 if let Ok(v) = $row.try_get::<i64, _>(i) {
                     serde_json::Value::Number(v.into())
                 } else if let Ok(v) = $row.try_get::<f64, _>(i) {

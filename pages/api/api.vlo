@@ -6,7 +6,7 @@
   "patch_users": "UPDATE users SET name = {{name}}, email = {{email}}, role = {{role}} WHERE id = {{id}}; SELECT * FROM users ORDER BY id DESC;",
   "delete_users": "DELETE FROM users WHERE id = {{id}}; SELECT * FROM users ORDER BY id DESC;",
 
-  "get_products": "SELECT * FROM products ORDER BY id DESC;",
+  "get_products": "SELECT * FROM products ORDER BY id ASC;",
   "post_products": "INSERT INTO products (title, description, price, stock) VALUES ({{title}}, {{description}}, {{price}}, {{stock}}); SELECT * FROM products ORDER BY id DESC;",
   "put_products": "UPDATE products SET title = {{title}}, description = {{description}}, price = {{price}}, stock = {{stock}} WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",
   "patch_products": "UPDATE products SET title = {{title}}, description = {{description}}, price = {{price}}, stock = {{stock}} WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",
@@ -17,6 +17,12 @@
   "put_cart": "UPDATE cart SET quantity = {{quantity}} WHERE id = {{id}}; SELECT * FROM cart ORDER BY id DESC;",
   "patch_cart": "UPDATE cart SET quantity = {{quantity}} WHERE id = {{id}}; SELECT * FROM cart ORDER BY id DESC;",
   "delete_cart": "DELETE FROM cart WHERE id = {{id}}; SELECT * FROM cart ORDER BY id DESC;",
-  "get_cart_by_id": "SELECT * FROM cart WHERE id = {{id}};"
+  "get_cart_by_id": "SELECT * FROM cart WHERE id = {{id}};",
+
+
+
+  "get_db_test": "SELECT p.id, p.title, p.price, c.quantity, (c.price * c.quantity) AS cart_total FROM products p LEFT JOIN cart c ON p.title = c.product_name ORDER BY p.id ASC;",
+    "get_db_test_report": "WITH product_stats AS (SELECT COUNT(*) AS product_count, COALESCE(SUM(stock), 0) AS total_stock, COALESCE(SUM(price * stock), 0) AS inventory_value, COALESCE(AVG(price), 0) AS average_price, MAX(price) AS highest_price FROM products), cart_stats AS (SELECT COUNT(*) AS cart_rows, COALESCE(SUM(c.quantity), 0) AS total_quantity, COALESCE(SUM(c.price * c.quantity), 0) AS cart_value, COUNT(DISTINCT p.id) AS matched_products FROM cart c LEFT JOIN products p ON p.title = c.product_name), user_stats AS (SELECT COUNT(*) AS user_count, COUNT(DISTINCT role) AS role_count FROM users) SELECT u.user_count, u.role_count, p.product_count, p.total_stock, p.inventory_value, p.average_price, p.highest_price, c.cart_rows, c.total_quantity, c.cart_value, c.matched_products, CASE WHEN c.total_quantity > 0 THEN c.cart_value / c.total_quantity ELSE 0 END AS average_cart_item_price FROM user_stats u CROSS JOIN product_stats p CROSS JOIN cart_stats c;"
+
 }
 </script>

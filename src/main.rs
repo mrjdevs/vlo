@@ -75,6 +75,11 @@ async fn run() -> Result<(), String> {
             database::init_db().await?;
             server::deploy(provider).await?;
         }
+        server::Commands::Cgi => {
+            state::set_app_mode(state::AppMode::Production);
+            database::init_db().await?;
+            server::cgi().await?;
+        }
     }
 
     Ok(())

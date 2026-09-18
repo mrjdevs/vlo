@@ -12,6 +12,7 @@ use axum::{
 use axum::extract::DefaultBodyLimit;
 use clap::Subcommand;
 use std::{
+    collections::HashMap,
     fs,
     path::Path,
     process::Command,
@@ -58,7 +59,7 @@ pub enum Commands {
         #[arg(long)]
         host: Option<String>,
     },
-
+    Cgi,
     Deploy {
         #[arg(
             short,
@@ -251,6 +252,111 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
     }
 
     Ok(())
+}
+
+pub async fn cgi() -> Result<(), String> {
+    let root = crate::state::get_project_root();
+
+    let request_uri = std::env::var("REQUEST_URI")
+        .unwrap_or_else(|_| "/".to_string());
+
+    let path = request_uri
+        .split('?')
+        .next()
+        .unwrap_or("/")
+        .trim_matches('/');
+
+    if path.ends_with(".vlo") || path.starts_with("pages/") {
+        println!("Status: 404 Not Found");
+        println!("Content-Type: text/html; charset=utf-8");
+        println!();
+        println!("<h1>404</h1><p>Page Not Found</p>");
+        return Ok(());
+    }
+
+    let page_name = if path.is_empty() {
+        "home".to_string()
+    } else {
+        path.to_string()
+    };
+
+    if page_name.contains("..") || page_name.contains('\\') {
+        println!("Status: 404 Not Found");
+        println!("Content-Type: text/html; charset=utf-8");
+        println!();
+        println!("<h1>404</h1><p>Page Not Found</p>");
+        return Ok(());
+    }
+
+    let page_file = root
+        .join("pages")
+        .join(format!("{}.vlo", page_name));
+
+    let query_string = std::env::var("QUERY_STRING")
+        .unwrap_or_default();
+
+    let query = parse_cgi_query(&query_string);
+
+    match fs::read_to_string(&page_file) {
+        Ok(source) => {
+            let rendered = crate::router::render_vlo_with_query(
+                source,
+                &query,
+            );
+
+            let html = crate::router::wrap_html(
+                &page_name,
+                &rendered,
+            );
+
+            println!("Status: 200 OK");
+            println!("Content-Type: text/html; charset=utf-8");
+            println!();
+            print!("{}", html);
+        }
+
+        Err(_) => {
+            let response = crate::router::render_404()
+                .await
+                .into_response();
+
+            let status = response.status();
+
+            println!(
+                "Status: {} {}",
+                status.as_u16(),
+                status.canonical_reason().unwrap_or("Not Found")
+            );
+            println!("Content-Type: text/html; charset=utf-8");
+            println!();
+
+            let body = axum::body::to_bytes(
+                response.into_body(),
+                usize::MAX,
+            )
+            .await
+            .map_err(|error| {
+                format!("Failed to read CGI response: {}", error)
+            })?;
+
+            print!("{}", String::from_utf8_lossy(&body));
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_cgi_query(query: &str) -> HashMap<String, String> {
+    query
+        .split('&')
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| {
+            let mut parts = part.splitn(2, '=');
+            let key = parts.next()?.to_string();
+            let value = parts.next().unwrap_or("").to_string();
+            Some((key, value))
+        })
+        .collect()
 }
 
 async fn serve_build_page(
