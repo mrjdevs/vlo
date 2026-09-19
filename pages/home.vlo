@@ -7,12 +7,13 @@
             <a href="/pricing">Pricing</a>
             <a href="/about">About</a>
             <a href="/docs">Docs</a>
+            <a href="/dashboard">Dashboard</a>
         </Navbar>'
 
     hero="<HeroLayout
-        badge='v0.5.1 • Built in Rust'
+        badge='v0.8.3 • Built in Rust'
         title='Build Web Apps Without the Framework Overhead'
-        subtitle='VLO is a lightweight Rust-powered web framework with real components, server-side rendering, APIs, live reload, and a simple developer experience.'
+        subtitle='VLO is a lightweight Rust-powered web framework with real components, hierarchical layouts, server-side rendering, APIs, live reload, and a simple developer experience.'
         cta='<Button text="Start Building" href="/docs" variant="primary" /><Button text="Explore Components" href="/components" variant="ghost" />'
     />"
     footer="<Footer />"
@@ -21,7 +22,10 @@
 
     <section class="intro">
         <div class="intro-inner">
-            <span class="section-badge">A MODERN RUST WEB FRAMEWORK</span>
+            <span class="section-badge">
+                <span class="pulse"></span>
+                A MODERN RUST WEB FRAMEWORK
+            </span>
             <h2>Simple enough to learn.<br><span>Powerful enough to ship.</span></h2>
             <p>
                 VLO brings the pieces of modern web development together without
@@ -51,8 +55,11 @@
 
     <section class="features">
         <div class="section-heading">
-            <span class="section-badge">WHY VLO</span>
-            <h2>Everything you need to build.</h2>
+            <span class="section-badge">
+                <span class="pulse"></span>
+                WHY VLO
+            </span>
+            <h2>Everything you need to <span>build.</span></h2>
             <p>
                 VLO focuses on the parts that make web development productive
                 while keeping the underlying architecture straightforward.
@@ -79,11 +86,11 @@
             </div>
 
             <div class="feature">
-                <div class="icon">🦀</div>
-                <h3>Rust Powered</h3>
+                <div class="icon">🎨</div>
+                <h3>Auto-Resolved Layouts</h3>
                 <p>
-                    VLO is built in Rust for a fast development server and
-                    lightweight production runtime.
+                    Create nested layouts that automatically resolve based on
+                    your page path, keeping your markup clean and DRY.
                 </p>
             </div>
 
@@ -97,11 +104,11 @@
             </div>
 
             <div class="feature">
-                <div class="icon">🎨</div>
-                <h3>Composable UI</h3>
+                <div class="icon">🚀</div>
+                <h3>Optimized Performance</h3>
                 <p>
-                    Create layouts, buttons, cards, navigation, forms, and
-                    other reusable pieces instead of repeating markup.
+                    Built-in HTTP caching, memory-cached APIs, and non-blocking
+                    I/O ensure your app is production-ready from day one.
                 </p>
             </div>
 
@@ -119,8 +126,11 @@
     <section class="workflow">
         <div class="workflow-content">
             <div class="workflow-copy">
-                <span class="section-badge">THE VLO WORKFLOW</span>
-                <h2>Write less configuration. Build more.</h2>
+                <span class="section-badge">
+                    <span class="pulse"></span>
+                    THE VLO WORKFLOW
+                </span>
+                <h2>Write less configuration. <span>Build more.</span></h2>
                 <p>
                     Pages, layouts, components, and APIs live inside one
                     straightforward project structure. Start the development
@@ -149,9 +159,6 @@
 
             <div class="code-window">
                 <div class="window-bar">
-                    <span></span>
-                    <span></span>
-                    <span></span>
                     <label>pages/home.vlo</label>
                 </div>
 
@@ -174,8 +181,11 @@
 
     <section class="architecture">
         <div class="section-heading">
-            <span class="section-badge">ONE PROJECT</span>
-            <h2>Everything has a place.</h2>
+            <span class="section-badge">
+                <span class="pulse"></span>
+                ONE PROJECT
+            </span>
+            <h2>Everything has a <span>place.</span></h2>
             <p>
                 Keep your pages, components, layouts, APIs, and static assets
                 organized in a structure that's easy to understand.
@@ -214,8 +224,11 @@
     </section>
 
     <section class="cta-section">
-        <span class="section-badge">READY WHEN YOU ARE</span>
-        <h2>Start building with VLO.</h2>
+        <span class="section-badge">
+            <span class="pulse"></span>
+            READY WHEN YOU ARE
+        </span>
+        <h2>Start building with <span>VLO.</span></h2>
         <p>
             Install VLO, create your first page, and experience a simpler
             Rust-powered web development workflow.
@@ -234,259 +247,353 @@
 </BaseLayout>
 
 <style>
+
+/* =========================================
+   ROOT & BADGES
+========================================= */
+
 .intro {
-    padding: 85px 20px 55px;
+    padding: 85px 24px 65px;
     text-align: center;
+    background: radial-gradient(circle at 50% -10%, rgba(0,245,255,.08), transparent 34%);
 }
+
 .intro-inner {
     max-width: 760px;
     margin: 0 auto;
 }
+
 .section-badge {
-    color: var(--primary);
-    font-size: 0.7rem;
-    font-weight: 800;
-    letter-spacing: 0.14em;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 13px;
+    border: 1px solid rgba(0,245,255,.25);
+    border-radius: 999px;
+    background: rgba(0,245,255,.05);
+    color: #00f5ff;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .08em;
 }
-.intro h2 {
-    margin: 14px 0;
-    font-size: 2.8rem;
-    line-height: 1.12;
-    letter-spacing: -0.04em;
+
+.pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #00f5ff;
+    box-shadow: 0 0 12px #00f5ff;
 }
-.intro h2 span {
-    color: var(--primary);
+
+
+/* =========================================
+   TYPOGRAPHY
+========================================= */
+
+.intro h2, 
+.section-heading h2, 
+.workflow-copy h2, 
+.cta-section h2 {
+    margin: 24px 0 18px;
+    font-size: clamp(2.2rem, 5vw, 3.8rem);
+    line-height: .95;
+    letter-spacing: -.05em;
+    color: #fff;
 }
-.intro p {
+
+.intro h2 span, 
+.section-heading h2 span, 
+.workflow-copy h2 span, 
+.cta-section h2 span {
+    color: #00f5ff;
+    text-shadow: 0 0 30px rgba(0,245,255,.25);
+}
+
+.intro p, 
+.section-heading p, 
+.workflow-copy > p, 
+.cta-section > p {
     max-width: 650px;
     margin: 0 auto;
-    color: #888;
+    color: #8d8d8d;
     line-height: 1.75;
     font-size: 1rem;
 }
-.stats {
-    max-width: 1050px;
-    margin: 0 auto;
-    padding: 30px 20px 80px;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1px;
-    background: var(--border);
-    border: 1px solid var(--border);
-}
-.stat {
-    padding: 25px 15px;
-    background: var(--card);
-    text-align: center;
-}
-.stat strong {
-    display: block;
-    color: var(--primary);
-    font-size: 1.4rem;
-    margin-bottom: 5px;
-}
-.stat span {
-    color: #777;
-    font-size: 0.8rem;
-}
-.features {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 90px 20px;
-}
+
 .section-heading {
     max-width: 700px;
     margin: 0 auto 50px;
     text-align: center;
 }
-.section-heading h2 {
-    margin: 12px 0;
-    font-size: 2.3rem;
-    letter-spacing: -0.035em;
+
+
+/* =========================================
+   STATS
+========================================= */
+
+.stats {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 24px 80px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border: 1px solid #292929;
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(255,255,255,.018);
 }
-.section-heading p {
-    margin: 0;
-    color: #888;
-    line-height: 1.7;
+
+.stat {
+    padding: 25px 15px;
+    text-align: center;
+    border-right: 1px solid #292929;
 }
+
+.stat:last-child {
+    border-right: none;
+}
+
+.stat strong {
+    display: block;
+    color: #00f5ff;
+    font-family: monospace;
+    font-size: 1.5rem;
+    margin-bottom: 5px;
+}
+
+.stat span {
+    color: #777;
+    font-size: .75rem;
+}
+
+
+/* =========================================
+   FEATURES
+========================================= */
+
+.features {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 90px 24px;
+}
+
 .feature-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 20px;
+    gap: 12px;
 }
+
 .feature {
-    min-height: 190px;
-    padding: 28px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    transition: transform 0.2s ease, border-color 0.2s ease;
+    padding: 21px;
+    border: 1px solid #292929;
+    border-radius: 11px;
+    background: rgba(255,255,255,.018);
+    transition: border-color .2s ease, background .2s ease;
 }
+
 .feature:hover {
-    transform: translateY(-4px);
-    border-color: var(--primary);
+    border-color: rgba(0,245,255,.3);
+    background: rgba(0,245,255,.035);
 }
+
 .icon {
-    margin-bottom: 20px;
-    font-size: 1.7rem;
+    margin-bottom: 13px;
+    color: #00f5ff;
+    font-size: 1.2rem;
 }
+
 .feature h3 {
-    margin: 0 0 9px;
-    font-size: 1.05rem;
+    margin: 0 0 7px;
+    color: #eee;
+    font-size: .95rem;
 }
+
 .feature p {
     margin: 0;
-    color: #888;
-    line-height: 1.65;
-    font-size: 0.9rem;
+    color: #707070;
+    font-size: .8rem;
+    line-height: 1.6;
 }
+
+
+/* =========================================
+   WORKFLOW
+========================================= */
+
 .workflow {
-    padding: 100px 20px;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    background: #0d0d0f;
+    padding: 100px 24px;
+    border-top: 1px solid #292929;
+    border-bottom: 1px solid #292929;
+    background: #0a0a0c;
 }
+
 .workflow-content {
-    max-width: 1100px;
+    max-width: 1120px;
     margin: 0 auto;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 70px;
+    gap: 65px;
     align-items: center;
 }
-.workflow-copy h2 {
-    margin: 12px 0;
-    font-size: 2.3rem;
-    letter-spacing: -0.035em;
-}
-.workflow-copy > p {
-    color: #888;
-    line-height: 1.75;
-}
+
 .workflow-points {
     margin-top: 35px;
-    display: grid;
-    gap: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
+
 .workflow-points div {
     display: flex;
     align-items: center;
-    gap: 15px;
-    padding: 14px 16px;
-    border: 1px solid var(--border);
+    gap: 14px;
+    padding: 12px 14px;
+    border: 1px solid #292929;
     border-radius: 8px;
-    background: var(--card);
+    background: rgba(255,255,255,.015);
 }
+
 .workflow-points span {
-    color: var(--primary);
+    color: #00f5ff;
     font-family: monospace;
-    font-size: 0.8rem;
+    font-size: .68rem;
 }
+
 .workflow-points strong {
-    font-size: 0.9rem;
+    color: #ddd;
+    font-size: .85rem;
 }
+
+
+/* =========================================
+   CODE WINDOW
+========================================= */
+
 .code-window {
     overflow: hidden;
     border: 1px solid #292929;
-    border-radius: 12px;
-    background: #09090a;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    border-radius: 11px;
+    background: #090909;
 }
+
 .window-bar {
-    height: 42px;
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 0 14px;
-    border-bottom: 1px solid #222;
-    background: #111;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid #292929;
+    background: rgba(255,255,255,.02);
 }
-.window-bar > span {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #444;
-}
+
 .window-bar label {
-    margin-left: 10px;
-    color: #666;
+    color: #707070;
     font-family: monospace;
-    font-size: 0.72rem;
+    font-size: .7rem;
 }
+
+.window-bar::after {
+    content: "VLO";
+    color: #00f5ff;
+    font-family: monospace;
+    font-size: .7rem;
+}
+
 .code-window pre {
     margin: 0;
-    padding: 28px;
+    padding: 20px;
     overflow-x: auto;
 }
+
 .code-window code {
-    color: #ccc;
+    color: #b9f8ff;
     font-family: "SFMono-Regular", Consolas, monospace;
-    font-size: 0.82rem;
-    line-height: 1.8;
+    font-size: .78rem;
+    line-height: 1.7;
 }
+
+
+/* =========================================
+   ARCHITECTURE
+========================================= */
+
 .architecture {
-    max-width: 1100px;
+    max-width: 1120px;
     margin: 0 auto;
-    padding: 100px 20px;
+    padding: 100px 24px;
 }
+
 .architecture-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 18px;
+    gap: 12px;
 }
+
 .architecture-card {
-    padding: 25px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--card);
+    padding: 21px;
+    border: 1px solid #292929;
+    border-radius: 11px;
+    background: rgba(255,255,255,.018);
 }
+
 .architecture-icon {
     display: block;
-    margin-bottom: 18px;
-    font-size: 1.5rem;
+    margin-bottom: 13px;
+    font-size: 1.2rem;
 }
+
 .architecture-card h3 {
-    margin: 0 0 8px;
+    margin: 0 0 7px;
+    color: #eee;
+    font-size: .95rem;
 }
+
 .architecture-card p {
-    min-height: 48px;
-    margin: 0 0 18px;
-    color: #888;
-    font-size: 0.85rem;
-    line-height: 1.55;
+    margin: 0 0 15px;
+    color: #707070;
+    font-size: .8rem;
+    line-height: 1.6;
 }
+
 .architecture-card code {
     display: block;
-    color: var(--primary);
-    font-size: 0.72rem;
-    word-break: break-all;
+    color: #00f5ff;
+    font-family: monospace;
+    font-size: .72rem;
 }
+
+
+/* =========================================
+   CTA SECTION
+========================================= */
+
 .cta-section {
-    padding: 110px 20px 130px;
+    padding: 110px 24px 130px;
     text-align: center;
+    border: 1px solid rgba(0,245,255,.16);
+    border-radius: 15px;
+    background: radial-gradient(circle at center, rgba(0,245,255,.06), transparent 65%);
+    max-width: 1120px;
+    margin: 0 auto 100px;
 }
-.cta-section h2 {
-    margin: 12px 0;
-    font-size: 2.7rem;
-    letter-spacing: -0.04em;
-}
-.cta-section > p {
-    max-width: 600px;
-    margin: 0 auto;
-    color: #888;
-    line-height: 1.7;
-}
+
 .cta-buttons {
     display: flex;
     justify-content: center;
     gap: 12px;
     margin-top: 28px;
 }
+
 .cta-note {
     margin-top: 22px;
-    color: #555;
-    font-size: 0.75rem;
+    color: #666;
+    font-size: .75rem;
 }
+
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
 @media (max-width: 900px) {
     .feature-grid {
         grid-template-columns: repeat(2, 1fr);
@@ -499,6 +606,7 @@
         gap: 45px;
     }
 }
+
 @media (max-width: 650px) {
     .intro h2,
     .cta-section h2 {
@@ -506,6 +614,9 @@
     }
     .stats {
         grid-template-columns: repeat(2, 1fr);
+    }
+    .stat {
+        border-bottom: 1px solid #292929;
     }
     .feature-grid,
     .architecture-grid {
@@ -522,4 +633,5 @@
         align-items: center;
     }
 }
+
 </style>

@@ -14,7 +14,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 
 pub fn component_path(name: &str) -> Option<PathBuf> {
@@ -288,6 +288,9 @@ pub fn render_component_file(
 
     let default_slot =
         render_nested_vlo_content(&raw_default_slot, context);
+    
+    // Apply active class to nav links during rendering (not post-render)
+    let default_slot = apply_active_nav_class(&default_slot, context);
 
     let mut render_ctx = context.template_context.clone();
 
@@ -970,6 +973,54 @@ fn scan_nested_tag(
     }
 
     None
+}
+
+fn apply_active_nav_class(html: &str, context: &RenderedPage) -> String {
+    let Some(Value::String(current_path)) = context.template_context.get("@path") else {
+        return html.to_string();
+    };
+
+    static NAV_LINK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)<a\s+([^>]*?)>"#).unwrap()
+    });
+    static NAV_HREF_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)href\s*=\s*["']([^"']+)["']"#).unwrap()
+    });
+    static NAV_CLASS_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)class\s*=\s*["']([^"']*)["']"#).unwrap()
+    });
+
+    NAV_LINK_RE
+        .replace_all(html, |caps: &regex::Captures| {
+            let full_match = caps.get(0).unwrap().as_str();
+            let attrs = caps.get(1).unwrap().as_str();
+
+            let Some(href_cap) = NAV_HREF_RE.captures(attrs) else {
+                return full_match.to_string();
+            };
+            let href = href_cap.get(1).unwrap().as_str();
+
+            let is_match = href == current_path
+                || (current_path != "/" && current_path.starts_with(&format!("{}/", href)));
+
+            if !is_match {
+                return full_match.to_string();
+            }
+
+            if let Some(class_cap) = NAV_CLASS_RE.captures(attrs) {
+                let existing = class_cap.get(1).unwrap().as_str();
+                if existing.split_whitespace().any(|c| c == "active") {
+                    return full_match.to_string();
+                }
+                let new_class = format!("{} active", existing.trim());
+                let quote = if class_cap.get(0).unwrap().as_str().contains('\'') { '\'' } else { '"' };
+                let new_attrs = NAV_CLASS_RE.replace(attrs, &format!("class={quote}{}{quote}", new_class));
+                format!("<a {}>", new_attrs)
+            } else {
+                format!("<a {} class=\"active\">", attrs.trim())
+            }
+        })
+        .into_owned()
 }
 
 pub fn render_component_template(

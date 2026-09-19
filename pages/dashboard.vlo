@@ -1,0 +1,453 @@
+<BaseLayout
+    title="Dashboard"
+    
+    hero='
+        <HeroLayout
+            badge="VLO DASHBOARD"
+            title="Everything you need, in one place."
+            subtitle="A practical dashboard demonstrating VLO components, configurable sidebars, reusable layouts, and server-side rendering."
+        />'
+
+    footer="<Footer />"
+>
+
+    <div class="dashboard-layout">
+
+        <!-- SIDEBAR -->
+        <Sidebar
+            brand="VLO"
+            subtitle="Dashboard"
+            width="240px"
+            position="left"
+            size="medium"
+        >
+            <a href="/dashboard" class="active">Dashboard</a>
+            <a href="/products">Products</a>
+            <a href="/users">Users</a>
+            <a href="/components">Components</a>
+            <a href="/docs">Documentation</a>
+            <a href="/">Back to Home</a>
+        </Sidebar>
+
+
+        <!-- CONTENT -->
+        <main class="dashboard-content">
+
+            <!-- OVERVIEW -->
+            <section class="section">
+
+                <div class="section-label">01 — OVERVIEW</div>
+
+                <div class="stats">
+
+                    <article class="stat-card">
+                        <span>PROJECTS</span>
+                        <strong>12</strong>
+                        <small>Active projects</small>
+                    </article>
+
+                    <article class="stat-card">
+                        <span>COMPONENTS</span>
+                        <strong>10</strong>
+                        <small>Reusable components</small>
+                    </article>
+
+                    <article class="stat-card">
+                        <span>API</span>
+                        <strong>Ready</strong>
+                        <small>SQL API connected</small>
+                    </article>
+
+                    <article class="stat-card">
+                        <span>STATUS</span>
+                        <strong>Online</strong>
+                        <small>VLO server running</small>
+                    </article>
+
+                </div>
+
+            </section>
+
+
+            <!-- RECENT ACTIVITY -->
+            <section class="section">
+
+                <div class="section-label">02 — RECENT ACTIVITY</div>
+
+                <div class="activity-list">
+
+                    <div class="activity">
+                        <span class="activity-dot"></span>
+
+                        <div>
+                            <strong>Dashboard created</strong>
+                            <small>VLO automatic layout system</small>
+                        </div>
+
+                        <time>Just now</time>
+                    </div>
+
+                    <div class="activity">
+                        <span class="activity-dot"></span>
+
+                        <div>
+                            <strong>Sidebar loaded</strong>
+                            <small>Reusable configurable component</small>
+                        </div>
+
+                        <time>1 min ago</time>
+                    </div>
+
+                    <div class="activity">
+                        <span class="activity-dot"></span>
+
+                        <div>
+                            <strong>VLO server running</strong>
+                            <small>Development environment ready</small>
+                        </div>
+
+                        <time>2 min ago</time>
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- QUICK ACTIONS -->
+            <section class="section">
+
+                <div class="section-label">03 — QUICK ACTIONS</div>
+
+                <div class="actions">
+
+                    <a href="/components">
+                        <strong>Components</strong>
+                        <span>Explore reusable UI →</span>
+                    </a>
+
+                    <a href="/docs">
+                        <strong>Documentation</strong>
+                        <span>Read the VLO docs →</span>
+                    </a>
+
+                    <a href="/products">
+                        <strong>Products</strong>
+                        <span>View product data →</span>
+                    </a>
+
+                </div>
+
+            </section>
+
+
+            <!-- SIDEBAR DEMO -->
+            <section class="sidebar-demo">
+
+                <div class="section-label">04 — SIDEBAR COMPONENT</div>
+
+                <h2>
+                    Configurable.<br>
+                    <span>Reusable.</span>
+                </h2>
+
+                <p>
+                    The sidebar is a normal VLO component. Its position,
+                    width and size can be configured directly through props.
+                </p>
+
+                <div class="demo-code">
+                    <code>
+&lt;Sidebar
+    width="240px"
+    position="left"
+    size="medium"
+&gt;
+    ...
+&lt;/Sidebar&gt;
+                    </code>
+                </div>
+
+            </section>
+
+
+            <!-- FINAL -->
+            <section class="final-section">
+
+                <div class="vlo-symbol">VLO</div>
+
+                <h2>Build with components.</h2>
+
+                <p>
+                    Compose pages from reusable pieces and let VLO handle
+                    the rendering.
+                </p>
+
+                <a href="/components" class="btn primary">
+                    Explore Components →
+                </a>
+
+            </section>
+        </main>
+
+    </div>
+
+</BaseLayout>
+
+
+<style>
+.dashboard-layout {
+    display: flex;
+    min-height: 700px;
+    background: #080808;
+    color: #fff;
+}
+
+.dashboard-content {
+    min-width: 0;
+    flex: 1;
+}
+
+.section {
+    max-width: 1100px;
+    margin: auto;
+    padding: 65px 30px;
+    border-bottom: 1px solid #222;
+}
+
+.section-label {
+    color: #00f5ff;
+    font-size: .7rem;
+    font-weight: 700;
+    letter-spacing: .12em;
+}
+
+.stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-top: 28px;
+}
+
+.stat-card {
+    padding: 22px;
+    border: 1px solid #292929;
+    border-radius: 11px;
+    background: rgba(255,255,255,.018);
+}
+
+.stat-card span {
+    display: block;
+    color: #555;
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: .1em;
+}
+
+.stat-card strong {
+    display: block;
+    margin: 10px 0 5px;
+    color: #fff;
+    font-size: 1.7rem;
+}
+
+.stat-card small {
+    color: #666;
+    font-size: .7rem;
+}
+
+.activity-list {
+    margin-top: 25px;
+    border-top: 1px solid #292929;
+}
+
+.activity {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 0;
+    border-bottom: 1px solid #292929;
+}
+
+.activity-dot {
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: #00f5ff;
+}
+
+.activity div {
+    flex: 1;
+}
+
+.activity strong {
+    display: block;
+    color: #ddd;
+    font-size: .78rem;
+}
+
+.activity small,
+.activity time {
+    color: #666;
+    font-size: .68rem;
+}
+
+.activity time {
+    white-space: nowrap;
+}
+
+.actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 25px;
+}
+
+.actions a {
+    padding: 22px;
+    border: 1px solid #292929;
+    border-radius: 10px;
+    text-decoration: none;
+    transition: .2s;
+}
+
+.actions a:hover {
+    border-color: #00f5ff;
+    transform: translateY(-2px);
+}
+
+.actions strong {
+    display: block;
+    color: #ddd;
+    font-size: .8rem;
+}
+
+.actions span {
+    display: block;
+    margin-top: 8px;
+    color: #666;
+    font-size: .7rem;
+}
+
+.sidebar-demo {
+    max-width: 1100px;
+    margin: auto;
+    padding: 75px 30px;
+    border-bottom: 1px solid #222;
+}
+
+.sidebar-demo h2 {
+    margin: 18px 0 12px;
+    color: #fff;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    line-height: .95;
+    letter-spacing: -.05em;
+}
+
+.sidebar-demo h2 span {
+    color: #00f5ff;
+}
+
+.sidebar-demo p {
+    max-width: 650px;
+    color: #777;
+    line-height: 1.7;
+    font-size: .85rem;
+}
+
+.demo-code {
+    max-width: 600px;
+    margin-top: 28px;
+    padding: 20px;
+    overflow-x: auto;
+    border: 1px solid #292929;
+    border-radius: 10px;
+    background: #090909;
+}
+
+.demo-code code {
+    color: #b9f8ff;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: .75rem;
+    line-height: 1.7;
+}
+
+.final-section {
+    max-width: 1100px;
+    margin: auto;
+    padding: 90px 30px 100px;
+    text-align: center;
+}
+
+.vlo-symbol {
+    color: #00f5ff;
+    font-size: 1.8rem;
+    font-weight: 900;
+    letter-spacing: -.08em;
+    text-shadow: 0 0 25px rgba(0,245,255,.25);
+}
+
+.final-section h2 {
+    margin: 15px 0 8px;
+    color: #fff;
+    font-size: 1.7rem;
+}
+
+.final-section p {
+    margin: 0 auto 24px;
+    color: #666;
+    font-size: .78rem;
+}
+
+.btn {
+    display: inline-flex;
+    padding: 11px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-size: .78rem;
+    font-weight: 700;
+}
+
+.btn.primary {
+    background: #00f5ff;
+    color: #000;
+}
+
+@media (max-width: 900px) {
+    .stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .actions {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 700px) {
+    .dashboard-layout {
+        display: block;
+    }
+
+    .stats {
+        grid-template-columns: 1fr;
+    }
+
+    .section,
+    .sidebar-demo,
+    .final-section {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+}
+
+@media (max-width: 550px) {
+    .activity {
+        align-items: flex-start;
+    }
+
+    .activity time {
+        display: none;
+    }
+}
+</style>

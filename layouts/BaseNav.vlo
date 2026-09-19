@@ -1,0 +1,15 @@
+<Navbar 
+    brand="{{brand}}" 
+    brandHref="{{brandHref}}" 
+    variant="{{variant}}" 
+    size="{{size}}" 
+    shadow="{{shadow}}"
+    class="sticky collapse {{class}}"
+>
+    <a href="/">Home</a>
+    <a href="/components">Components</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/about">About</a>
+    <a href="/docs">Docs</a>
+    <a href="/dashboard">Dashboard</a>
+</Navbar>

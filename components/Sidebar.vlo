@@ -1,0 +1,153 @@
+<aside
+    class="vlo-sidebar"
+    data-position="{{position}}"
+    data-size="{{size}}"
+    style="--sidebar-width: {{width}};"
+>
+    <div class="sidebar-brand">
+        <strong>{{brand}}</strong>
+        <span>{{subtitle}}</span>
+    </div>
+
+    <nav class="sidebar-nav">
+        <slot></slot>
+    </nav>
+</aside>
+
+<style>
+.vlo-sidebar {
+    width: var(--sidebar-width, 240px);
+    min-height: 100vh;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    background: #111;
+    border-color: #222;
+}
+
+.vlo-sidebar[data-position="left"] {
+    order: 0;
+    border-right: 1px solid #222;
+}
+
+.vlo-sidebar[data-position="right"] {
+    order: 2;
+    border-left: 1px solid #222;
+}
+
+/* SMALL */
+
+.vlo-sidebar[data-size="small"] {
+    width: var(--sidebar-width, 180px);
+}
+
+.vlo-sidebar[data-size="small"] .sidebar-brand {
+    padding: 20px 16px;
+}
+
+.vlo-sidebar[data-size="small"] .sidebar-brand strong {
+    font-size: 1.1rem;
+}
+
+.vlo-sidebar[data-size="small"] .sidebar-brand span {
+    font-size: .65rem;
+}
+
+.vlo-sidebar[data-size="small"] .sidebar-nav a {
+    padding: 9px 10px;
+    font-size: .7rem;
+}
+
+/* LARGE */
+
+.vlo-sidebar[data-size="large"] {
+    width: var(--sidebar-width, 300px);
+}
+
+.vlo-sidebar[data-size="large"] .sidebar-brand {
+    padding: 28px 24px;
+}
+
+.vlo-sidebar[data-size="large"] .sidebar-brand strong {
+    font-size: 1.5rem;
+}
+
+.vlo-sidebar[data-size="large"] .sidebar-nav {
+    padding: 20px 16px;
+}
+
+.vlo-sidebar[data-size="large"] .sidebar-nav a {
+    padding: 13px 14px;
+    font-size: .82rem;
+}
+
+/* BRAND */
+
+.sidebar-brand {
+    padding: 24px 20px;
+    border-bottom: 1px solid #222;
+}
+
+.sidebar-brand strong {
+    display: block;
+    color: #00f5ff;
+    font-size: 1.3rem;
+    letter-spacing: -.04em;
+}
+
+.sidebar-brand span {
+    display: block;
+    margin-top: 5px;
+    color: #666;
+    font-size: .7rem;
+}
+
+/* NAV */
+
+.sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 12px;
+}
+
+.sidebar-nav a {
+    display: block;
+    padding: 11px 12px;
+    border-radius: 7px;
+    color: #888;
+    text-decoration: none;
+    font-size: .78rem;
+    transition: .2s;
+}
+
+.sidebar-nav a:hover,
+.sidebar-nav a.active {
+    color: #fff;
+    background: #1c1c1c;
+}
+
+.sidebar-nav a.active {
+    color: #00f5ff;
+}
+
+/* MOBILE */
+
+@media (max-width: 700px) {
+    .vlo-sidebar,
+    .vlo-sidebar[data-size="small"],
+    .vlo-sidebar[data-size="large"] {
+        width: 100%;
+        min-height: auto;
+        border-left: 0;
+        border-right: 0;
+        border-bottom: 1px solid #222;
+    }
+
+    .sidebar-nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+}
+</style>

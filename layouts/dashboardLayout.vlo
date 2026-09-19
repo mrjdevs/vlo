@@ -7,10 +7,12 @@
     <link rel="icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/style.css">
 </head>
+
 <body>
-<BaseNav brand="VLO" />
-{{hero}}
-{{children}}
-{{footer}}
+ <!-- The global navbar, automatically active on all pages -->
+    <BaseNav brand="VLO" />
+    {{hero}}
+    {{children}}
+    {{footer}}
 </body>
 </html>

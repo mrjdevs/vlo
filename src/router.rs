@@ -306,8 +306,20 @@ pub fn render_vlo_for_build(source: String) -> RenderedPage {
     render_vlo_for_build_at("", source)
 }
 
-pub fn render_vlo_for_build_at(page_path: &str, source: String) -> RenderedPage {
+pub fn render_vlo_for_build_at(
+    page_path: &str,
+    source: String,
+) -> RenderedPage {
     let mut context = RenderedPage::default();
+
+    // Inject current path for active nav link resolution
+    let url_path = if page_path.is_empty() || page_path == "home" || page_path == "index" {
+        "/".to_string()
+    } else {
+        format!("/{}", page_path.trim_matches('/'))
+    };
+    context.insert("@path", Value::String(url_path));
+
     let mut source = strip_server_block(&source);
 
     let (laid_out, layout_name) = apply_layout(page_path, source);
@@ -394,6 +406,13 @@ pub fn render_vlo_with_query_at(
     for (key, value) in query {
         context.insert(key, Value::String(value.clone()));
     }
+    // Inject current path so components can use it during rendering
+    let url_path = if page_path.is_empty() || page_path == "home" || page_path == "index" {
+        "/".to_string()
+    } else {
+        format!("/{}", page_path.trim_matches('/'))
+    };
+    context.insert("@path", Value::String(url_path));
 
     let mut source = strip_server_block(&source);
 

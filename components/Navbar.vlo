@@ -1,0 +1,402 @@
+<nav class="navbar {{variant}} {{class}} {{size}} {{shadow}}">
+    <input class="navbar-toggle-input" type="checkbox" id="navbar-toggle">
+
+    <div class="navbar-inner">
+        <a class="brand" href="{{brandHref}}">{{brand}}</a>
+
+        <label class="navbar-toggle" for="navbar-toggle" aria-label="Toggle navigation">
+            <span></span>
+            <span></span>
+            <span></span>
+        </label>
+
+        <div class="nav-links">
+            {{children}}
+        </div>
+    </div>
+</nav>
+
+<style>
+/* =========================================================
+   BASE
+   ========================================================= */
+
+.navbar {
+    width: 100%;
+    box-sizing: border-box;
+
+    color: #a0a0a0;
+    background: var(--background);
+    border-bottom: 1px solid var(--border);
+
+    z-index: 100;
+}
+
+.navbar-inner {
+    width: 100%;
+    box-sizing: border-box;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+
+    padding: 1rem 2rem;
+}
+
+.brand {
+    color: var(--primary);
+    text-decoration: none;
+
+    font-weight: 700;
+    font-size: 1.5rem;
+    line-height: 1;
+
+    white-space: nowrap;
+    transition: opacity .2s ease;
+}
+
+.brand:hover {
+    opacity: .8;
+}
+
+.nav-links {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .5rem;
+}
+
+.nav-links a {
+    display: inline-block;
+
+    color: #a0a0a0;
+    background: transparent;
+
+    border: 1px solid transparent;
+    border-radius: 8px;
+
+    padding: 8px 16px;
+
+    text-decoration: none;
+    font-weight: 600;
+
+    transition:
+        color .2s ease,
+        background .2s ease,
+        border-color .2s ease;
+}
+
+.nav-links a:hover {
+    color: #fff;
+    background: rgba(255,255,255,.06);
+}
+
+.nav-links a.active {
+    color: var(--primary);
+
+    background: rgba(0,245,255,.08);
+    border-color: rgba(0,245,255,.4);
+}
+
+.nav-links a.active:hover {
+    color: #fff;
+    background: rgba(0,245,255,.14);
+}
+
+
+/* =========================================================
+   VARIANTS
+   ========================================================= */
+
+/* Default */
+.navbar.default {
+    background: var(--background);
+}
+
+
+/* Light */
+.navbar.light {
+    background: #fff;
+    color: #374151;
+    border-color: #e5e7eb;
+}
+
+.navbar.light .brand {
+    color: #111827;
+}
+
+.navbar.light .nav-links a {
+    color: #4b5563;
+}
+
+.navbar.light .nav-links a:hover {
+    color: #111827;
+    background: #f3f4f6;
+}
+
+.navbar.light .nav-links a.active {
+    color: var(--primary);
+    background: rgba(0,0,0,.05);
+    border-color: #d1d5db;
+}
+
+
+/* Dark */
+.navbar.dark {
+    background: #111827;
+    border-color: #374151;
+}
+
+.navbar.dark .brand {
+    color: #fff;
+}
+
+.navbar.dark .nav-links a {
+    color: #d1d5db;
+}
+
+.navbar.dark .nav-links a:hover {
+    color: #fff;
+    background: #1f2937;
+}
+
+.navbar.dark .nav-links a.active {
+    color: #fff;
+    background: #374151;
+    border-color: #6b7280;
+}
+
+
+/* Primary */
+.navbar.primary {
+    background: var(--primary);
+    border-color: transparent;
+}
+
+.navbar.primary .brand {
+    color: #fff;
+}
+
+.navbar.primary .nav-links a {
+    color: rgba(255,255,255,.85);
+}
+
+.navbar.primary .nav-links a:hover {
+    color: #fff;
+    background: rgba(255,255,255,.12);
+}
+
+.navbar.primary .nav-links a.active {
+    color: var(--primary);
+    background: #fff;
+    border-color: #fff;
+}
+
+
+/* Outline */
+.navbar.outline {
+    background: transparent;
+}
+
+.navbar.outline .nav-links a {
+    color: var(--primary);
+}
+
+.navbar.outline .nav-links a:hover {
+    color: var(--primary);
+    background: rgba(0,0,0,.03);
+    border-color: var(--primary);
+}
+
+.navbar.outline .nav-links a.active {
+    color: var(--primary);
+    background: transparent;
+    border-color: var(--primary);
+}
+
+
+/* =========================================================
+   SIZE
+   ========================================================= */
+
+.navbar.small .navbar-inner {
+    padding: .65rem 1.25rem;
+}
+
+.navbar.small .brand {
+    font-size: 1.25rem;
+}
+
+.navbar.small .nav-links a {
+    padding: 6px 10px;
+    font-size: .85rem;
+}
+
+.navbar.large .navbar-inner {
+    padding: 1.25rem 2.5rem;
+}
+
+.navbar.large .brand {
+    font-size: 1.7rem;
+}
+
+.navbar.large .nav-links a {
+    padding: 10px 18px;
+}
+
+
+/* =========================================================
+   SHADOW
+   ========================================================= */
+
+.navbar.shadow-small {
+    box-shadow: 0 2px 8px rgba(0,0,0,.08);
+}
+
+.navbar.shadow-medium {
+    box-shadow: 0 4px 16px rgba(0,0,0,.12);
+}
+
+.navbar.shadow-large {
+    box-shadow: 0 8px 30px rgba(0,0,0,.18);
+}
+
+
+/* =========================================================
+   STICKY
+   ========================================================= */
+
+.navbar.sticky {
+    position: sticky;
+    top: 0;
+}
+
+
+/* =========================================================
+   MOBILE TOGGLE
+   ========================================================= */
+
+.navbar-toggle-input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.navbar-toggle {
+    display: none;
+
+    width: 40px;
+    height: 40px;
+    box-sizing: border-box;
+
+    padding: 8px;
+
+    border: 1px solid var(--border);
+    border-radius: 7px;
+
+    cursor: pointer;
+}
+
+.navbar-toggle span {
+    display: block;
+    height: 2px;
+    margin: 5px 0;
+
+    background: currentColor;
+    border-radius: 2px;
+
+    transition: transform .2s ease, opacity .2s ease;
+}
+
+
+/* =========================================================
+   MOBILE COLLAPSE
+   ========================================================= */
+
+@media (max-width: 768px) {
+
+    .navbar.collapse .navbar-inner {
+        flex-wrap: wrap;
+    }
+
+    .navbar.collapse .navbar-toggle {
+        display: block;
+    }
+
+    .navbar.collapse .nav-links {
+        display: none;
+
+        width: 100%;
+
+        flex-direction: column;
+        align-items: stretch;
+
+        padding-top: .5rem;
+    }
+
+    .navbar.collapse .navbar-toggle-input:checked
+    ~ .navbar-inner .nav-links {
+        display: flex;
+    }
+
+    .navbar.collapse .nav-links a {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .navbar.collapse .navbar-toggle-input:checked
+    ~ .navbar-inner .navbar-toggle span:nth-child(1) {
+        transform: translateY(7px) rotate(45deg);
+    }
+
+    .navbar.collapse .navbar-toggle-input:checked
+    ~ .navbar-inner .navbar-toggle span:nth-child(2) {
+        opacity: 0;
+    }
+
+    .navbar.collapse .navbar-toggle-input:checked
+    ~ .navbar-inner .navbar-toggle span:nth-child(3) {
+        transform: translateY(-7px) rotate(-45deg);
+    }
+}
+
+
+/* =========================================================
+   MOBILE WRAP
+   ========================================================= */
+
+@media (max-width: 768px) {
+
+    .navbar.wrap .navbar-inner {
+        flex-wrap: wrap;
+    }
+
+    .navbar.wrap .nav-links {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+}
+
+
+/* =========================================================
+   MOBILE SCROLL
+   ========================================================= */
+
+@media (max-width: 768px) {
+
+    .navbar.scroll .nav-links {
+        max-width: 100%;
+        overflow-x: auto;
+
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+    }
+
+    .navbar.scroll .nav-links a {
+        flex-shrink: 0;
+        white-space: nowrap;
+    }
+}
+</style>
