@@ -9,6 +9,7 @@ use axum::{
     routing::get,
     Router,
 };
+use crate::auth;
 use axum::extract::DefaultBodyLimit;
 use clap::Subcommand;
 use std::{
@@ -126,11 +127,19 @@ pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
                 .patch(api_handler_id)
                 .delete(api_handler_id),
         )
+        // ─── Auth routes ─────────────────────────────────────
+        .route("/api/auth/login", axum::routing::post(auth::login_handler))
+        .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
+        .route("/api/auth/me", axum::routing::get(auth::me_handler))
+        // ─────────────────────────────────────────────────────
         .route("/__vlo_hmr", get(move || hmr_handler(tx)))
         .nest_service("/static", ServeDir::new(public_path_service))
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(CompressionLayer::new())
         .layer(middleware::from_fn(cache_middleware))
+        // ─── Session middleware ──────────────────────────────
+        .layer(axum::middleware::from_fn(auth::session_middleware))
+        // ─────────────────────────────────────────────────────
         .fallback(not_found_handler);
 
     // CLI arguments override .env values.
@@ -216,6 +225,11 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
                 .patch(api_handler_id)
                 .delete(api_handler_id),
         )
+        // ─── Auth routes ─────────────────────────────────────
+        .route("/api/auth/login", axum::routing::post(auth::login_handler))
+        .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
+        .route("/api/auth/me", axum::routing::get(auth::me_handler))
+        // ─────────────────────────────────────────────────────
         .route("/uploads/*path", get(serve_file))
         .nest_service("/static", ServeDir::new(static_dir))
         .fallback(move |uri: axum::http::Uri| {
@@ -223,7 +237,9 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
         })
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(CompressionLayer::new())
-        .layer(middleware::from_fn(cache_middleware)); // <--- Semicolon moved to the very end
+        .layer(middleware::from_fn(cache_middleware))
+        // ─── Session middleware (required for /api/auth/me) ──
+        .layer(axum::middleware::from_fn(auth::session_middleware));
 
     // CLI arguments override .env values.
     let host_str = host
@@ -767,11 +783,11 @@ pub fn resolve_directives(source: &str) -> String {
 
             // Updated fetch handler with status & action query flags for toast notifications on deletion
             let onclick = format!(
-                "if({}){{fetch({},{{method:'DELETE'}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.href=window.location.pathname+'?status=success&action=deleted&message='+encodeURIComponent(d.message||'Delete operation successful.')}}).catch(e=>{{console.error('[VLO DELETE]',e);window.location.href=window.location.pathname+'?status=error&action=error&message='+encodeURIComponent(e.message)}})}}",
+                "if({}){{fetch({},{{method:'DELETE'}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}var p=new URLSearchParams(window.location.search);p.set('status','success');p.set('action','deleted');p.set('message',d.message||'Delete operation successful.');window.location.href=window.location.pathname+'?'+p.toString()}}).catch(e=>{{console.error('[VLO DELETE]',e);var p=new URLSearchParams(window.location.search);p.set('status','error');p.set('action','error');p.set('message',e.message);window.location.href=window.location.pathname+'?'+p.toString()}})}}",
                 confirm_js,
                 url_js
             );
-            let onclick_attr = escape_html_attribute(&onclick);
+                        let onclick_attr = escape_html_attribute(&onclick);
 
             format!(
                 "<{} {} onclick=\"{}\">",
@@ -808,7 +824,7 @@ pub fn resolve_directives(source: &str) -> String {
             if tag.eq_ignore_ascii_case("form") {
                 // Form submit handler with status & action query flags for toast notifications on update
                 let onsubmit = format!(
-                    "event.preventDefault();fetch({},{{method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.href=window.location.pathname+'?status=success&action=updated&message='+encodeURIComponent(d.message||'Update operation successful.')}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.href=window.location.pathname+'?status=error&action=error&message='+encodeURIComponent(e.message)}});return false",
+                    "event.preventDefault();fetch({},{{method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded'}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}var p=new URLSearchParams(window.location.search);p.set('status','success');p.set('action','updated');p.set('message',d.message||'Update operation successful.');window.location.href=window.location.pathname+'?'+p.toString()}}).catch(e=>{{console.error('[VLO PUT]',e);var p=new URLSearchParams(window.location.search);p.set('status','error');p.set('action','error');p.set('message',e.message);window.location.href=window.location.pathname+'?'+p.toString()}});return false",
                     url_js
                 );
 
@@ -890,7 +906,7 @@ pub fn resolve_directives(source: &str) -> String {
 
             if tag.eq_ignore_ascii_case("form") {
             let onsubmit = format!(
-                "event.preventDefault();fetch({},{{method:'POST',body:new FormData(event.currentTarget)}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.href=window.location.pathname+'?status=success&action=created&message='+encodeURIComponent(d.message||'Operation successful.')}}).catch(e=>{{console.error('[VLO POST]',e);window.location.href=window.location.pathname+'?status=error&action=error&message='+encodeURIComponent(e.message)}});return false",
+                "event.preventDefault();fetch({},{{method:'POST',body:new FormData(event.currentTarget)}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}var p=new URLSearchParams(window.location.search);p.set('status','success');p.set('action','created');p.set('message',d.message||'Operation successful.');window.location.href=window.location.pathname+'?'+p.toString()}}).catch(e=>{{console.error('[VLO POST]',e);var p=new URLSearchParams(window.location.search);p.set('status','error');p.set('action','error');p.set('message',e.message);window.location.href=window.location.pathname+'?'+p.toString()}});return false",
                 url_js
             );
 

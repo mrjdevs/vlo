@@ -1,4 +1,7 @@
-<BaseLayout title="Project Guidelines" navbar='<Navbar brand="VLO"><a href="/">Home</a><a href="/components">Components</a><a href="/pricing">Pricing</a><a href="/about">About</a><a href="/docs" class="active">Docs</a></Navbar>' footer='<Footer />'>
+<BaseLayout title="Project Guidelines" 
+
+    footer='<Footer />
+'>
     <div class="guidelines-page">
         <header class="guidelines-hero">
             <div class="hero-badge"><span class="pulse"></span> VLO PROJECT GUIDELINES</div>

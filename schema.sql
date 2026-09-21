@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL DEFAULT '',
     role TEXT DEFAULT 'User',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -60,6 +61,17 @@ WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = 9);
 INSERT INTO users (id, name, email, role)
 SELECT 10, 'Bruce Wayne', 'bruce@example.com', 'Admin'
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = 10);
+
+
+-- ============================================================
+-- 2. SESSION TABLE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
 
 
 -- ============================================================

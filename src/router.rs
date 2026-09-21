@@ -19,7 +19,7 @@ use axum::{
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive},
-        Html, IntoResponse, Sse,
+        Html, IntoResponse, Sse, Response,
     },
 };
 use futures_util::stream::Stream;
@@ -467,16 +467,18 @@ pub fn render_vlo_with_query_at(
 // HTTP handlers
 // ---------------------------------------------------------------------------
 pub async fn home_handler(
+    axum::Extension(auth): axum::Extension<crate::auth::AuthUser>,
     Query(query): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    render_page("home".to_string(), query).await
+    render_page("home".to_string(), query, auth).await
 }
 
 pub async fn page_handler(
     AxumPath(path): AxumPath<String>,
+    axum::Extension(auth): axum::Extension<crate::auth::AuthUser>,
     Query(query): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    render_page(path, query).await
+    render_page(path, query, auth).await
 }
 
 pub async fn not_found_handler() -> impl IntoResponse {
@@ -486,20 +488,60 @@ pub async fn not_found_handler() -> impl IntoResponse {
 pub async fn render_page(
     path: String,
     query: HashMap<String, String>,
+    auth: crate::auth::AuthUser,
 ) -> impl IntoResponse {
     let page_path = path.clone();
-    match tokio::task::spawn_blocking(move || {
+    match tokio::task::spawn_blocking(move || -> Option<Response> {
         let file = state::get_project_root()
             .join("pages")
             .join(format!("{}.vlo", page_path));
-        fs::read_to_string(file).ok().map(|content| {
-            let rendered = render_vlo_with_query_at(&page_path, content, &query);
-            (StatusCode::OK, Html(wrap_html(&page_path, &rendered)))
-        })
+
+        let content = match fs::read_to_string(&file) {
+            Ok(c) => c,
+            Err(_) => return None,
+        };
+
+        let mut query = query;
+
+        // ─── PAGE GUARD CHECK ───────────────────────────────
+        if let Some(guard) = crate::auth::extract_page_guard(&content) {
+            let current_url = if page_path == "home" {
+                "/".to_string()
+            } else {
+                format!("/{}", page_path)
+            };
+            let next = query.get("next").cloned();
+
+            if let Some(response) = crate::auth::check_page_guard(
+                &guard,
+                &auth.user,
+                &current_url,
+                next.as_deref(),
+            ) {
+                return Some(response);
+            }
+        }
+        // ────────────────────────────────────────────────────
+
+        // Inject auth state so templates can use {if logged_in}
+        match &auth.user {
+            Some(user) => {
+                query.insert("logged_in".to_string(), "true".to_string());
+                query.insert("user_name".to_string(), user.name.clone());
+                query.insert("user_role".to_string(), user.role.clone());
+                query.insert("user_email".to_string(), user.email.clone());
+            }
+            None => {
+                query.insert("logged_in".to_string(), String::new());
+            }
+        }
+
+        let rendered = render_vlo_with_query_at(&page_path, content, &query);
+        Some((StatusCode::OK, Html(wrap_html(&page_path, &rendered))).into_response())
     })
     .await
     {
-        Ok(Some(response)) => response.into_response(),
+        Ok(Some(response)) => response,
         _ => render_404().await.into_response(),
     }
 }

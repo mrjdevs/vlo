@@ -9,6 +9,7 @@ mod server;
 mod utils;
 mod files;
 mod files_api;
+mod auth;  // ← NEW
 
 use clap::Parser;
 
@@ -49,6 +50,8 @@ async fn run() -> Result<(), String> {
         server::Commands::Dev { port, ref host } => {
             state::set_app_mode(state::AppMode::Development);
             database::init_db().await?;
+            auth::init_session_secret();  // ← NEW
+
             let port = port
                 .map(|value| {
                     value.parse::<u16>()
@@ -67,6 +70,7 @@ async fn run() -> Result<(), String> {
         server::Commands::Serve { port, ref host } => {
             state::set_app_mode(state::AppMode::Production);
             database::init_db().await?;
+            auth::init_session_secret();  // ← NEW
             let port = port
                 .map(|value| {
                     value.parse::<u16>()
@@ -81,9 +85,11 @@ async fn run() -> Result<(), String> {
             database::init_db().await?;
             server::deploy(provider).await?;
         }
+        
         server::Commands::Cgi => {
             state::set_app_mode(state::AppMode::Production);
             database::init_db().await?;
+            auth::init_session_secret();  // ← NEW
             server::cgi().await?;
         }
     }

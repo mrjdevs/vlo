@@ -10,7 +10,7 @@
 
 <body>
  <!-- The global navbar, automatically active on all pages -->
-    <BaseNav brand="VLO" />
+    <BaseNav brand="VLO" subtitle="Ship faster." />
     {{hero}}
     {{children}}
     {{footer}}

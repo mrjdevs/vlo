@@ -11,5 +11,10 @@
     <a href="/pricing">Pricing</a>
     <a href="/about">About</a>
     <a href="/docs">Docs</a>
-    <a href="/dashboard">Dashboard</a>
+    {if logged_in}
+        <a href="/dashboard">Dashboard</a>
+        <a href="/api/auth/logout">Logout ({{user_name}})</a>
+    {else}
+        <a href="/login">Login</a>
+    {/if}
 </Navbar>

@@ -1,0 +1,273 @@
+<BaseLayout title="Login" guest="true">
+    <div class="auth-page">
+        <div class="auth-glow"></div>
+
+        <div class="auth-card">
+            <div class="auth-badge">
+                <span class="pulse"></span>
+                SECURE ACCESS
+            </div>
+
+            <h1>Login to <span>VLO</span>.</h1>
+
+            <p class="auth-lead">
+                Sign in to manage your projects, dashboards and content.
+            </p>
+
+            {if status == "error"}
+                <div class="auth-alert">
+                    <span>!</span>
+                    <p>{{message}}</p>
+                </div>
+            {/if}
+
+            <form v-post="/api/auth/login" class="auth-form">
+                <div class="auth-field">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" name="email" placeholder="you@company.com" required />
+                </div>
+
+                <div class="auth-field">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" placeholder="••••••••" required />
+                </div>
+
+                <button type="submit" class="auth-submit">
+                    Sign In →
+                </button>
+            </form>
+
+            <div class="auth-footer">
+                <a href="/">← Back to Home</a>
+                <span>Free during beta • Built with Rust</span>
+            </div>
+        </div>
+    </div>
+</BaseLayout>
+
+<style>
+/* =========================================
+   PAGE & GLOW
+========================================= */
+.auth-page {
+    position: relative;
+    min-height: calc(100vh - 140px);
+    display: grid;
+    place-items: center;
+    padding: 60px 24px;
+    overflow: hidden;
+}
+
+.auth-glow {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 0%, rgba(0,245,255,.08), transparent 45%);
+    pointer-events: none;
+}
+
+/* =========================================
+   CARD
+========================================= */
+.auth-card {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    padding: 40px 34px;
+    border: 1px solid rgba(0,245,255,.16);
+    border-radius: 15px;
+    background: rgba(255,255,255,.02);
+    backdrop-filter: blur(6px);
+}
+
+.auth-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 13px;
+    border: 1px solid rgba(0,245,255,.25);
+    border-radius: 999px;
+    background: rgba(0,245,255,.05);
+    color: #00f5ff;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+}
+
+.pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #00f5ff;
+    box-shadow: 0 0 12px #00f5ff;
+}
+
+.auth-card h1 {
+    margin: 22px 0 10px;
+    font-size: clamp(2rem, 6vw, 2.6rem);
+    line-height: .95;
+    letter-spacing: -.05em;
+    color: #fff;
+}
+
+.auth-card h1 span {
+    color: #00f5ff;
+    text-shadow: 0 0 30px rgba(0,245,255,.25);
+}
+
+.auth-lead {
+    margin: 0 0 28px;
+    color: #858585;
+    font-size: .85rem;
+    line-height: 1.65;
+}
+
+/* =========================================
+   ERROR ALERT
+========================================= */
+.auth-alert {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 15px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255,92,122,.25);
+    border-radius: 10px;
+    background: rgba(255,92,122,.05);
+}
+
+.auth-alert > span {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    border-radius: 7px;
+    background: rgba(255,92,122,.1);
+    color: #ff6680;
+    font-weight: 700;
+    font-size: .8rem;
+}
+
+.auth-alert p {
+    margin: 0;
+    color: #ff8fa3;
+    font-size: .78rem;
+    line-height: 1.5;
+}
+
+/* =========================================
+   FORM
+========================================= */
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.auth-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.auth-field label {
+    color: #777;
+    font-family: monospace;
+    font-size: .65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+}
+
+.auth-field input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px 14px;
+    border: 1px solid #292929;
+    border-radius: 9px;
+    background: #090909;
+    color: #eee;
+    font-size: .85rem;
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+.auth-field input::placeholder {
+    color: #444;
+}
+
+.auth-field input:focus {
+    outline: none;
+    border-color: rgba(0,245,255,.45);
+    box-shadow: 0 0 0 3px rgba(0,245,255,.08);
+}
+
+/* =========================================
+   SUBMIT BUTTON
+========================================= */
+.auth-submit {
+    margin-top: 6px;
+    padding: 13px 18px;
+    border: none;
+    border-radius: 9px;
+    background: #00f5ff;
+    color: #000;
+    font-size: .85rem;
+    font-weight: 900;
+    letter-spacing: .02em;
+    cursor: pointer;
+    transition: transform .15s ease, box-shadow .2s ease, background .2s ease;
+}
+
+.auth-submit:hover {
+    background: #4dfaff;
+    box-shadow: 0 0 25px rgba(0,245,255,.35);
+    transform: translateY(-1px);
+}
+
+.auth-submit:active {
+    transform: translateY(0);
+}
+
+/* =========================================
+   FOOTER
+========================================= */
+.auth-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 26px;
+    padding-top: 20px;
+    border-top: 1px solid #222;
+}
+
+.auth-footer a {
+    color: #aaa;
+    text-decoration: none;
+    font-size: .72rem;
+    transition: color .2s ease;
+}
+
+.auth-footer a:hover {
+    color: #00f5ff;
+}
+
+.auth-footer span {
+    color: #555;
+    font-size: .68rem;
+}
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+@media (max-width: 480px) {
+    .auth-card {
+        padding: 32px 22px;
+    }
+    .auth-footer {
+        justify-content: center;
+        text-align: center;
+    }
+}
+</style>

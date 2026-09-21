@@ -1,5 +1,6 @@
 ﻿<BaseLayout
     title="Home"
+    auth="true"
     navbar='
         <Navbar brand="VLO">
             <a href="/" class="active">Home</a>
