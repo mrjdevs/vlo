@@ -1,6 +1,7 @@
 <BaseLayout
     title="Dashboard"
     auth="true"
+    roles="Admin, Editor"
     hero='
         <HeroLayout
             badge="VLO DASHBOARD"

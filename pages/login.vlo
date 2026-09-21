@@ -23,18 +23,14 @@
 
             <form v-post="/api/auth/login" class="auth-form">
                 <div class="auth-field">
-                    <label for="email">Email</label>
-                    <input type="email" id="email" name="email" placeholder="you@company.com" required />
+                    <label for="identifier">{{auth_identifier_field}}</label>
+                    <input type="text" id="identifier" name="{{auth_identifier_field}}" placeholder="Email or username" required />
                 </div>
-
                 <div class="auth-field">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" placeholder="••••••••" required />
+                    <label for="password">{{auth_password_field}}</label>
+                    <input type="password" id="password" name="{{auth_password_field}}" placeholder="••••••••" required />
                 </div>
-
-                <button type="submit" class="auth-submit">
-                    Sign In →
-                </button>
+                <button type="submit" class="auth-submit">Sign In →</button>
             </form>
 
             <div class="auth-footer">

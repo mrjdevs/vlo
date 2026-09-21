@@ -9,13 +9,12 @@ repository = "https://github.com/mrjdevs/vlo.git"
 
 [dependencies]
 # Web framework & HTTP routing
-axum = { version = "0.7", features = ["macros", "http1", "json", "query", "tokio", "multipart"] }
+axum = { version = "0.7", features = ["http1", "json", "query", "tokio", "multipart"] }
 
 # Asynchronous runtime & streaming
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "fs"] }
-async-stream = "0.3"
-multer = "3.1"
-futures-util = "0.3"
+futures-util = "0.3"    # Required for HMR SSE streams
+async-stream = "0.3"    # Required for HMR SSE streams
 urlencoding = "2"
 
 # Command line interface
@@ -37,11 +36,15 @@ sqlx = {
         "sqlite",
         "postgres",
         "mysql",
-        "json"
+        "json",
+        "macros"
     ]
 }
 
 tower-http = { version = "0.5.2", features = ["fs", "compression-gzip"] }
+
+# Password hashing (includes OsRng for secure tokens)
+argon2 = "0.5"
 
 [profile.release]
 opt-level = "z"

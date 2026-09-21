@@ -62,7 +62,20 @@ INSERT INTO users (id, name, email, role)
 SELECT 10, 'Bruce Wayne', 'bruce@example.com', 'Admin'
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE id = 10);
 
+-- ============================================================
+-- 2. CUSTOMER TABLE
+-- ============================================================
 
+   CREATE TABLE IF NOT EXISTS customers (
+       customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
+       full_name TEXT NOT NULL,
+       email_address TEXT UNIQUE NOT NULL,
+       pass_hash TEXT NOT NULL DEFAULT '',
+       tier TEXT DEFAULT 'User'
+   );
+   INSERT INTO customers (full_name, email_address, tier)
+   SELECT 'Test Customer', 'cust@shop.com', 'User'
+   WHERE NOT EXISTS (SELECT 1 FROM customers WHERE email_address='cust@shop.com');
 -- ============================================================
 -- 2. SESSION TABLE
 -- ============================================================

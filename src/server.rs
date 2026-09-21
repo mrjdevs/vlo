@@ -503,30 +503,37 @@ async fn shutdown_signal() {
 async fn cache_middleware(req: Request, next: Next) -> Response {
     let path = req.uri().path().to_owned();
     let mut response = next.run(req).await;
-    
+
     // 1. Static assets and uploads are immutable (cached for 1 year)
     if path.starts_with("/static/") || path.starts_with("/uploads/") {
         response.headers_mut().insert(
             CACHE_CONTROL,
             HeaderValue::from_static("public, max-age=31536000, immutable"),
         );
-    } 
+    }
     // 2. Fallback for direct asset extensions
-    else if path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".png") 
+    else if path.ends_with(".css") || path.ends_with(".js") || path.ends_with(".png")
          || path.ends_with(".jpg") || path.ends_with(".svg") || path.ends_with(".woff2") {
         response.headers_mut().insert(
             CACHE_CONTROL,
             HeaderValue::from_static("public, max-age=31536000, immutable"),
         );
-    } 
-    // 3. HTML pages and API routes should never be cached aggressively
+    }
+    // 3. API endpoints: private, no-cache (prevents shared-cache leakage)
+    else if path.starts_with("/api/") {
+        response.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("private, no-cache"),
+        );
+    }
+    // 4. HTML pages: private, no-cache (allows bfcache, still revalidates)
     else {
         response.headers_mut().insert(
             CACHE_CONTROL,
-            HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+            HeaderValue::from_static("private, no-cache"),
         );
     }
-    
+
     response
 }
 

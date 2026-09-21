@@ -50,14 +50,18 @@ async fn run() -> Result<(), String> {
         server::Commands::Dev { port, ref host } => {
             state::set_app_mode(state::AppMode::Development);
             database::init_db().await?;
-            auth::init_session_secret();  // ← NEW
+
+            auth::init_auth_config();
+            auth::init_session_secret();
 
             let port = port
                 .map(|value| {
-                    value.parse::<u16>()
+                    value
+                        .parse::<u16>()
                         .map_err(|_| format!("Invalid port '{}'.", value))
                 })
                 .transpose()?;
+
             server::dev(host.as_deref(), port).await?;
         }
 
@@ -70,13 +74,18 @@ async fn run() -> Result<(), String> {
         server::Commands::Serve { port, ref host } => {
             state::set_app_mode(state::AppMode::Production);
             database::init_db().await?;
-            auth::init_session_secret();  // ← NEW
+
+            auth::init_auth_config();
+            auth::init_session_secret();
+
             let port = port
                 .map(|value| {
-                    value.parse::<u16>()
+                    value
+                        .parse::<u16>()
                         .map_err(|_| format!("Invalid port '{}'.", value))
                 })
                 .transpose()?;
+
             server::serve(host.as_deref(), port).await?;
         }
 
@@ -85,11 +94,14 @@ async fn run() -> Result<(), String> {
             database::init_db().await?;
             server::deploy(provider).await?;
         }
-        
+
         server::Commands::Cgi => {
             state::set_app_mode(state::AppMode::Production);
             database::init_db().await?;
-            auth::init_session_secret();  // ← NEW
+
+            auth::init_auth_config();
+            auth::init_session_secret();
+
             server::cgi().await?;
         }
     }

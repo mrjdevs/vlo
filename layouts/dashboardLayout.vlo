@@ -6,6 +6,9 @@
     <title>{{title}}</title>
     <link rel="icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/style.css">
+    <meta
+    name="description"
+    content="{{title}}">
 </head>
 
 <body>

@@ -523,7 +523,12 @@ pub async fn render_page(
         }
         // ────────────────────────────────────────────────────
 
-        // Inject auth state so templates can use {if logged_in}
+        // Inject auth config fields (ALWAYS — needed on login page too)
+        let cfg = crate::auth::auth_config();
+        query.insert("auth_identifier_field".to_string(), cfg.identifier_field.clone());
+        query.insert("auth_password_field".to_string(), cfg.password_field.clone());
+
+        // Inject user state (only when logged in)
         match &auth.user {
             Some(user) => {
                 query.insert("logged_in".to_string(), "true".to_string());
@@ -588,10 +593,13 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage) -> String {
     };
     let hmr = if dev {
         r#"<script>
-const es = new EventSource("/__vlo_hmr");
-es.onmessage = () => location.reload();
-window.addEventListener("beforeunload", () => es.close());
-</script>"#
+        // Defer HMR connection until the main thread is idle to prevent blocking initial render
+        (requestIdleCallback || setTimeout)(function() {
+        const es = new EventSource("/__vlo_hmr");
+        es.onmessage = function() { location.reload(); };
+        window.addEventListener("beforeunload", function() { es.close(); });
+        }, 100);
+        </script>"#
     } else {
         ""
     };
