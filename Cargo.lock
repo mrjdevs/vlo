@@ -2218,7 +2218,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vlo"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "argon2",
  "async-stream",
@@ -2226,9 +2226,11 @@ dependencies = [
  "clap",
  "dotenvy",
  "futures-util",
+ "hmac",
  "notify",
  "regex",
  "serde_json",
+ "sha2",
  "sqlx",
  "tokio",
  "tower-http",

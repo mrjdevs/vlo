@@ -1,41 +1,67 @@
-<script server>
-SELECT id, name, role FROM users;
-</script>
+<BaseLayout title="Users" auth="true" roles="Admin">
+  <div class="products-list-card">
+    <Card title="Users" description="All registered users.">
+      <div class="products-table-wrap">
+        <table class="products-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody data-source="/api/get_users">
+            {for user in users}
+            <tr>
+              <td>#{{user.id}}</td>
+              <td>{{user.name}}</td>
+              <td>{{user.email}}</td>
+              <td><Badge variant="success" text="{{user.role}}" /></td>
+              <td>
+                <div class="product-actions">
+                  <button type="button" class="vlo-btn vlo-btn-secondary" v-put="/api/users/{{user.id}}" v-param="role" v-prompt="Enter new role:">Edit Role</button>
+                  <button type="button" class="vlo-btn vlo-btn-danger" v-delete="/api/users/{{user.id}}" v-confirm="Delete this user?">Delete</button>
+                </div>
+              </td>
+            </tr>
+            {else}
+            <tr><td colspan="5"><div class="empty-products"><h3>No Users Found</h3></div></td></tr>
+            {/for}
+          </tbody>
+        </table>
+      </div>
+    </Card>
 
-<BaseLayout title="Users Directory">
-  <div style="padding: 40px; max-width: 800px; margin: 0 auto; font-family: sans-serif;">
-    <h1 style="color: #00f5ff; margin-bottom: 20px;">⚡ User Directory</h1>
-    
-    <table border="1" cellpadding="12" style="width: 100%; border-collapse: collapse; border-color: #333; background: #111; color: #fff; border-radius: 8px; overflow: hidden;">
-      <thead>
-        <tr style="background: #222; text-align: left; color: #888;">
-          <th>ID</th>
-          <th>Name</th>
-          <th>Role</th>
-        </tr>
-      </thead>
-      <tbody id="user-rows">
-        <tr>
-          <td colspan="3" style="text-align: center; color: #666;">Loading users from database...</td>
-        </tr>
-      </tbody>
-    </table>
   </div>
 
-  <script>
-    fetch('/api/users')
-      .then(res => res.json())
-      .then(res => {
-        const tbody = document.getElementById('user-rows');
-        if (res.data && res.data.length > 0) {
-          tbody.innerHTML = res.data.map(u => `
-            <tr style="border-bottom: 1px solid #222;">
-              <td><code style="color: #00ff88;">#${u.id}</code></td>
-              <td><strong>${u.name}</strong></td>
-              <td><span style="background: #222; padding: 4px 8px; border-radius: 4px; font-size: 0.85rem;">${u.role}</span></td>
-            </tr>
-          `).join('');
-        }
-      });
-  </script>
+  <!-- Pagination uses total_pages injected globally by resolve_data_sources -->
+      <!-- Pass the variables explicitly so the component can see them -->
+    <Pagination />
 </BaseLayout>
+
+<style>
+  /* Reuse the exact same CSS from products.vlo here, or rely on global styles */
+  .products-page { max-width: 1150px; margin: 0 auto; padding: 45px 24px 70px; color: #fff; }
+  .products-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 25px; margin-bottom: 30px; }
+  .products-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; color: #00f5ff; margin-bottom: 7px; }
+  .products-header h1 { margin: 0; font-size: 34px; line-height: 1.15; }
+  .products-header p { margin: 9px 0 0; color: #888; font-size: 15px; }
+  .products-list-card { margin-top: 24px; }
+  .products-table-wrap { overflow-x: auto; }
+  .products-table { width: 100%; border-collapse: collapse; min-width: 700px; }
+  .products-table th { padding: 13px 14px; text-align: left; background: #171717; color: #777; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; border-bottom: 1px solid #292929; }
+  .products-table td { padding: 12px 14px; border-bottom: 1px solid #222; color: #ccc; font-size: 13px; vertical-align: middle; }
+  .products-table tbody tr:hover { background: #161616; }
+  .product-actions { display: flex; justify-content: center; gap: 6px; }
+  .empty-products { text-align: center; padding: 55px 20px; color: #666; }
+  .empty-icon { font-size: 35px; margin-bottom: 10px; }
+  .empty-products h3 { margin: 0 0 7px; color: #aaa; }
+  .vlo-btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all .15s; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+  .vlo-btn-primary { background: #00f5ff; color: #000; }
+  .vlo-btn-secondary { background: transparent; border: 1px solid #444; color: #ccc; }
+  .vlo-btn-secondary:hover { border-color: #00f5ff; color: #00f5ff; }
+  .vlo-btn-danger { background: transparent; border: 1px solid #444; color: #ff6666; }
+  .vlo-btn-danger:hover { background: #351717; border-color: #ff6666; }
+</style>

@@ -1,3 +1,4 @@
+
 <BaseLayout title="Product Management home">
 
   <div class="products-page">
@@ -412,6 +413,8 @@
           </div>
         </div>
       </Card>
+          <!-- Pagination Component -->
+          <Pagination />
     </div>
   </div>
 

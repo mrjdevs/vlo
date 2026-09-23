@@ -33,9 +33,6 @@ pub static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-pub static SQL_PARAM_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\{\{?\s*([a-zA-Z0-9_-]+)\s*\}\}?").unwrap());
-
 // ---------------------------------------------------------------------------
 // Compiled template cache
 // ---------------------------------------------------------------------------

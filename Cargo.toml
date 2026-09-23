@@ -1,6 +1,6 @@
 [package]
 name = "vlo"
-version = "0.8.3"
+version = "0.8.4"
 edition = "2021"
 authors = ["MRJDEV <mrjdev@gmail.com>"]
 description = "VLO - A zero-boilerplate full-stack web framework"
@@ -45,6 +45,10 @@ tower-http = { version = "0.5.2", features = ["fs", "compression-gzip"] }
 
 # Password hashing (includes OsRng for secure tokens)
 argon2 = "0.5"
+
+# Cryptographic primitives for CSRF tokens
+hmac = "0.12"
+sha2 = "0.10"
 
 [profile.release]
 opt-level = "z"

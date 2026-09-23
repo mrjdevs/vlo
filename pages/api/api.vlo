@@ -1,12 +1,15 @@
 <script server>
 {
-  "get_users": "SELECT * FROM users ORDER BY id DESC;",
+  "get_users": "SELECT id, name, email, role FROM users ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}};",
+  "get_users_count": "SELECT COUNT(*) as total FROM users;",
   "post_users": "INSERT INTO users (name, email, role) VALUES ({{name}}, {{email}}, {{role}}); SELECT * FROM users ORDER BY id DESC;",
   "put_users": "UPDATE users SET name = {{name}}, email = {{email}}, role = {{role}} WHERE id = {{id}}; SELECT * FROM users ORDER BY id DESC;",
   "patch_users": "UPDATE users SET name = {{name}}, email = {{email}}, role = {{role}} WHERE id = {{id}}; SELECT * FROM users ORDER BY id DESC;",
   "delete_users": "DELETE FROM users WHERE id = {{id}}; SELECT * FROM users ORDER BY id DESC;",
 
-  "get_products": "SELECT * FROM products ORDER BY id ASC;",
+
+  "get_products": "SELECT * FROM products ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}};",
+  "get_products_count": "SELECT COUNT(*) as total FROM products;",
   "post_products": "INSERT INTO products (title, description, price, stock) VALUES ({{title}}, {{description}}, {{price}}, {{stock}}); SELECT * FROM products ORDER BY id DESC;",
   "put_products": "UPDATE products SET title = {{title}}, description = {{description}}, price = {{price}}, stock = {{stock}} WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",
   "patch_products": "UPDATE products SET title = {{title}}, description = {{description}}, price = {{price}}, stock = {{stock}} WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",

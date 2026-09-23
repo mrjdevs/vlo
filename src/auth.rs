@@ -3,12 +3,14 @@ use crate::database::{DbPool, DB_POOL};
 use argon2::password_hash::rand_core::{OsRng, RngCore};
 use axum::{
     extract::{FromRequest, Request},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{Html, IntoResponse, Json, Redirect, Response},
 };
+use hmac::{Hmac, Mac};
 use regex::Regex;
 use serde_json::json;
+use sha2::Sha256;
 use sqlx::FromRow;
 use std::{
     sync::{LazyLock, OnceLock},
@@ -16,24 +18,26 @@ use std::{
 };
 
 // ---------------------------------------------------------------------------
-// Models (canonical shape — SQL aliases map into this)
+// Models
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, FromRow)]
 pub struct User {
     pub id: i64,
     pub name: String,
-    pub email: String, // = identifier column, aliased
+    pub email: String,
     pub role: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub user: Option<User>,
+    pub csrf_token: Option<String>,
+    pub session_token: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
-// Authentication Configuration (ENV-based schema mapping)
+// Auth Configuration
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
@@ -50,8 +54,8 @@ pub struct AuthConfig {
     pub session_expires_at: String,
     pub session_lifetime: i64,
     pub cookie_name: String,
-    pub identifier_field: String,  // Form field name for identifier
-    pub password_field: String,    // Form field name for password
+    pub identifier_field: String,
+    pub password_field: String,
 }
 
 impl Default for AuthConfig {
@@ -115,7 +119,6 @@ impl AuthConfig {
                 validate_identifier(name, value)?;
             }
         }
-
         if self.session_lifetime <= 0 {
             return Err("AUTH_SESSION_LIFETIME must be greater than zero".into());
         }
@@ -125,7 +128,6 @@ impl AuthConfig {
         Ok(())
     }
 
-    // SQL placeholder style per driver
     fn placeholder(&self, pool: &DbPool, index: usize) -> String {
         match pool {
             DbPool::Postgres(_) => format!("${}", index),
@@ -154,7 +156,6 @@ fn env_i64(name: &str, default: i64) -> Result<i64, String> {
 fn validate_identifier(name: &str, value: &str) -> Result<(), String> {
     static RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
-
     if RE.is_match(value) {
         Ok(())
     } else {
@@ -181,7 +182,7 @@ pub fn init_auth_config() {
 }
 
 pub fn auth_config() -> &'static AuthConfig {
-    AUTH_CONFIG.get().expect("Auth config not initialized — call init_auth_config() first")
+    AUTH_CONFIG.get().expect("Auth config not initialized")
 }
 
 // ---------------------------------------------------------------------------
@@ -194,20 +195,49 @@ pub fn init_session_secret() {
     let secret = std::env::var("SESSION_SECRET").unwrap_or_else(|_| {
         let mut bytes = [0u8; 32];
         OsRng.fill_bytes(&mut bytes);
-        let secret: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+        let s: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
         crate::vlo_debug!("⚠️ VLO DEBUG: Generated random SESSION_SECRET (set in .env for persistence)");
-        secret
+        s
     });
     SESSION_SECRET.set(secret).ok();
 }
 
-#[allow(dead_code)]
 pub fn get_secret() -> &'static str {
     SESSION_SECRET.get().map(|s| s.as_str()).unwrap_or("default_secret")
 }
 
 // ---------------------------------------------------------------------------
-// Password Hashing (Argon2)
+// CSRF Tokens
+// ---------------------------------------------------------------------------
+
+type HmacSha256 = Hmac<Sha256>;
+
+pub fn compute_csrf_token(session_token: &str) -> String {
+    let secret = get_secret();
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+        .expect("HMAC accepts any key size");
+    mac.update(session_token.as_bytes());
+    let result = mac.finalize().into_bytes();
+    result.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+pub fn verify_csrf_token(session_token: &str, submitted: &str) -> bool {
+    if submitted.is_empty() {
+        return false;
+    }
+    let expected = compute_csrf_token(session_token);
+    if expected.len() != submitted.len() {
+        return false;
+    }
+    expected
+        .bytes()
+        .zip(submitted.bytes())
+        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+        == 0
+}
+
+// ---------------------------------------------------------------------------
+// Password Hashing
 // ---------------------------------------------------------------------------
 
 #[allow(dead_code)]
@@ -216,7 +246,6 @@ pub async fn hash_password(password: &str) -> Result<String, String> {
         password_hash::{PasswordHasher, SaltString},
         Argon2,
     };
-
     Argon2::default()
         .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
         .map(|h| h.to_string())
@@ -228,14 +257,13 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
         password_hash::{PasswordHash, PasswordVerifier},
         Argon2,
     };
-
     PasswordHash::new(hash)
         .map(|h| Argon2::default().verify_password(password.as_bytes(), &h).is_ok())
         .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
-// Session Management (schema-mapped)
+// Session Management
 // ---------------------------------------------------------------------------
 
 fn generate_token() -> String {
@@ -256,26 +284,18 @@ pub async fn create_session(user_id: i64) -> Result<String, String> {
     let pool = DB_POOL.get().ok_or("Database not configured")?;
     let token = generate_token();
     let expires_at = now_timestamp() + cfg.session_lifetime;
-
     let p1 = cfg.placeholder(pool, 1);
     let p2 = cfg.placeholder(pool, 2);
     let p3 = cfg.placeholder(pool, 3);
-
     let sql = format!(
         "INSERT INTO {} ({}, {}, {}) VALUES ({}, {}, {})",
-        cfg.session_table,
-        cfg.session_token,
-        cfg.session_user_id,
-        cfg.session_expires_at,
-        p1, p2, p3
+        cfg.session_table, cfg.session_token, cfg.session_user_id, cfg.session_expires_at, p1, p2, p3
     );
-
     let result = match pool {
         DbPool::Sqlite(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
         DbPool::Postgres(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
         DbPool::MySql(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
     };
-
     result.map_err(|e| format!("Failed to create session: {}", e))?;
     Ok(token)
 }
@@ -284,16 +304,13 @@ pub async fn get_user_from_session(token: &str) -> Option<User> {
     let cfg = auth_config();
     let pool = DB_POOL.get()?;
     let now = now_timestamp();
-
     let p1 = cfg.placeholder(pool, 1);
     let p2 = cfg.placeholder(pool, 2);
-
     let role_expr = if cfg.user_role.is_empty() {
         "'User' AS role".to_string()
     } else {
         format!("COALESCE(u.{}, 'User') AS role", cfg.user_role)
     };
-
     let sql = format!(
         "SELECT u.{id} AS id, u.{name} AS name, u.{ident} AS email, {role} \
          FROM {ut} u INNER JOIN {st} s ON u.{id} = s.{suc} \
@@ -311,31 +328,35 @@ pub async fn get_user_from_session(token: &str) -> Option<User> {
         p2 = p2
     );
 
-    match pool {
+    crate::vlo_debug!("🔐 DB: Query: {}", sql);
+    crate::vlo_debug!("🔐 DB: Token (first 8): {}", &token[..8.min(token.len())]);
+    crate::vlo_debug!("🔐 DB: Now timestamp: {}", now);
+
+    let result = match pool {
         DbPool::Sqlite(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now).fetch_optional(c).await,
         DbPool::Postgres(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now).fetch_optional(c).await,
         DbPool::MySql(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now).fetch_optional(c).await,
+    };
+
+    match &result {
+        Ok(Some(user)) => crate::vlo_debug!("🔐 DB: Found user: {} ({})", user.name, user.id),
+        Ok(None) => crate::vlo_debug!("🔐 DB: No user found for this token"),
+        Err(e) => crate::vlo_debug!("🔐 DB: Query error: {}", e),
     }
-    .ok()
-    .flatten()
+
+    result.ok().flatten()
 }
 
 pub async fn delete_session(token: &str) -> Result<(), String> {
     let cfg = auth_config();
     let pool = DB_POOL.get().ok_or("Database not configured")?;
-
     let p1 = cfg.placeholder(pool, 1);
-    let sql = format!(
-        "DELETE FROM {} WHERE {} = {}",
-        cfg.session_table, cfg.session_token, p1
-    );
-
+    let sql = format!("DELETE FROM {} WHERE {} = {}", cfg.session_table, cfg.session_token, p1);
     let result = match pool {
         DbPool::Sqlite(c) => sqlx::query(&sql).bind(token).execute(c).await.map(|_| ()),
         DbPool::Postgres(c) => sqlx::query(&sql).bind(token).execute(c).await.map(|_| ()),
         DbPool::MySql(c) => sqlx::query(&sql).bind(token).execute(c).await.map(|_| ()),
     };
-
     result.map_err(|e| format!("Failed to delete session: {}", e))?;
     Ok(())
 }
@@ -343,18 +364,14 @@ pub async fn delete_session(token: &str) -> Result<(), String> {
 async fn find_user_by_identifier(identifier: &str) -> Option<User> {
     let cfg = auth_config();
     let pool = DB_POOL.get()?;
-
     let p1 = cfg.placeholder(pool, 1);
-    
     let role_expr = if cfg.user_role.is_empty() {
         "'User' AS role".to_string()
     } else {
         format!("COALESCE({}, 'User') AS role", cfg.user_role)
     };
-
     let sql = format!(
-        "SELECT {id} AS id, {name} AS name, {ident} AS email, {role} \
-         FROM {ut} WHERE {ident} = {p1}",
+        "SELECT {id} AS id, {name} AS name, {ident} AS email, {role} FROM {ut} WHERE {ident} = {p1}",
         id = cfg.user_id,
         name = cfg.user_name,
         ident = cfg.user_identifier,
@@ -362,7 +379,6 @@ async fn find_user_by_identifier(identifier: &str) -> Option<User> {
         ut = cfg.user_table,
         p1 = p1
     );
-
     match pool {
         DbPool::Sqlite(c) => sqlx::query_as::<_, User>(&sql).bind(identifier).fetch_optional(c).await,
         DbPool::Postgres(c) => sqlx::query_as::<_, User>(&sql).bind(identifier).fetch_optional(c).await,
@@ -375,13 +391,11 @@ async fn find_user_by_identifier(identifier: &str) -> Option<User> {
 async fn fetch_password_hash(user_id: i64) -> Option<String> {
     let cfg = auth_config();
     let pool = DB_POOL.get()?;
-
     let p1 = cfg.placeholder(pool, 1);
     let sql = format!(
         "SELECT {} FROM {} WHERE {} = {}",
         cfg.user_password, cfg.user_table, cfg.user_id, p1
     );
-
     match pool {
         DbPool::Sqlite(c) => sqlx::query_scalar::<_, String>(&sql).bind(user_id).fetch_optional(c).await,
         DbPool::Postgres(c) => sqlx::query_scalar::<_, String>(&sql).bind(user_id).fetch_optional(c).await,
@@ -397,30 +411,150 @@ async fn fetch_password_hash(user_id: i64) -> Option<String> {
 
 fn parse_cookie_header(value: &str, cookie_name: &str) -> Option<String> {
     let prefix = format!("{}=", cookie_name);
-    value.split(';')
+    crate::vlo_debug!("🔐 COOKIE: Looking for prefix '{}' in '{}'", prefix, value);
+
+    let result = value
+        .split(';')
         .map(str::trim)
-        .find_map(|part| part.strip_prefix(&prefix).map(str::to_string))
+        .find_map(|part| part.strip_prefix(&prefix).map(str::to_string));
+
+    crate::vlo_debug!(
+        "🔐 COOKIE: Parse result: {:?}",
+        result.as_ref().map(|t| &t[..8.min(t.len())])
+    );
+    result
 }
 
 pub async fn session_middleware(mut req: Request, next: Next) -> Response {
     let cookie_name = auth_config().cookie_name.clone();
-    
-    let token = req.headers()
-        .get(header::COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|h| parse_cookie_header(h, &cookie_name));
 
-    let user = match token {
-        Some(t) => get_user_from_session(&t).await,
-        None => None,
+    let cookie_header = req
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok());
+
+    crate::vlo_debug!("🔐 SESSION: Cookie header: {:?}", cookie_header);
+
+    let session_token = cookie_header.and_then(|h| parse_cookie_header(h, &cookie_name));
+
+    crate::vlo_debug!(
+        "🔐 SESSION: Extracted token: {:?}",
+        session_token.as_ref().map(|t| &t[..8.min(t.len())])
+    );
+
+    let (user, csrf_token) = match &session_token {
+        Some(t) => {
+            let found_user = get_user_from_session(t).await;
+            crate::vlo_debug!("🔐 SESSION: User lookup result: {}", found_user.is_some());
+            (found_user, Some(compute_csrf_token(t)))
+        }
+        None => {
+            crate::vlo_debug!("🔐 SESSION: No session token found");
+            (None, None)
+        }
     };
 
-    req.extensions_mut().insert(AuthUser { user });
+    req.extensions_mut().insert(AuthUser {
+        user,
+        csrf_token,
+        session_token,
+    });
     next.run(req).await
 }
 
 // ---------------------------------------------------------------------------
-// Login Handler (supports multipart, JSON, and urlencoded)
+// CSRF Middleware
+// ---------------------------------------------------------------------------
+
+pub async fn csrf_middleware(req: Request, next: Next) -> Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_owned();
+
+    let is_safe = matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
+    let is_exempt = path.starts_with("/api/auth/") || path.starts_with("/api/files/upload");
+
+    if is_safe || is_exempt {
+        return next.run(req).await;
+    }
+
+    let auth = req.extensions().get::<AuthUser>().cloned();
+    let session_token = match auth {
+        Some(AuthUser { session_token: Some(t), user: Some(_), .. }) => t,
+        _ => return next.run(req).await,
+    };
+
+    let submitted = req
+        .headers()
+        .get("X-CSRF-Token")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !verify_csrf_token(&session_token, submitted) {
+        crate::vlo_debug!("🛡️ CSRF rejected for {} {}", method, path);
+        return (StatusCode::FORBIDDEN, Json(json!({
+            "success": false,
+            "error": "CSRF token invalid or missing"
+        })))
+            .into_response();
+    }
+
+    next.run(req).await
+}
+
+// ---------------------------------------------------------------------------
+// API Auth Middleware
+// ---------------------------------------------------------------------------
+
+pub async fn api_auth_middleware(req: Request, next: Next) -> Response {
+    let path = req.uri().path().to_owned();
+    let method = req.method().clone();
+
+    // Only protect API routes
+    if !path.starts_with("/api/") {
+        return next.run(req).await;
+    }
+
+    // Exempt routes
+    let is_exempt = path.starts_with("/api/auth/")
+        || path == "/api"
+        || path.starts_with("/api/files/");
+
+    if is_exempt {
+        return next.run(req).await;
+    }
+
+    // Check public routes from ENV
+    let public_env = std::env::var("AUTH_API_PUBLIC_ROUTES").unwrap_or_default();
+    let public_routes: Vec<&str> = public_env
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let is_public = public_routes.iter().any(|r| path.starts_with(r));
+
+    if is_public {
+        return next.run(req).await;
+    }
+
+    // Check if user is authenticated
+    let auth = req.extensions().get::<AuthUser>().cloned();
+    let is_authenticated = auth.as_ref().map_or(false, |a| a.user.is_some());
+
+    if !is_authenticated {
+        crate::vlo_debug!("🔒 API auth rejected: {} {}", method, path);
+        return (StatusCode::UNAUTHORIZED, Json(json!({
+            "success": false,
+            "error": "Authentication required"
+        })))
+            .into_response();
+    }
+
+    next.run(req).await
+}
+
+// ---------------------------------------------------------------------------
+// Login / Logout / Me
 // ---------------------------------------------------------------------------
 
 pub async fn login_handler(req: Request) -> impl IntoResponse {
@@ -428,14 +562,12 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
     let id_field = cfg.identifier_field.clone();
     let pw_field = cfg.password_field.clone();
 
-    let content_type = req.headers()
+    let content_type = req
+        .headers()
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_lowercase();
-
-    crate::vlo_debug!("🔐 LOGIN: Content-Type: {}", content_type);
-    crate::vlo_debug!("🔐 LOGIN: Looking for fields: {} / {}", id_field, pw_field);
 
     let mut identifier = String::new();
     let mut password = String::new();
@@ -446,45 +578,30 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
                 while let Ok(Some(field)) = multipart.next_field().await {
                     let name = field.name().unwrap_or("").to_string();
                     let value = field.text().await.unwrap_or_default();
-                    
-                    crate::vlo_debug!("🔐 LOGIN: Received field '{}' = '{}'", 
-                        name, 
-                        if name == pw_field { "***" } else { &value }
-                    );
-                    
-                    if name == id_field { 
-                        identifier = value;
-                        crate::vlo_debug!("🔐 LOGIN: ✓ Matched identifier field");
-                    }
-                    else if name == pw_field { 
-                        password = value;
-                        crate::vlo_debug!("🔐 LOGIN: ✓ Matched password field");
-                    }
+                    if name == id_field { identifier = value; }
+                    else if name == pw_field { password = value; }
                 }
             }
-            Err(e) => {
-                crate::vlo_debug!("🔐 LOGIN: Multipart error: {:?}", e);
-                return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid multipart request"}))).into_response();
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid multipart request"})))
+                    .into_response()
             }
         }
     } else if content_type.contains("application/json") {
         match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
             Ok(payload) => {
-                crate::vlo_debug!("🔐 LOGIN: JSON payload: {:?}", payload);
                 identifier = payload.get(&id_field).and_then(|v| v.as_str()).unwrap_or("").into();
                 password = payload.get(&pw_field).and_then(|v| v.as_str()).unwrap_or("").into();
             }
-            Err(e) => {
-                crate::vlo_debug!("🔐 LOGIN: JSON parse error: {:?}", e);
-                return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid JSON"}))).into_response();
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid JSON"})))
+                    .into_response()
             }
         }
     } else if content_type.contains("application/x-www-form-urlencoded") {
         match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
             Ok(bytes) => {
-                let body_str = String::from_utf8_lossy(&bytes);
-                crate::vlo_debug!("🔐 LOGIN: Form body: {}", body_str);
-                for pair in body_str.split('&') {
+                for pair in String::from_utf8_lossy(&bytes).split('&') {
                     let mut p = pair.splitn(2, '=');
                     if let (Some(k), Some(v)) = (p.next(), p.next()) {
                         let v = urlencoding::decode(v).unwrap_or_default().to_string();
@@ -493,84 +610,80 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
                     }
                 }
             }
-            Err(e) => {
-                crate::vlo_debug!("🔐 LOGIN: Body read error: {:?}", e);
-                return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Failed to read body"}))).into_response();
+            Err(_) => {
+                return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Failed to read body"})))
+                    .into_response()
             }
         }
     } else {
-        return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Unsupported content type"}))).into_response();
+        return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Unsupported content type"})))
+            .into_response();
     }
 
-    crate::vlo_debug!("🔐 LOGIN: Final values - identifier: '{}', password: '{}'", 
-        identifier, 
-        if password.is_empty() { "(empty)" } else { "***" }
-    );
-
     if identifier.is_empty() || password.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Credentials required"}))).into_response();
+        return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Credentials required"})))
+            .into_response();
     }
 
     let user = match find_user_by_identifier(&identifier).await {
         Some(u) => u,
-        None => return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response(),
+        None => {
+            return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"})))
+                .into_response()
+        }
     };
-
     let hash = match fetch_password_hash(user.id).await {
         Some(h) => h,
-        None => return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response(),
+        None => {
+            return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"})))
+                .into_response()
+        }
     };
-
     if !verify_password(&password, &hash) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response();
+        return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"})))
+            .into_response();
     }
-
     let token = match create_session(user.id).await {
         Ok(t) => t,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success":false,"error":e}))).into_response(),
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success":false,"error":e})))
+                .into_response()
+        }
     };
 
     let cookie = format!(
         "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
         cfg.cookie_name, token, cfg.session_lifetime
     );
-
     let mut response = Json(json!({
         "success": true,
         "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role }
-    })).into_response();
+    }))
+    .into_response();
 
     if let Ok(value) = HeaderValue::from_str(&cookie) {
         response.headers_mut().append(header::SET_COOKIE, value);
     }
-
     response
 }
-
-// ---------------------------------------------------------------------------
-// Logout / Me
-// ---------------------------------------------------------------------------
 
 pub async fn logout_handler(req: Request) -> impl IntoResponse {
     let cfg = auth_config();
     let cookie_name = cfg.cookie_name.clone();
-
-    let token = req.headers()
+    let token = req
+        .headers()
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         .and_then(|h| parse_cookie_header(h, &cookie_name));
-
     if let Some(token) = token {
         let _ = delete_session(&token).await;
     }
 
     let cookie = format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", cookie_name);
     let mut response = Redirect::to("/").into_response();
-
     if let Ok(value) = HeaderValue::from_str(&cookie) {
         response.headers_mut().append(header::SET_COOKIE, value);
     }
-
     response
 }
 
@@ -579,16 +692,40 @@ pub async fn me_handler(axum::Extension(auth): axum::Extension<AuthUser>) -> imp
         Some(user) => (StatusCode::OK, Json(json!({
             "authenticated": true,
             "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role }
-        }))).into_response(),
+        })))
+            .into_response(),
         None => (StatusCode::UNAUTHORIZED, Json(json!({
-            "authenticated": false,
-            "error": "Not authenticated"
-        }))).into_response(),
+            "authenticated": false, "error": "Not authenticated"
+        })))
+            .into_response(),
     }
 }
 
 // ---------------------------------------------------------------------------
-// Page Guards (Auth, Roles & Guest-only via BaseLayout config)
+// setpass CLI
+// ---------------------------------------------------------------------------
+#[allow(dead_code)]
+pub async fn set_password(identifier: &str, password: &str) -> Result<(), String> {
+    let cfg = auth_config();
+    let pool = DB_POOL.get().ok_or("Database not configured")?;
+    let hash = hash_password(password).await?;
+    let p1 = cfg.placeholder(pool, 1);
+    let p2 = cfg.placeholder(pool, 2);
+    let sql = format!(
+        "UPDATE {} SET {} = {} WHERE {} = {}",
+        cfg.user_table, cfg.user_password, p1, cfg.user_identifier, p2
+    );
+    match pool {
+        DbPool::Sqlite(c) => sqlx::query(&sql).bind(&hash).bind(identifier).execute(c).await.map(|_| ()),
+        DbPool::Postgres(c) => sqlx::query(&sql).bind(&hash).bind(identifier).execute(c).await.map(|_| ()),
+        DbPool::MySql(c) => sqlx::query(&sql).bind(&hash).bind(identifier).execute(c).await.map(|_| ()),
+    }
+    .map_err(|e| format!("Failed to update password: {}", e))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Page Guards
 // ---------------------------------------------------------------------------
 
 static LAYOUT_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -613,17 +750,13 @@ pub fn extract_page_guard(source: &str) -> Option<PageGuard> {
 
     let auth = read_bool("auth");
     let guest = read_bool("guest");
-
-    let roles = match props.get("roles") {
-        Some(serde_json::Value::String(s)) => s
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect(),
-        _ => vec![],
-    };
-
+    let mut roles = Vec::new();
+    if let Some(serde_json::Value::String(s)) = props.get("roles") {
+        roles.extend(s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from));
+    }
+    if let Some(serde_json::Value::String(s)) = props.get("role") {
+        roles.extend(s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from));
+    }
     if auth || guest || !roles.is_empty() {
         Some(PageGuard { auth, roles, guest })
     } else {
@@ -647,26 +780,22 @@ pub fn check_page_guard(
     if guard.guest && user.is_some() {
         return Some(Redirect::to(&safe_next(next)).into_response());
     }
-
     if guard.auth && user.is_none() {
         return Some(Redirect::to(&format!("/login?next={}", current_path)).into_response());
     }
-
     if !guard.roles.is_empty() {
         let has_role = user.as_ref().map_or(false, |u| {
             guard.roles.iter().any(|r| r.eq_ignore_ascii_case(&u.role))
         });
-
         if !has_role {
             if user.is_none() {
                 return Some(Redirect::to(&format!("/login?next={}", current_path)).into_response());
             }
-            return Some((
-                StatusCode::FORBIDDEN,
-                Html("<h1>403 Forbidden</h1><p>Insufficient permissions.</p>".to_string()),
-            ).into_response());
+            return Some(
+                (StatusCode::FORBIDDEN, Html("<h1>403 Forbidden</h1><p>Insufficient permissions.</p>".to_string()))
+                    .into_response(),
+            );
         }
     }
-
     None
 }
