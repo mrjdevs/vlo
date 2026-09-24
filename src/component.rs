@@ -819,10 +819,10 @@ pub fn parse_props_v7(
                 index += 1;
             }
 
-            map.insert(
-                key,
-                Value::String(value),
-            );
+            // Try to parse as JSON, fall back to string
+            let parsed_value = serde_json::from_str::<Value>(&value)
+                .unwrap_or_else(|_| Value::String(value));
+            map.insert(key, parsed_value);
             continue;
         }
 
@@ -835,10 +835,10 @@ pub fn parse_props_v7(
                 quote,
             );
 
-        map.insert(
-            key,
-            Value::String(value),
-        );
+        // Try to parse as JSON, fall back to string
+        let parsed_value = serde_json::from_str::<Value>(&value)
+            .unwrap_or_else(|_| Value::String(value));
+        map.insert(key, parsed_value);
     }
 
     map

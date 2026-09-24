@@ -1,0 +1,53 @@
+<form class="vlo-sort-select" method="get" action="">
+    {if search}
+        <input type="hidden" name="search" value="{{search}}" />
+    {/if}
+    {if limit}
+        <input type="hidden" name="limit" value="{{limit}}" />
+    {/if}
+    
+    {if label}
+        <label class="vlo-sort-label">{{label}}</label>
+    {/if}
+    
+    <select name="sort" class="vlo-sort-input" onchange="this.form.submit()">
+        {for option in options}
+            <option value="{{option.value}}" {if sort == option.value}selected{/if}>{{option.label}}</option>
+        {/for}
+    </select>
+    
+    <select name="order" class="vlo-sort-input vlo-sort-order" onchange="this.form.submit()">
+        <option value="asc" {if order == "asc"}selected{/if}>↑ Asc</option>
+        <option value="desc" {if order == "desc"}selected{/if}>↓ Desc</option>
+    </select>
+</form>
+
+<style>
+.vlo-sort-select {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.vlo-sort-label {
+    color: #777;
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+.vlo-sort-input {
+    padding: 8px 12px;
+    border: 1px solid var(--border, #292929);
+    border-radius: 7px;
+    background: var(--surface, #111);
+    color: var(--text, #eee);
+    font-size: 0.75rem;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+.vlo-sort-input:focus {
+    border-color: var(--primary, #00f5ff);
+}
+.vlo-sort-order {
+    width: 80px;
+}
+</style>

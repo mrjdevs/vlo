@@ -1,423 +1,207 @@
-
-<BaseLayout title="Product Management home">
-
+<BaseLayout title="Product Management">
   <div class="products-page">
 
-    <!-- Toast Notifications -->
-    {if status == "success"}
-      {if action == "created"}
-        <Toast
-          variant="success"
-          icon="✅"
-          title="Product Created"
-          description="{{message}}"
-        />
-      {/if}
-
-      {if action == "updated"}
-        <Toast
-          variant="success"
-          icon="✏️"
-          title="Product Updated"
-          description="{{message}}"
-        />
-      {/if}
-
-      {if action == "deleted"}
-        <Toast
-          variant="success"
-          icon="🗑️"
-          title="Product Deleted"
-          description="{{message}}"
-        />
-      {/if}
+    {if flash_messages}
+      <Toast />
     {/if}
 
-  {if status == "error"}
-    <Toast
-      variant="error"
-      icon="⚠️"
-      title="Operation Failed"
-      description="{{message}}"
-    />
-  {/if}
-
+    <!-- ═══ HEADER ═══ -->
     <div class="products-header">
       <div>
         <div class="products-eyebrow">VLO / API</div>
         <h1>Product Management</h1>
         <p>Manage your product catalog using the VLO REST CRUD API.</p>
       </div>
-      <Badge variant="success" text="REST API" />
+      <div class="header-actions">
+        <Badge variant="success" text="REST API" />
+        <button type="button" class="vlo-btn vlo-btn-primary" onclick="document.getElementById('add-product-modal').classList.add('active')">
+          + Add Product
+        </button>
+      </div>
     </div>
 
-    <Card
-      title="Add Product"
-      description="Create a new product and add it to your catalog."
-    >
-    <form
-        v-post="/api/products"
-        class="product-form"
-        enctype="multipart/form-data"
-    >
-        <div class="form-field">
-          <label for="product-title">Product Title</label>
-          <input
-            id="product-title"
-            type="text"
-            name="title"
-            placeholder="e.g. Mechanical Keyboard"
-            required
-          />
-        </div>
-
-        <div class="form-field">
-          <label for="product-description">Description</label>
-          <input
-            id="product-description"
-            type="text"
-            name="description"
-            placeholder="Product description"
-          />
-        </div>
-
-        <div class="form-field">
-          <label for="product-price">Price</label>
-          <input
-            id="product-price"
-            type="number"
-            name="price"
-            placeholder="0.00"
-            step="0.01"
-            min="0"
-            required
-          />
-        </div>
-
-        <div class="form-field">
-          <label for="product-stock">Stock</label>
-          <input
-            id="product-stock"
-            type="number"
-            name="stock"
-            placeholder="0"
-            min="0"
-            required
-          />
-        </div>
-
-        <div class="form-field">
-          <label>Product Image</label>
-
-          <FileInput
-            id="product-image"
-            name="image"
-            accept="image/*"
-            variant="primary"
-            button="Choose Image"
-            required
-          />
-        </div>
-
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="vlo-btn vlo-btn-primary"
-          >
-            + Add Product
-          </button>
-        </div>
-      </form>
-    </Card>
-
-    <div class="products-list-card">
-      <Card
-        title="Products"
-        description="All products currently stored in the database."
-      >
-        <div class="products-toolbar">
-          <span>Live Database</span>
-          <Badge variant="success" text="Active" />
-        </div>
-
-        <div >
-          <div class="products-table-wrap">
-            <table class="products-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Image</th>
-                  <th>Product</th>
-                  <th>Description</th>
-                  <th>Price</th>
-                  <th>Stock</th>
-                  <th>Created</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-
-              <tbody data-source="/api/get_products">
-                {for product in products}
-                  <tr>
-                    <td>#{{product.id}}</td>
-
-                    <td>
-                      {if product.image}
-                        <img
-                          src="{{product.image}}"
-                          alt="{{product.title}}"
-                          class="product-image"
-                          loading="lazy"
-                        />
-                      {else}
-                        <div class="product-image-placeholder">
-                          📦
-                        </div>
-                      {/if}
-                    </td>
-
-                    <td>
-                      {if product.price > 500}
-                        <div class="product-title product-premium">
-                          {{product.title}}
-                        </div>
-                      {else}
-                        <div class="product-title">
-                          {{product.title}}
-                        </div>
-                      {/if}
-                    </td>
-
-                    <td>
-                      <div class="product-description">
-                        {{product.description}}
-                      </div>
-                    </td>
-
-                    <td>
-                      {if product.price > 500}
-                        <span class="product-price product-expensive">
-                          ${{product.price}}
-                        </span>
-                      {else}
-                        <span class="product-price">
-                          ${{product.price}}
-                        </span>
-                      {/if}
-                    </td>
-
-                    <td>
-                      {if product.stock == 0}
-                        <span class="stock-empty">
-                          Out of Stock
-                        </span>
-                      {else}
-                        {if product.stock < 5}
-                          <span class="stock-low">
-                            {{product.stock}} left
-                          </span>
-                        {else}
-                          <span class="stock-good">
-                            {{product.stock}}
-                          </span>
-                        {/if}
-                      {/if}
-                    </td>
-
-                    <td>
-                      {if product.created_at < 5}
-                        <span class="date-recent">
-                          {{product.created_at}}
-                        </span>
-                      {else}
-                        <span>
-                          {{product.created_at}}
-                        </span>
-                      {/if}
-                    </td>
-
-                    <td>
-                      <div class="product-actions">
-                        <button
-                          type="button"
-                          class="vlo-btn vlo-btn-secondary"
-                          onclick="document.getElementById('edit-product-{{product.id}}').classList.add('active')"
-                          title="Edit Product"
-                        >
-                          ✎
-                        </button>
-
-                        <button
-                          type="button"
-                          class="vlo-btn vlo-btn-danger"
-                          onclick="document.getElementById('delete-product-{{product.id}}').classList.add('active')"
-                          title="Delete Product"
-                        >
-                          ✕
-                        </button>
-                      </div>
-
-                      <!-- Edit Product -->
-                      <Modal
-                        id="edit-product-{{product.id}}"
-                        title="Edit Product"
-                      >
-                        <form
-                          v-put="/api/products/{{product.id}}"
-                          class="modal-form"
-                          enctype="multipart/form-data"
-                        >
-                          <div class="modal-product-name">
-                            Editing:
-                            <strong>{{product.title}}</strong>
-                          </div>
-
-                          <div class="form-field">
-                            <label>Product Title</label>
-                            <input
-                              type="text"
-                              name="title"
-                              value="{{product.title}}"
-                              required
-                            />
-                          </div>
-
-                          <div class="form-field">
-                            <label>Description</label>
-                            <input
-                              type="text"
-                              name="description"
-                              value="{{product.description}}"
-                            />
-                          </div>
-
-                          <div class="form-field">
-                            <label>Price</label>
-                            <input
-                              type="number"
-                              name="price"
-                              value="{{product.price}}"
-                              step="0.01"
-                              min="0"
-                              required
-                            />
-                          </div>
-
-                          <div class="form-field">
-                            <label>Stock</label>
-                            <input
-                              type="number"
-                              name="stock"
-                              value="{{product.stock}}"
-                              min="0"
-                              required
-                            />
-                          </div>
-
-                          <div class="form-field">
-                            <label>Product Image</label>
-
-                            <FileInput
-                              id="product-image-{{product.id}}"
-                              name="image"
-                              accept="image/*"
-                              variant="secondary"
-                              button="Replace Image"
-                            />
-                          </div>
-
-                          {if product.image}
-                            <div class="current-product-image">
-                              <span>Current Image</span>
-
-                              <img
-                                src="{{product.image}}"
-                                alt="{{product.title}}"
-                                class="product-edit-image"
-                                loading="lazy"
-                              />
-                            </div>
-                          {/if}
-
-                          <div class="modal-actions">
-                            <button
-                              type="button"
-                              class="vlo-btn vlo-btn-secondary"
-                              onclick="document.getElementById('edit-product-{{product.id}}').classList.remove('active')"
-                            >
-                              Cancel
-                            </button>
-
-                            <button
-                              type="submit"
-                              class="vlo-btn vlo-btn-primary"
-                            >
-                              Save Changes
-                            </button>
-                          </div>
-                        </form>
-                      </Modal>
-
-                      <!-- Delete Product -->
-                      <Modal
-                        id="delete-product-{{product.id}}"
-                        title="Delete Product"
-                      >
-                        <div class="delete-confirmation">
-                          <p>
-                            Are you sure you want to delete
-                            <strong>{{product.title}}</strong>?
-                          </p>
-
-                          <p class="delete-warning">
-                            This action cannot be undone.
-                          </p>
-
-                          <div class="modal-actions">
-                            <button
-                              type="button"
-                              class="vlo-btn vlo-btn-secondary"
-                              onclick="document.getElementById('delete-product-{{product.id}}').classList.remove('active')"
-                            >
-                              Cancel
-                            </button>
-
-                            <button
-                              type="button"
-                              class="vlo-btn vlo-btn-danger"
-                              v-delete="/api/products/{{product.id}}"
-                            >
-                              Delete Product
-                            </button>
-                          </div>
-                        </div>
-                      </Modal>
-                    </td>
-                  </tr>
-
-                {else}
-                  <tr>
-                    <td colspan="8">
-                      <div class="empty-products">
-                        <div class="empty-icon">📦</div>
-                        <h3>No Products Found</h3>
-                        <p>
-                          Add your first product using the form above.
-                        </p>
-                      </div>
-                    </td>
-                  </tr>
-                {/for}
-              </tbody>
-            </table>
+    <!-- ═══ ADD PRODUCT MODAL ═══ -->
+    <Modal id="add-product-modal" title="Add New Product">
+      <form v-post="/api/products" class="modal-form" enctype="multipart/form-data">
+        <div class="form-grid">
+          <div class="form-field">
+            <label>Product Title</label>
+            <input type="text" name="title" placeholder="e.g. Mechanical Keyboard" required />
+          </div>
+          <div class="form-field">
+            <label>Description</label>
+            <input type="text" name="description" placeholder="Product description" />
+          </div>
+          <div class="form-field">
+            <label>Price</label>
+            <input type="number" name="price" placeholder="0.00" step="0.01" min="0" required />
+          </div>
+          <div class="form-field">
+            <label>Stock</label>
+            <input type="number" name="stock" placeholder="0" min="0" required />
           </div>
         </div>
+        <div class="form-field">
+          <label>Product Image</label>
+          <FileInput name="image" accept="image/*" variant="primary" button="Choose Image" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('add-product-modal').classList.remove('active')">Cancel</button>
+          <button type="submit" class="vlo-btn vlo-btn-primary">Add Product</button>
+        </div>
+      </form>
+    </Modal>
+
+    <!-- ═══ PRODUCTS LIST ═══ -->
+    <div class="products-list-card">
+      <Card title="Products" description="{{total}} products found.">
+
+        <!-- Search & Sort Toolbar -->
+        <div class="products-toolbar">
+          <SearchBar 
+              placeholder="Search products..." 
+              button_text="Search"
+              columns="title,description"
+              variant="inline"
+          />
+          <SortSelect 
+              label="Sort:" 
+              options='
+                  [{"value":"id","label":"ID"},
+                  {"value":"title","label":"Title"},
+                  {"value":"price","label":"Price"},
+                  {"value":"stock","label":"Stock"}
+              ]' 
+          />
+
+          <Badge variant="success" text="Live" />
+        </div>
+
+        <!-- Active Filters -->
+        {if search || sort}
+          <div class="active-filters">
+            <div class="filter-tags">
+              {if search}
+                <span class="active-filter">
+                  Search: <strong>"{{search}}"</strong>
+                  <a href="?{if sort}sort={{sort}}&order={{order}}{/if}">✕</a>
+                </span>
+              {/if}
+              {if sort}
+                <span class="active-filter">
+                  Sort: <strong>{{sort}}</strong> ({{order}})
+                  <a href="?{if search}search={{search}}{/if}">✕</a>
+                </span>
+              {/if}
+            </div>
+            <a href="?" class="clear-all">Clear all filters</a>
+          </div>
+        {/if}
+
+        <!-- Data Table -->
+        <div class="products-table-wrap">
+          <table class="products-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Image</th>
+                <th>Product</th>
+                <th>Description</th>
+                <th>Price</th>
+                <th>Stock</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody data-source="/api/get_products">
+              {for product in products}
+              <tr>
+                <td>#{{product.id}}</td>
+                <td>
+                  {if product.image}
+                    <img src="{{product.image}}" alt="{{product.title}}" class="product-image" loading="lazy" />
+                  {else}
+                    <div class="product-image-placeholder">📦</div>
+                  {/if}
+                </td>
+                <td>
+                  <div class="product-title {if product.price > 500}product-premium{/if}">{{product.title}}</div>
+                </td>
+                <td><div class="product-description">{{product.description}}</div></td>
+                <td>
+                  <span class="product-price {if product.price > 500}product-expensive{/if}">${{product.price}}</span>
+                </td>
+                <td>
+                  {if product.stock == 0}
+                    <span class="stock-empty">Out of Stock</span>
+                  {else}
+                    {if product.stock < 5}
+                      <span class="stock-low">{{product.stock}} left</span>
+                    {else}
+                      <span class="stock-good">{{product.stock}}</span>
+                    {/if}
+                  {/if}
+                </td>
+                <td><span>{{product.created_at}}</span></td>
+                <td>
+                  <div class="product-actions">
+                    <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('edit-{{product.id}}').classList.add('active')" title="Edit">✎</button>
+                    <button type="button" class="vlo-btn vlo-btn-danger" onclick="document.getElementById('del-{{product.id}}').classList.add('active')" title="Delete">✕</button>
+                  </div>
+
+                  <!-- Edit Modal -->
+                  <Modal id="edit-{{product.id}}" title="Edit Product">
+                    <form v-put="/api/products/{{product.id}}" class="modal-form" enctype="multipart/form-data">
+                      <div class="modal-product-name">Editing: <strong>{{product.title}}</strong></div>
+                      <div class="form-grid">
+                        <div class="form-field"><label>Title</label><input type="text" name="title" value="{{product.title}}" required /></div>
+                        <div class="form-field"><label>Description</label><input type="text" name="description" value="{{product.description}}" /></div>
+                        <div class="form-field"><label>Price</label><input type="number" name="price" value="{{product.price}}" step="0.01" min="0" required /></div>
+                        <div class="form-field"><label>Stock</label><input type="number" name="stock" value="{{product.stock}}" min="0" required /></div>
+                      </div>
+                      <div class="form-field"><label>Image</label><FileInput name="image" accept="image/*" variant="secondary" button="Replace Image" /></div>
+                      {if product.image}
+                        <div class="current-product-image"><span>Current</span><img src="{{product.image}}" alt="{{product.title}}" class="product-edit-image" loading="lazy" /></div>
+                      {/if}
+                      <div class="modal-actions">
+                        <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('edit-{{product.id}}').classList.remove('active')">Cancel</button>
+                        <button type="submit" class="vlo-btn vlo-btn-primary">Save Changes</button>
+                      </div>
+                    </form>
+                  </Modal>
+
+                  <!-- Delete Modal -->
+                  <Modal id="del-{{product.id}}" title="Delete Product">
+                    <div class="delete-confirmation">
+                      <p>Are you sure you want to delete <strong>{{product.title}}</strong>?</p>
+                      <p class="delete-warning">This action cannot be undone.</p>
+                      <div class="modal-actions">
+                        <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('del-{{product.id}}').classList.remove('active')">Cancel</button>
+                        <button type="button" class="vlo-btn vlo-btn-danger" v-delete="/api/products/{{product.id}}">Delete Product</button>
+                      </div>
+                    </div>
+                  </Modal>
+                </td>
+              </tr>
+              {else}
+              <tr>
+                <td colspan="8">
+                  <div class="empty-products">
+                    <div class="empty-icon">📦</div>
+                    <h3>No Products Found</h3>
+                    <p>{if search}No results for "{{search}}". Try a different search.{else}Add your first product using the button above.{/if}</p>
+                  </div>
+                </td>
+              </tr>
+              {/for}
+            </tbody>
+          </table>
+        </div>
       </Card>
-          <!-- Pagination Component -->
-          <Pagination />
+
+      <Pagination />
     </div>
   </div>
-
 
   <style>
     .products-page { max-width: 1150px; margin: 0 auto; padding: 45px 24px 70px; color: #fff; }
@@ -425,14 +209,21 @@
     .products-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; color: #00f5ff; margin-bottom: 7px; }
     .products-header h1 { margin: 0; font-size: 34px; line-height: 1.15; }
     .products-header p { margin: 9px 0 0; color: #888; font-size: 15px; }
-    .product-form { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 20px; }
-    .form-field { display: flex; flex-direction: column; gap: 7px; }
-    .form-field label { font-size: 12px; font-weight: 600; color: #aaa; }
-    .form-field input { padding: 10px 12px; background: #171717; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 14px; outline: none; }
-    .form-field input:focus { border-color: #00f5ff; }
-    .form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; padding-top: 4px; }
+    .header-actions { display: flex; align-items: center; gap: 12px; }
+    
     .products-list-card { margin-top: 24px; }
-    .products-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 14px; color: #777; font-size: 13px; }
+    .products-toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 20px 0 14px; }
+    .products-toolbar .vlo-sort-select { margin-left: auto; }
+    
+    .active-filters { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+    .filter-tags { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .active-filter { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid rgba(0,245,255,.2); border-radius: 7px; background: rgba(0,245,255,.04); color: #aaa; font-size: .78rem; }
+    .active-filter strong { color: #00f5ff; }
+    .active-filter a { color: #ff6680; text-decoration: none; margin-left: 4px; font-weight: 600; }
+    .active-filter a:hover { text-decoration: underline; }
+    .clear-all { color: #ff6680; font-size: .78rem; text-decoration: none; font-weight: 600; white-space: nowrap; }
+    .clear-all:hover { text-decoration: underline; }
+
     .products-table-wrap { overflow-x: auto; }
     .products-table { width: 100%; border-collapse: collapse; min-width: 900px; }
     .products-table th { padding: 13px 14px; text-align: left; background: #171717; color: #777; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; border-bottom: 1px solid #292929; }
@@ -440,6 +231,9 @@
     .products-table tbody tr:hover { background: #161616; }
     .products-table th:nth-child(4), .products-table td:nth-child(4) { text-align: right; }
     .products-table th:nth-child(5), .products-table td:nth-child(5), .products-table th:nth-child(7), .products-table td:nth-child(7) { text-align: center; }
+    
+    .product-image { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid #333; }
+    .product-image-placeholder { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 6px; background: #1a1a1a; border: 1px solid #333; font-size: 18px; }
     .product-title { font-weight: 600; color: #fff; }
     .product-premium { font-weight: 800; }
     .product-description { max-width: 240px; color: #777; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -448,12 +242,13 @@
     .stock-good { color: #00ff88; font-weight: 600; }
     .stock-low { color: #ff6666; font-weight: 700; }
     .stock-empty { color: #ff4444; font-weight: 800; }
-    .date-recent { color: #ff6666; font-weight: 600; }
     .product-actions { display: flex; justify-content: center; gap: 6px; }
+    
     .empty-products { text-align: center; padding: 55px 20px; color: #666; }
     .empty-icon { font-size: 35px; margin-bottom: 10px; }
     .empty-products h3 { margin: 0 0 7px; color: #aaa; }
     .empty-products p { margin: 0; font-size: 13px; }
+    
     .vlo-btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all .15s; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
     .vlo-btn-primary { background: #00f5ff; color: #000; }
     .vlo-btn-primary:hover { background: #00d4dd; }
@@ -461,20 +256,31 @@
     .vlo-btn-secondary:hover { border-color: #00f5ff; color: #00f5ff; }
     .vlo-btn-danger { background: transparent; border: 1px solid #444; color: #ff6666; }
     .vlo-btn-danger:hover { background: #351717; border-color: #ff6666; }
+    
     .modal-form { display: flex; flex-direction: column; gap: 16px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-field { display: flex; flex-direction: column; gap: 7px; }
+    .form-field label { font-size: 12px; font-weight: 600; color: #aaa; }
+    .form-field input { padding: 10px 12px; background: #171717; border: 1px solid #333; border-radius: 6px; color: #fff; font-size: 14px; outline: none; }
+    .form-field input:focus { border-color: #00f5ff; }
+    
     .modal-product-name { color: #888; font-size: 13px; margin-bottom: 2px; }
     .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
     .delete-confirmation { color: #ccc; }
     .delete-confirmation p { margin: 0 0 12px; line-height: 1.6; }
     .delete-warning { color: #ff8888; font-size: 13px; }
+    .current-product-image { display: flex; align-items: center; gap: 10px; }
+    .current-product-image span { color: #777; font-size: 12px; }
+    .product-edit-image { width: 50px; height: 50px; object-fit: cover; border-radius: 6px; border: 1px solid #333; }
+    
     @media (max-width: 700px) {
       .products-page { padding: 30px 15px 50px; }
       .products-header { align-items: flex-start; flex-direction: column; }
       .products-header h1 { font-size: 28px; }
-      .product-form { grid-template-columns: 1fr; }
-      .form-actions { grid-column: auto; justify-content: stretch; }
-      .form-actions .vlo-btn { width: 100%; text-align: center; }
+      .header-actions { width: 100%; justify-content: flex-start; }
+      .form-grid { grid-template-columns: 1fr; }
+      .products-toolbar { flex-direction: column; align-items: stretch; }
+      .active-filters { flex-direction: column; align-items: flex-start; }
     }
-
   </style>
 </BaseLayout>

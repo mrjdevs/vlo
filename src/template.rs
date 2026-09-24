@@ -78,29 +78,167 @@ pub fn get_nested_value(
     current.cloned().unwrap_or(Value::Null)
 }
 
+// ---------------------------------------------------------------------------
+// Logical Operators: || (OR), && (AND), ! (NOT), ( ) grouping
+// Precedence: ! > && > ||
+// ---------------------------------------------------------------------------
+
 pub fn evaluate_condition(
     expr: &str,
     context: &HashMap<String, Value>,
 ) -> bool {
     let expr = expr.trim();
-
     if expr.is_empty() {
         return false;
     }
+    evaluate_or(expr, context)
+}
 
-    if let Some(stripped) = expr.strip_prefix('!') {
-        return !evaluate_condition(stripped.trim(), context);
+fn evaluate_or(expr: &str, context: &HashMap<String, Value>) -> bool {
+    let branches = split_logical(expr, "||");
+    for branch in branches {
+        if evaluate_and(branch.trim(), context) {
+            return true; // Short-circuit: one true OR makes it true
+        }
+    }
+    false
+}
+
+fn evaluate_and(expr: &str, context: &HashMap<String, Value>) -> bool {
+    let branches = split_logical(expr, "&&");
+    for branch in branches {
+        if !evaluate_atom(branch.trim(), context) {
+            return false; // Short-circuit: one false AND makes it false
+        }
+    }
+    true
+}
+
+fn evaluate_atom(expr: &str, context: &HashMap<String, Value>) -> bool {
+    let expr = expr.trim();
+
+    // Handle parentheses wrapping the entire expression: (a || b)
+    if expr.starts_with('(') && expr.ends_with(')') {
+        let mut depth = 0i32;
+        let mut wraps_all = true;
+        for (i, ch) in expr.char_indices() {
+            if ch == '(' { depth += 1; }
+            else if ch == ')' {
+                depth -= 1;
+                if depth == 0 && i < expr.len() - 1 {
+                    wraps_all = false;
+                    break;
+                }
+            }
+        }
+        if wraps_all && depth == 0 {
+            return evaluate_condition(&expr[1..expr.len() - 1], context);
+        }
     }
 
+    // Handle negation: !expr
+    if let Some(stripped) = expr.strip_prefix('!') {
+        return !evaluate_atom(stripped.trim(), context);
+    }
+
+    // Handle comparison operators (respecting quotes and parens)
     for op in ["==", "!=", "<=", ">=", "<", ">"] {
-        if let Some(pos) = expr.find(op) {
+        if let Some(pos) = find_operator(expr, op) {
             let left = resolve_operand(&expr[..pos], context);
             let right = resolve_operand(&expr[pos + op.len()..], context);
             return compare_values(&left, &right, op);
         }
     }
 
+    // Fallback: truthy check
     is_truthy(&resolve_operand(expr, context))
+}
+
+/// Splits an expression by a logical operator, respecting quotes and parentheses.
+fn split_logical<'a>(expr: &'a str, op: &str) -> Vec<&'a str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut in_quotes: Option<char> = None;
+    let mut start = 0;
+    let bytes = expr.as_bytes();
+    let op_bytes = op.as_bytes();
+
+    let mut i = 0;
+    while i < bytes.len() {
+        let ch = bytes[i] as char;
+
+        // Track quotes
+        if let Some(q) = in_quotes {
+            if ch == q && (i == 0 || bytes[i - 1] != b'\\') {
+                in_quotes = None;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            in_quotes = Some(ch);
+            i += 1;
+            continue;
+        }
+
+        // Track parentheses
+        if ch == '(' { depth += 1; i += 1; continue; }
+        if ch == ')' { depth -= 1; i += 1; continue; }
+
+        // Check for operator match (only outside quotes and parens)
+        if depth == 0 && i + op_bytes.len() <= bytes.len() {
+            if &bytes[i..i + op_bytes.len()] == op_bytes {
+                parts.push(&expr[start..i]);
+                start = i + op_bytes.len();
+                i = start;
+                continue;
+            }
+        }
+
+        i += 1;
+    }
+
+    parts.push(&expr[start..]);
+    parts
+}
+
+/// Finds the position of a comparison operator, respecting quotes and parentheses.
+fn find_operator(expr: &str, op: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_quotes: Option<char> = None;
+    let bytes = expr.as_bytes();
+    let op_bytes = op.as_bytes();
+
+    let mut i = 0;
+    while i < bytes.len() {
+        let ch = bytes[i] as char;
+
+        if let Some(q) = in_quotes {
+            if ch == q && (i == 0 || bytes[i - 1] != b'\\') {
+                in_quotes = None;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            in_quotes = Some(ch);
+            i += 1;
+            continue;
+        }
+
+        if ch == '(' { depth += 1; i += 1; continue; }
+        if ch == ')' { depth -= 1; i += 1; continue; }
+
+        if depth == 0 && i + op_bytes.len() <= bytes.len() {
+            if &bytes[i..i + op_bytes.len()] == op_bytes {
+                return Some(i);
+            }
+        }
+
+        i += 1;
+    }
+
+    None
 }
 
 fn resolve_operand(

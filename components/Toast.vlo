@@ -1,38 +1,80 @@
-<div class="vlo-toast {{variant}} {{class}} {{duration}}">
-    <span class="icon">{{icon}}</span>
-    <div>
-        <strong>{{title}}</strong>
-        <p>{{description}}</p>
+<div class="vlo-toast vlo-toast-{{variant}} vlo-toast-dur-{{duration}}">
+    <span class="vlo-toast-icon">{{icon}}</span>
+    <div class="vlo-toast-content">
+        <strong class="vlo-toast-title">{{title}}</strong>
+        <span class="vlo-toast-description">{{description}}</span>
     </div>
 </div>
 
 <style>
 .vlo-toast {
+    --toast-delay: 3s;
     position: fixed;
     bottom: 20px;
     right: 20px;
-    background: var(--card, #111);
-    border: 1px solid var(--border, #333);
-    border-left: 4px solid #00f5ff;
-    padding: 16px 20px;
-    border-radius: 12px;
+    z-index: 99999;
     display: flex;
+    align-items: center;
     gap: 12px;
-    align-items: start;
-    min-width: 300px;
-    z-index: 999;
-    animation: toast 4s ease forwards;
+    width: max-content;
+    max-width: 380px;
+    padding: 12px 16px;
+    background: #1a1a2e;
+    color: #fff;
+    border: 1px solid #333;
+    border-left: 4px solid var(--toast-border, #00f5ff);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    animation: 
+        vloToastIn 0.35s ease,
+        vloToastOut 0.4s ease var(--toast-delay) forwards;
 }
-.vlo-toast.short { animation-duration: 3s; }
-.vlo-toast.long { animation-duration: 6s; }
-.vlo-toast.success { border-left-color: #00ff88; }
-.vlo-toast.error { border-left-color: #ff4444; }
-.vlo-toast .icon { font-size: 1.5rem; }
 
-@keyframes toast {
-    0% { transform: translateX(400px); opacity: 0; }
-    8% { transform: translateX(0); opacity: 1; }
-    85% { transform: translateX(0); opacity: 1; }
-    100% { transform: translateX(400px); opacity: 0; visibility: hidden; }
+/* ─── Variant Colors ─── */
+.vlo-toast-success { --toast-border: #00ff88; }
+.vlo-toast-error   { --toast-border: #ff4444; }
+.vlo-toast-info    { --toast-border: #00f5ff; }
+
+/* ─── Duration: Semantic ─── */
+.vlo-toast-dur-short  { --toast-delay: 2s; }
+.vlo-toast-dur-medium { --toast-delay: 4s; }
+.vlo-toast-dur-long   { --toast-delay: 6s; }
+
+/* ─── Duration: Explicit ─── */
+.vlo-toast-dur-2s { --toast-delay: 2s; }
+.vlo-toast-dur-3s { --toast-delay: 3s; }
+.vlo-toast-dur-4s { --toast-delay: 4s; }
+.vlo-toast-dur-5s { --toast-delay: 5s; }
+.vlo-toast-dur-6s { --toast-delay: 6s; }
+
+/* ─── Structure ─── */
+.vlo-toast-icon {
+    flex: 0 0 auto;
+    font-size: 1.25rem;
+    line-height: 1;
+}
+.vlo-toast-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.vlo-toast-title {
+    display: block;
+    font-size: 0.9rem;
+    line-height: 1.2;
+}
+.vlo-toast-description {
+    display: block;
+    color: #aaa;
+    font-size: 0.78rem;
+    line-height: 1.3;
+}
+
+@keyframes vloToastIn {
+    from { opacity: 0; transform: translateX(40px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes vloToastOut {
+    to { opacity: 0; transform: translateX(40px); }
 }
 </style>

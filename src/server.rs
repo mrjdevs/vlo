@@ -343,6 +343,7 @@ pub async fn cgi() -> Result<(), String> {
             let html = crate::router::wrap_html(
                 &page_name,
                 &rendered,
+                true,
             );
 
             println!("Status: 200 OK");
@@ -610,6 +611,7 @@ pub fn build(release: bool) -> Result<(), String> {
             let html = crate::router::wrap_html(
                 &relative_page_path,
                 &rendered,
+                true,
             );
 
             let output = if relative_page_path == "home"
@@ -769,186 +771,105 @@ pub fn resolve_directives(source: &str) -> String {
     // ============================================================
     // v-delete
     // ============================================================
-
     let re_del = regex::Regex::new(
         r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-delete\s*=\s*["']([^"']+)["']([^>]*?)>"#,
-    )
-    .unwrap();
+    ).unwrap();
 
-    result = re_del
-        .replace_all(&result, |caps: &regex::Captures| {
-            let tag = caps.get(1).unwrap().as_str();
-            let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-            let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
-            let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+    result = re_del.replace_all(&result, |caps: &regex::Captures| {
+        let tag = caps.get(1).unwrap().as_str();
+        let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+        let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+        let all_attrs = format!("{} {}", attrs_before, attrs_after);
 
-            let all_attrs = format!("{} {}", attrs_before, attrs_after);
+        let confirm_re = regex::Regex::new(r#"(?is)v-confirm\s*=\s*["']([^"']*)["']"#).unwrap();
+        let confirm_js = if let Some(c) = confirm_re.captures(&all_attrs) {
+            let msg = c.get(1).map(|m| m.as_str()).unwrap_or("");
+            format!("confirm({})", js_string_literal(msg))
+        } else { "true".to_string() };
 
-            let confirm_re =
-                regex::Regex::new(r#"(?is)v-confirm\s*=\s*["']([^"']*)["']"#)
-                    .unwrap();
+        let clean_before = strip_vlo_directive_attrs(attrs_before);
+        let clean_after = strip_vlo_directive_attrs(attrs_after);
+        let url_js = js_string_literal(url);
 
-            let confirm_js = if let Some(c) = confirm_re.captures(&all_attrs) {
-                let msg = c.get(1).map(|m| m.as_str()).unwrap_or("");
-                format!("confirm({})", js_string_literal(msg))
-            } else {
-                "true".to_string()
-            };
+        let onclick = format!(
+            "if({}){{fetch({},{{method:'DELETE',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}}}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO DELETE]',e);window.location.reload()}})}}",
+            confirm_js, url_js
+        );
 
-            let clean_before = strip_vlo_directive_attrs(attrs_before);
-            let clean_after = strip_vlo_directive_attrs(attrs_after);
-            let url_js = js_string_literal(url);
-
-            // Updated fetch handler with status & action query flags for toast notifications on deletion
-            let onclick = format!(
-                "if({}){{fetch({},{{method:'DELETE',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}}}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}var p=new URLSearchParams(window.location.search);p.set('status','success');p.set('action','deleted');p.set('message',d.message||'Delete operation successful.');window.location.href=window.location.pathname+'?'+p.toString()}}).catch(e=>{{console.error('[VLO DELETE]',e);var p=new URLSearchParams(window.location.search);p.set('status','error');p.set('action','error');p.set('message',e.message);window.location.href=window.location.pathname+'?'+p.toString()}})}}",
-                confirm_js, url_js
-            );
-
-            let onclick_attr = escape_html_attribute(&onclick);
-
-            format!(
-                "<{} {} onclick=\"{}\">",
-                tag,
-                format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
-                onclick_attr
-            )
-        })
-        .into_owned();
+        let onclick_attr = escape_html_attribute(&onclick);
+        format!("<{} {} onclick=\"{}\">", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim(), onclick_attr)
+    }).into_owned();
 
     // ============================================================
     // v-put
     // ============================================================
-
     let re_put = regex::Regex::new(
         r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-put\s*=\s*["']([^"']+)["']([^>]*?)>"#,
-    )
-    .unwrap();
+    ).unwrap();
 
-    result = re_put
-        .replace_all(&result, |caps: &regex::Captures| {
-            let tag = caps.get(1).unwrap().as_str();
-            let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-            let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
-            let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+    result = re_put.replace_all(&result, |caps: &regex::Captures| {
+        let tag = caps.get(1).unwrap().as_str();
+        let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+        let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+        let all_attrs = format!("{} {}", attrs_before, attrs_after);
+        let clean_before = strip_vlo_directive_attrs(attrs_before);
+        let clean_after = strip_vlo_directive_attrs(attrs_after);
+        let url_js = js_string_literal(url);
 
-            let all_attrs = format!("{} {}", attrs_before, attrs_after);
-
-            let clean_before = strip_vlo_directive_attrs(attrs_before);
-            let clean_after = strip_vlo_directive_attrs(attrs_after);
-
-            let url_js = js_string_literal(url);
-
-            if tag.eq_ignore_ascii_case("form") {
-                // Form submit handler with status & action query flags for toast notifications on update
-                let onsubmit = format!(
-                    "event.preventDefault();fetch({},{{method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}var p=new URLSearchParams(window.location.search);p.set('status','success');p.set('action','updated');p.set('message',d.message||'Update operation successful.');window.location.href=window.location.pathname+'?'+p.toString()}}).catch(e=>{{console.error('[VLO PUT]',e);var p=new URLSearchParams(window.location.search);p.set('status','error');p.set('action','error');p.set('message',e.message);window.location.href=window.location.pathname+'?'+p.toString()}});return false",
-                    url_js
-                );
-
-                let onsubmit_attr = escape_html_attribute(&onsubmit);
-
-                format!(
-                    "<{} {} onsubmit=\"{}\">",
-                    tag,
-                    format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
-                    onsubmit_attr
-                )
-            } else {
-                let param_re =
-                    regex::Regex::new(
-                        r#"(?is)v-param\s*=\s*["']([^"']+)["']"#,
-                    )
-                    .unwrap();
-
-                let param = param_re
-                    .captures(&all_attrs)
-                    .and_then(|c| c.get(1))
-                    .map(|m| m.as_str())
-                    .unwrap_or("value");
-
-                let prompt_re =
-                    regex::Regex::new(
-                        r#"(?is)v-prompt\s*=\s*["']([^"']*)["']"#,
-                    )
-                    .unwrap();
-
-                let prompt = prompt_re
-                    .captures(&all_attrs)
-                    .and_then(|c| c.get(1))
-                    .map(|m| m.as_str())
-                    .unwrap_or("Enter new value:");
-
-                let prompt_js = js_string_literal(prompt);
-                let param_js = js_string_literal(param);
-
-                let onclick = format!(
-                    "let v=prompt({});if(v!==null){{fetch({},{{method:'PUT',headers:{{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok){{let d;try{{d=await r.json()}}catch(_){{d={{}}}};throw new Error(d.details||d.error||'Request failed')}}window.location.href=window.location.pathname+'?status=success&action=updated'}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.href=window.location.pathname+'?status=error&action=error&message='+encodeURIComponent(e.message)}})}}",
-                    prompt_js, url_js, param_js
-                );
-
-                let onclick_attr = escape_html_attribute(&onclick);
-
-                format!(
-                    "<{} {} onclick=\"{}\">",
-                    tag,
-                    format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
-                    onclick_attr
-                )
-            }
-        })
-        .into_owned();
-
-        // ============================================================
-    // v-post
-    // ============================================================
-
-    let re_post = regex::Regex::new(
-        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-post\s*=\s*["']([^"']+)["']([^>]*?)>"#,
-    )
-    .unwrap();
-
-    result = re_post
-        .replace_all(&result, |caps: &regex::Captures| {
-            let tag = caps.get(1).unwrap().as_str();
-            let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-            let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
-            let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
-
-            let clean_before = strip_vlo_directive_attrs(attrs_before);
-            let clean_after = strip_vlo_directive_attrs(attrs_after);
-
-            let url_js = js_string_literal(url);
-
-            if tag.eq_ignore_ascii_case("form") {
+        if tag.eq_ignore_ascii_case("form") {
             let onsubmit = format!(
-                "event.preventDefault();fetch({},{{method:'POST',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new FormData(event.currentTarget)}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}var p=new URLSearchParams(window.location.search);p.set('status','success');p.set('action','created');p.set('message',d.message||'Operation successful.');window.location.href=window.location.pathname+'?'+p.toString()}}).catch(e=>{{console.error('[VLO POST]',e);var p=new URLSearchParams(window.location.search);p.set('status','error');p.set('action','error');p.set('message',e.message);window.location.href=window.location.pathname+'?'+p.toString()}});return false",
+                "event.preventDefault();fetch({},{{method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.reload()}});return false",
                 url_js
             );
+            let onsubmit_attr = escape_html_attribute(&onsubmit);
+            format!("<{} {} onsubmit=\"{}\">", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim(), onsubmit_attr)
+        } else {
+            let param_re = regex::Regex::new(r#"(?is)v-param\s*=\s*["']([^"']+)["']"#).unwrap();
+            let param = param_re.captures(&all_attrs).and_then(|c| c.get(1)).map(|m| m.as_str()).unwrap_or("value");
+            let prompt_re = regex::Regex::new(r#"(?is)v-prompt\s*=\s*["']([^"']*)["']"#).unwrap();
+            let prompt = prompt_re.captures(&all_attrs).and_then(|c| c.get(1)).map(|m| m.as_str()).unwrap_or("Enter new value:");
+            let prompt_js = js_string_literal(prompt);
+            let param_js = js_string_literal(param);
 
-                let onsubmit_attr = escape_html_attribute(&onsubmit);
+            let onclick = format!(
+                "let v=prompt({});if(v!==null){{fetch({},{{method:'PUT',headers:{{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok){{let d;try{{d=await r.json()}}catch(_){{d={{}}}};throw new Error(d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.reload()}})}}",
+                prompt_js, url_js, param_js
+            );
+            let onclick_attr = escape_html_attribute(&onclick);
+            format!("<{} {} onclick=\"{}\">", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim(), onclick_attr)
+        }
+    }).into_owned();
 
-                format!(
-                    "<{} {} onsubmit=\"{}\">",
-                    tag,
-                    format!("{} {}", clean_before.trim(), clean_after.trim()).trim(),
-                    onsubmit_attr
-                )
-            } else {
-                format!(
-                    "<{} {}>",
-                    tag,
-                    format!("{} {}", clean_before.trim(), clean_after.trim()).trim()
-                )
-            }
-        })
-        .into_owned();
+    // ============================================================
+    // v-post
+    // ============================================================
+    let re_post = regex::Regex::new(
+        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-post\s*=\s*["']([^"']+)["']([^>]*?)>"#,
+    ).unwrap();
 
-    vlo_debug!(
-        "🧩 [VLO DIRECTIVES] Resolved HTML: {} chars, {} rows",
-        result.len(),
-        result.lines().count()
-    );
+    result = re_post.replace_all(&result, |caps: &regex::Captures| {
+        let tag = caps.get(1).unwrap().as_str();
+        let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+        let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+        let clean_before = strip_vlo_directive_attrs(attrs_before);
+        let clean_after = strip_vlo_directive_attrs(attrs_after);
+        let url_js = js_string_literal(url);
 
+        if tag.eq_ignore_ascii_case("form") {
+            let onsubmit = format!(
+                "event.preventDefault();fetch({},{{method:'POST',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new FormData(event.currentTarget)}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO POST]',e);window.location.reload()}});return false",
+                url_js
+            );
+            let onsubmit_attr = escape_html_attribute(&onsubmit);
+            format!("<{} {} onsubmit=\"{}\">", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim(), onsubmit_attr)
+        } else {
+            format!("<{} {}>", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim())
+        }
+    }).into_owned();
+
+    vlo_debug!("🧩 [VLO DIRECTIVES] Resolved HTML: {} chars, {} rows", result.len(), result.lines().count());
     result
 }

@@ -6,7 +6,7 @@ use axum::{
     body::Bytes,
     extract::{FromRequest, Multipart, Path as AxumPath, Request},
     http::{Method, StatusCode},
-    response::{IntoResponse, Json, Redirect, Response},
+    response::{IntoResponse, Json, Response},
 };
 use serde_json::Value;
 use std::{
@@ -179,6 +179,18 @@ pub fn generate_count_sql(sql_template: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Flash Message
+// ---------------------------------------------------------------------------
+fn flash_response(status: StatusCode, body: serde_json::Value, flash_encoded: &str) -> Response {
+    let cookie = crate::auth::flash_cookie_header(flash_encoded);
+    let mut response = (status, Json(body)).into_response();
+    if let Ok(val) = axum::http::HeaderValue::from_str(&cookie) {
+        response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+    }
+    response
+}
+
+// ---------------------------------------------------------------------------
 // Main Route Handler
 // ---------------------------------------------------------------------------
 pub async fn api_route_handler(
@@ -325,14 +337,28 @@ pub async fn api_route_handler(
             // ─────────────────────────────────────────────────────────────────
 
             if method != Method::GET {
-                return Redirect::to(&format!("/{}?status=success&action={}", resource, action_type)).into_response();
+                let (icon, title) = match action_type {
+                    "updated" => ("✏️", "Update Successful"),
+                    "deleted" => ("🗑️", "Delete Successful"),
+                    _ => ("✅", "Operation Successful"),
+                };
+                let flash = crate::auth::encode_flash("success", icon, title, &format!("{} completed successfully.", action_type));
+                return flash_response(StatusCode::OK, serde_json::json!({
+                    "success": true,
+                    "message": format!("{} operation successful", action_type)
+                }), &flash);
             }
             (StatusCode::OK, Json(data)).into_response()
         }
         Err(error) => {
             eprintln!("❌ [VLO API] {} {} -> SQL error: {}", method, action_name, error);
             if method != Method::GET {
-                return Redirect::to(&format!("/{}?status=error&action={}", resource, action_type)).into_response();
+                let flash = crate::auth::encode_flash("error", "⚠️", "Operation Failed", &error);
+                return flash_response(StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({
+                    "success": false,
+                    "error": "Operation failed",
+                    "details": error
+                }), &flash);
             }
             (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "SQL Execution Error", "details": error, "action": action_name}))).into_response()
         }

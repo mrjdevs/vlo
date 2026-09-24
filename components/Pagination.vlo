@@ -1,6 +1,6 @@
 <nav class="vlo-pagination">
     {if page > 1}
-        <a href="?page={{prev_page}}&limit={{limit}}" class="pagination-btn">← Prev</a>
+        <a href="?page={{prev_page}}&limit={{limit}}{if search}&search={{search}}{/if}{if _columns}&_columns={{_columns}}{/if}{if sort}&sort={{sort}}&order={{order}}{/if}" class="pagination-btn">← Prev</a>
     {else}
         <span class="pagination-btn disabled">← Prev</span>
     {/if}
@@ -12,48 +12,18 @@
     </div>
 
     {if page < total_pages}
-        <a href="?page={{next_page}}&limit={{limit}}" class="pagination-btn pagination-next">Next →</a>
+        <a href="?page={{next_page}}&limit={{limit}}{if search}&search={{search}}{/if}{if _columns}&_columns={{_columns}}{/if}{if sort}&sort={{sort}}&order={{order}}{/if}" class="pagination-btn pagination-next">Next →</a>
     {else}
         <span class="pagination-btn disabled">Next →</span>
     {/if}
 </nav>
 
 <style>
-.vlo-pagination {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    padding: 20px 0;
-}
-.pagination-btn {
-    display: inline-flex;
-    align-items: center;
-    padding: 8px 16px;
-    border: 1px solid var(--border, #292929);
-    border-radius: 8px;
-    color: var(--text, #ccc);
-    text-decoration: none;
-    font-size: 0.8rem;
-    font-weight: 600;
-    transition: all 0.2s ease;
-}
-.pagination-btn:hover:not(.disabled) {
-    border-color: var(--primary, #00f5ff);
-    color: var(--primary, #00f5ff);
-    background: rgba(0, 245, 255, 0.05);
-}
-.pagination-btn.disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-    pointer-events: none;
-}
-.pagination-info {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.85rem;
-}
+.vlo-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 20px 0; }
+.pagination-btn { display: inline-flex; align-items: center; padding: 8px 16px; border: 1px solid var(--border, #292929); border-radius: 8px; color: var(--text, #ccc); text-decoration: none; font-size: 0.8rem; font-weight: 600; transition: all 0.2s ease; }
+.pagination-btn:hover:not(.disabled) { border-color: var(--primary, #00f5ff); color: var(--primary, #00f5ff); background: rgba(0, 245, 255, 0.05); }
+.pagination-btn.disabled { opacity: 0.3; cursor: not-allowed; pointer-events: none; }
+.pagination-info { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; }
 .pagination-current { color: var(--primary, #00f5ff); font-weight: 700; }
 .pagination-separator { color: #555; }
 .pagination-total { color: #888; }

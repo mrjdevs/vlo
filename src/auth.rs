@@ -409,7 +409,7 @@ async fn fetch_password_hash(user_id: i64) -> Option<String> {
 // Middleware
 // ---------------------------------------------------------------------------
 
-fn parse_cookie_header(value: &str, cookie_name: &str) -> Option<String> {
+pub fn parse_cookie_header(value: &str, cookie_name: &str) -> Option<String> {
     let prefix = format!("{}=", cookie_name);
     crate::vlo_debug!("🔐 COOKIE: Looking for prefix '{}' in '{}'", prefix, value);
 
@@ -798,4 +798,34 @@ pub fn check_page_guard(
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Cookie-Based Flash Messages
+// ---------------------------------------------------------------------------
+
+pub const FLASH_COOKIE: &str = "vlo_flash";
+
+pub fn encode_flash(variant: &str, icon: &str, title: &str, description: &str) -> String {
+    let flash = serde_json::json!({
+        "variant": variant,
+        "icon": icon,
+        "title": title,
+        "description": description
+    });
+    let json_str = serde_json::to_string(&flash).unwrap_or_default();
+    urlencoding::encode(&json_str).to_string()
+}
+
+pub fn decode_flash(encoded: &str) -> Option<serde_json::Value> {
+    let decoded = urlencoding::decode(encoded).ok()?;
+    serde_json::from_str(&decoded).ok()
+}
+
+pub fn flash_cookie_header(encoded: &str) -> String {
+    format!("{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=60", FLASH_COOKIE, encoded)
+}
+
+pub fn expire_flash_cookie() -> String {
+    format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", FLASH_COOKIE)
 }
