@@ -11,9 +11,10 @@
     {/if}
     
     <select name="sort" class="vlo-sort-input" onchange="this.form.submit()">
-        {for option in options}
-            <option value="{{option.value}}" {if sort == option.value}selected{/if}>{{option.label}}</option>
-        {/for}
+        <option value="id" {if sort == "id"}selected{/if}>ID</option>
+        <option value="title" {if sort == "title"}selected{/if}>Title</option>
+        <option value="price" {if sort == "price"}selected{/if}>Price</option>
+        <option value="stock" {if sort == "stock"}selected{/if}>Stock</option>
     </select>
     
     <select name="order" class="vlo-sort-input vlo-sort-order" onchange="this.form.submit()">

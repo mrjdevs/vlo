@@ -477,11 +477,35 @@ pub fn evaluate_if_block(
     inner: &str,
     expression: &str,
     context: &HashMap<String, Value>,
+    preserve_unresolved: bool,
 ) -> String {
+    if preserve_unresolved && expression_uses_runtime_query(expression) {
+        let mut all_resolved = true;
+        let mut current = String::new();
+        for ch in expression.chars() {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                current.push(ch);
+            } else {
+                if !current.is_empty() && is_runtime_var(&current) && !context.contains_key(&current) {
+                    all_resolved = false;
+                    break;
+                }
+                current.clear();
+            }
+        }
+        if !current.is_empty() && is_runtime_var(&current) && !context.contains_key(&current) {
+            all_resolved = false;
+        }
+        
+        if !all_resolved {
+            return format!("{{if {}}}{}{{/if}}", expression, inner);
+        }
+    }
+
     let (true_part, else_part) = split_else_branches(inner);
 
     if evaluate_condition(expression, context) {
-        return render_control_flow(&true_part, context);
+        return render_control_flow_internal(&true_part, context, preserve_unresolved);
     }
 
     if let Some(rest) = else_part {
@@ -494,7 +518,7 @@ pub fn evaluate_if_block(
             if let Some(end) = v.find(delimiter) {
                 let expr = v[..end].trim();
                 let body = &v[end + delimiter.len()..];
-                return evaluate_if_block(body, expr, context);
+                return evaluate_if_block(body, expr, context, preserve_unresolved);
             }
         }
 
@@ -504,7 +528,7 @@ pub fn evaluate_if_block(
             .or_else(|| rest.strip_prefix("{else}"))
             .unwrap_or(&rest);
 
-        return render_control_flow(else_body, context);
+        return render_control_flow_internal(else_body, context, preserve_unresolved);
     }
 
     String::new()
@@ -514,6 +538,7 @@ pub fn evaluate_for_block(
     inner: &str,
     expression: &str,
     context: &HashMap<String, Value>,
+    preserve_unresolved: bool,
 ) -> String {
     let parts: Vec<&str> = expression.split_whitespace().collect();
 
@@ -526,11 +551,11 @@ pub fn evaluate_for_block(
     let (body, else_part) = split_else_branches(inner);
 
     let Value::Array(items) = array else {
-        return render_else(else_part, context);
+        return render_else(else_part, context, preserve_unresolved);
     };
 
     if items.is_empty() {
-        return render_else(else_part, context);
+        return render_else(else_part, context, preserve_unresolved);
     }
 
     let mut result = String::with_capacity(body.len() * items.len());
@@ -542,7 +567,7 @@ pub fn evaluate_for_block(
         child.insert("@number".to_string(), Value::Number(((idx + 1) as i64).into()));
         child.insert("@first".to_string(), Value::Bool(idx == 0));
         child.insert("@last".to_string(), Value::Bool(idx + 1 == items.len()));
-        result.push_str(&render_control_flow(&body, &child));
+        result.push_str(&render_control_flow_internal(&body, &child, preserve_unresolved));
     }
 
     result
@@ -551,6 +576,7 @@ pub fn evaluate_for_block(
 fn render_else(
     else_part: Option<String>,
     context: &HashMap<String, Value>,
+    preserve_unresolved: bool,
 ) -> String {
     else_part
         .map(|v| {
@@ -559,7 +585,7 @@ fn render_else(
                 .or_else(|| v.strip_prefix("{{else}}"))
                 .or_else(|| v.strip_prefix("{else}"))
                 .unwrap_or(&v);
-            render_control_flow(body, context)
+            render_control_flow_internal(body, context, preserve_unresolved)
         })
         .unwrap_or_default()
 }
@@ -573,14 +599,14 @@ fn expression_uses_runtime_query(expression: &str) -> bool {
             continue;
         }
         if !current.is_empty() {
-            if matches!(current.as_str(), "status" | "action" | "message") {
+            if is_runtime_var(&current) {
                 return true;
             }
             current.clear();
         }
     }
 
-    matches!(current.as_str(), "status" | "action" | "message")
+    !current.is_empty() && is_runtime_var(&current)
 }
 
 fn block_uses_runtime_query(block: &str) -> bool {
@@ -661,7 +687,7 @@ pub fn preserve_runtime_query_interpolations(
         let end = start + 2 + end_rel;
         let expression = template[start + 2..end].trim();
 
-        if matches!(expression, "status" | "action" | "message") {
+        if is_runtime_var(expression) { 
             let index = values.len();
             values.push(template[start..end + 2].to_string());
             result.push_str(&format!("__VLO_RUNTIME_QUERY_INTERPOLATION_{}__", index));
@@ -857,6 +883,14 @@ pub fn restore_runtime_data_sources(
     result
 }
 
+pub fn render_control_flow(
+    template: &str,
+    context: &HashMap<String, Value>,
+) -> String {
+    let preserve = crate::state::is_building();
+    render_control_flow_internal(template, context, preserve)
+}
+
 pub fn render_control_flow_for_build(
     template: &str,
     context: &HashMap<String, Value>,
@@ -878,7 +912,7 @@ pub fn render_control_flow_for_build(
         let expression = source[start + 2..end].trim();
 
         let is_runtime_interpolation = expression.contains('.')
-            || matches!(expression, "status" | "action" | "message");
+            || is_runtime_var(expression);
 
         if is_runtime_interpolation {
             let index = protected_interpolations.len();
@@ -891,7 +925,7 @@ pub fn render_control_flow_for_build(
         }
     }
 
-    let mut rendered = render_control_flow(&source, context);
+    let mut rendered = render_control_flow_internal(&source, context, true);
 
     for (index, interpolation) in protected_interpolations.iter().enumerate() {
         let marker = format!("__VLO_RUNTIME_INTERPOLATION_{}__", index);
@@ -901,14 +935,76 @@ pub fn render_control_flow_for_build(
     restore_runtime_query_blocks(&rendered, &blocks)
 }
 
-pub fn render_control_flow(
+
+pub fn render_interpolations(
     template: &str,
     context: &HashMap<String, Value>,
 ) -> String {
+    // One linear pass instead of re-scanning from byte 0 per interpolation.
+    let preserve = crate::state::is_building(); // ← ADD THIS
+    let in_quotes = quote_mask(template);
+
+    PROP_RE
+        .replace_all(template, |captures: &regex::Captures| {
+            let full = captures.get(0).unwrap();
+            let key = captures[1].trim();
+            
+            // ← UPDATE THIS CHECK to include `preserve`
+            if preserve && is_runtime_var(key) && !context.contains_key(key) {
+                return full.as_str().to_string();
+            }
+            
+            let value = format_value(&get_nested_value(key, context));
+
+            if in_quotes[full.start()] {
+                escape_html_attribute(&value)
+            } else {
+                value
+            }
+        })
+        .into_owned()
+}
+
+pub fn format_value(val: &Value) -> String {
+    match val {
+        Value::Null => String::new(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => s.clone(),
+        _ => serde_json::to_string(val).unwrap_or_default(),
+    }
+}
+
+pub fn clean_empty_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    for line in html.lines() {
+        if !line.trim().is_empty() {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+    if !result.is_empty() {
+        result.pop();
+    }
+    result
+}
+
+pub fn escape_html_attribute(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn render_control_flow_internal(
+    template: &str,
+    context: &HashMap<String, Value>,
+    preserve_unresolved: bool,
+) -> String {
     let mut result = String::with_capacity(template.len());
     let mut cursor = 0usize;
-
-    // One linear pass instead of re-scanning from byte 0 per interpolation.
     let in_quotes = quote_mask(template);
 
     while cursor < template.len() {
@@ -936,6 +1032,13 @@ pub fn render_control_flow(
             if let Some(end_rel) = template[pos + 2..].find("}}") {
                 let end = pos + 2 + end_rel;
                 let key = template[pos + 2..end].trim();
+                
+                if preserve_unresolved && is_runtime_var(key) && !context.contains_key(key) {
+                    result.push_str(&template[pos..end + 2]);
+                    cursor = end + 2;
+                    continue;
+                }
+                
                 let value = format_value(&get_nested_value(key, context));
 
                 if in_quotes[pos] {
@@ -991,9 +1094,9 @@ pub fn render_control_flow(
         let inner = &template[content_start..block_end - closing_len];
 
         let rendered = if kind == "for" {
-            evaluate_for_block(inner, expression, context)
+            evaluate_for_block(inner, expression, context, preserve_unresolved)
         } else {
-            evaluate_if_block(inner, expression, context)
+            evaluate_if_block(inner, expression, context, preserve_unresolved)
         };
 
         result.push_str(&rendered);
@@ -1003,57 +1106,15 @@ pub fn render_control_flow(
     result
 }
 
-pub fn render_interpolations(
-    template: &str,
-    context: &HashMap<String, Value>,
-) -> String {
-    // One linear pass instead of re-scanning from byte 0 per interpolation.
-    let in_quotes = quote_mask(template);
-
-    PROP_RE
-        .replace_all(template, |captures: &regex::Captures| {
-            let full = captures.get(0).unwrap();
-            let key = captures[1].trim();
-            let value = format_value(&get_nested_value(key, context));
-
-            if in_quotes[full.start()] {
-                escape_html_attribute(&value)
-            } else {
-                value
-            }
-        })
-        .into_owned()
-}
-
-pub fn format_value(val: &Value) -> String {
-    match val {
-        Value::Null => String::new(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
-        Value::String(s) => s.clone(),
-        _ => serde_json::to_string(val).unwrap_or_default(),
-    }
-}
-
-pub fn clean_empty_tags(html: &str) -> String {
-    let mut result = String::with_capacity(html.len());
-    for line in html.lines() {
-        if !line.trim().is_empty() {
-            result.push_str(line);
-            result.push('\n');
-        }
-    }
-    if !result.is_empty() {
-        result.pop();
-    }
-    result
-}
-
-pub fn escape_html_attribute(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+fn is_runtime_var(var: &str) -> bool {
+    matches!(
+        var,
+        "status" | "action" | "message" |
+        "search" | "sort" | "order" | "_columns" |
+        "page" | "limit" | "offset" | "total" | "total_pages" |
+        "has_next" | "has_prev" | "prev_page" | "next_page" |
+        "logged_in" | "user_name" | "user_role" | "user_email" |
+        "flash_messages" | "flash_variant" | "flash_icon" | "flash_title" | "flash_description" |
+        "csrf_token" | "auth_identifier_field" | "auth_password_field" // ← ADDED
+    )
 }

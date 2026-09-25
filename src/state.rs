@@ -218,3 +218,16 @@ pub fn generate_request_id() -> String {
         .as_nanos();
     format!("req-{:x}-{}", timestamp, std::process::id())
 }
+
+// ---------------------------------------------------------------------------
+// Build mode flag
+// ---------------------------------------------------------------------------
+pub static IS_BUILDING: AtomicBool = AtomicBool::new(false);
+
+pub fn set_building(building: bool) {
+    IS_BUILDING.store(building, Ordering::Relaxed);
+}
+
+pub fn is_building() -> bool {
+    IS_BUILDING.load(Ordering::Relaxed)
+}

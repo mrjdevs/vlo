@@ -320,8 +320,8 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
         .layer(axum::middleware::from_fn(auth::csrf_middleware))        // Runs 3rd
         .layer(axum::middleware::from_fn(auth::api_auth_middleware))    // Runs 2nd
         .layer(axum::middleware::from_fn(auth::session_middleware))     // Runs 1st (MUST BE LAST)
-        .fallback(move |uri: axum::http::Uri| {
-            serve_build_page(build_dir.clone(), uri)
+        .fallback(move |uri: axum::http::Uri, req: Request| async move {
+            serve_build_page(build_dir.clone(), uri, req).await
         });
 
     // CLI arguments override .env values.
@@ -480,107 +480,186 @@ fn parse_cgi_query(query: &str) -> HashMap<String, String> {
 async fn serve_build_page(
     build_dir: std::path::PathBuf,
     uri: axum::http::Uri,
+    req: Request,
 ) -> impl IntoResponse {
     let path = uri.path();
+    let page_name = if path == "/" { "index" } else { path.trim_start_matches('/') };
 
-    let filename = if path == "/" {
-        "index.html".to_string()
-    } else {
-        let name = path.trim_start_matches('/');
-
-        if name.contains('/')
-            || name.contains('\\')
-            || name.contains("..")
-        {
-            return (
-                axum::http::StatusCode::NOT_FOUND,
-                Html("404 - Page Not Found".to_string()),
-            )
-                .into_response();
+    // ─── 1. MANUALLY RESOLVE AUTH (Bypass Axum fallback layer quirks) ─────
+    let mut auth = req.extensions().get::<crate::auth::AuthUser>().cloned();
+    
+    // If middleware didn't run (common with Axum fallbacks) or didn't find a user,
+    // manually parse the cookie and query the database.
+    if auth.is_none() || auth.as_ref().map_or(true, |a| a.user.is_none()) {
+        let cookie_header = req.headers().get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok());
+        let cookie_name = crate::auth::auth_config().cookie_name.clone();
+        if let Some(header) = cookie_header {
+            if let Some(token) = crate::auth::parse_cookie_header(header, &cookie_name) {
+                crate::vlo_debug!("🔐 MANUAL SESSION: Found token {}", &token[..8.min(token.len())]);
+                let user = crate::auth::get_user_from_session(&token).await;
+                if user.is_some() {
+                    crate::vlo_debug!("🔐 MANUAL SESSION: User resolved successfully");
+                    auth = Some(crate::auth::AuthUser {
+                        user,
+                        csrf_token: Some(crate::auth::compute_csrf_token(&token)),
+                        session_token: Some(token),
+                    });
+                }
+            }
         }
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
-        format!("{}.html", name)
-    };
+    // ─── 2. EXTRACT FLASH EARLY ────────────────────────────────────────
+    let flash_encoded = req.headers().get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| crate::auth::parse_cookie_header(h, crate::auth::FLASH_COOKIE));
+        
+    let mut flash_html = String::new();
+    let mut expire_cookie = false;
+    
+    if let Some(encoded) = flash_encoded {
+        if let Some(flash) = crate::auth::decode_flash(&encoded) {
+            let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
+            let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
+            let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
+            
+            flash_html = format!(
+                r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div><style>@keyframes vloFlashIn{{from{{opacity:0;transform:translateX(40px)}}to{{opacity:1;transform:translateX(0)}}}}</style><script>setTimeout(function(){{document.querySelectorAll('.vlo-flash').forEach(function(el){{el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){{el.remove()}},400)}})}},4000)</script>"#, 
+                border_color, icon, title, description
+            );
+            expire_cookie = true;
+        }
+    }
 
+        // ─── 3. CHECK AUTH GUARD FROM ROUTES MANIFEST ──────────────────────
+    let manifest_path = build_dir.join("routes.json");
+    
+    crate::vlo_debug!("🛡️ GUARD: Checking path '{}'", path);
+    crate::vlo_debug!("🛡️ GUARD: User authenticated = {}", auth.as_ref().map_or(false, |a| a.user.is_some()));
+
+    // ─── EXTRACT `next` PARAMETER FOR REDIRECTS ─────────────
+    let raw_query = uri.query().unwrap_or("");
+    let next_decoded = raw_query.split('&')
+        .find_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            let key = parts.next()?;
+            let value = parts.next().unwrap_or("");
+            if key == "next" {
+                Some(urlencoding::decode(value).unwrap_or_default().into_owned())
+            } else {
+                None
+            }
+        });
+    let next_ref = next_decoded.as_deref();
+    // ─────────────────────────────────────────────────────────
+
+    if manifest_path.exists() {
+        if let Ok(manifest_str) = fs::read_to_string(&manifest_path) {
+            if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_str) {
+                if let Some(routes) = manifest.as_object() {
+                    if let Some(route_config) = routes.get(path) {
+                        let guard = crate::auth::PageGuard {
+                            auth: route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false),
+                            guest: route_config.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
+                            roles: route_config.get("roles")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                                .unwrap_or_default(),
+                        };
+                        
+                        crate::vlo_debug!("🛡️ GUARD: Route '{}' requires auth={}, guest={}, roles={:?}", path, guard.auth, guard.guest, guard.roles);
+                        
+                        let user = auth.as_ref().and_then(|a| a.user.clone());
+                        if let Some(mut response) = crate::auth::check_page_guard(&guard, &user, path, next_ref) { // ← NOW next_ref
+                            crate::vlo_debug!("🛡️ GUARD: Access DENIED for '{}', redirecting...", path);
+                            
+                            if expire_cookie {
+                                let expire = crate::auth::expire_flash_cookie();
+                                if let Ok(val) = axum::http::HeaderValue::from_str(&expire) {
+                                    response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+                                }
+                            }
+                            return response;
+                        }
+                        crate::vlo_debug!("🛡️ GUARD: Access GRANTED for '{}'", path);
+                    }
+                }
+            }
+        }
+    }
+
+    let filename = if path == "/" { "index.html".to_string() } else { format!("{}.html", page_name) };
     let file = build_dir.join(&filename);
 
     match fs::read_to_string(&file) {
         Ok(html) => {
-            let query = uri
-                .query()
-                .unwrap_or("")
-                .split('&')
+            let query: HashMap<String, String> = uri.query().unwrap_or("").split('&')
                 .filter_map(|pair| {
                     let mut parts = pair.splitn(2, '=');
                     let key = parts.next()?;
                     let value = parts.next().unwrap_or("");
-
-                    Some((
-                        key.to_string(),
-                        urlencoding::decode(value)
-                            .unwrap_or_else(|_| value.into())
-                            .to_string(),
-                    ))
-                })
-                .collect::<std::collections::HashMap<_, _>>();
-
-            let mut context = std::collections::HashMap::new();
-
+                    Some((key.to_string(), urlencoding::decode(value).unwrap_or_else(|_| value.into()).to_string()))
+                }).collect();
+            
+            let mut context = HashMap::new();
             for (key, value) in &query {
-                // Parse numeric query parameters as integers
-                if let Ok(n) = value.parse::<i64>() {
-                    context.insert(key.clone(), serde_json::Value::Number(n.into()));
-                } else {
-                    context.insert(key.clone(), serde_json::Value::String(value.clone()));
+                if let Ok(n) = value.parse::<i64>() { context.insert(key.clone(), serde_json::Value::Number(n.into())); }
+                else { context.insert(key.clone(), serde_json::Value::String(value.clone())); }
+            }
+
+            let cfg = crate::auth::auth_config();
+            context.insert("auth_identifier_field".to_string(), serde_json::Value::String(cfg.identifier_field.clone()));
+            context.insert("auth_password_field".to_string(), serde_json::Value::String(cfg.password_field.clone()));
+
+            if let Some(auth_user) = &auth {
+                if let Some(user) = &auth_user.user {
+                    context.insert("logged_in".to_string(), serde_json::Value::Bool(true));
+                    context.insert("user_name".to_string(), serde_json::Value::String(user.name.clone()));
+                    context.insert("user_role".to_string(), serde_json::Value::String(user.role.clone()));
+                    context.insert("user_email".to_string(), serde_json::Value::String(user.email.clone()));
                 }
             }
 
-            // Resolve data-source blocks from the live database.
-                let (html, computed_vars) = resolve_data_sources(&html, &context);
-                let mut context = context;
-                for (key, value) in computed_vars {
-                    context.insert(key, value);
+            if !context.contains_key("limit") { context.insert("limit".to_string(), serde_json::Value::Number(20.into())); }
+            if !context.contains_key("page") { context.insert("page".to_string(), serde_json::Value::Number(1.into())); }
+            if !context.contains_key("order") { context.insert("order".to_string(), serde_json::Value::String("asc".to_string())); }
+            
+            if let (Some(p), Some(l)) = (context.get("page").and_then(|v| v.as_i64()), context.get("limit").and_then(|v| v.as_i64())) {
+                let offset = (p.max(1) - 1) * l.max(1);
+                context.insert("offset".to_string(), serde_json::Value::Number(offset.into()));
+                context.insert("prev_page".to_string(), serde_json::Value::Number((p.max(1) - 1).max(1).into()));
+                context.insert("next_page".to_string(), serde_json::Value::Number((p + 1).into()));
+            }
+
+            let (html_with_data, computed_vars) = resolve_data_sources(&html, &context);
+            let mut context = context;
+            for (key, value) in computed_vars { context.insert(key, value); }
+            
+            let rendered = render_control_flow(&html_with_data, &context);
+
+            let csrf_token = auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default();
+            let mut rendered = rendered.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
+            rendered = rendered.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
+
+            let mut response = (StatusCode::OK, Html(rendered)).into_response();
+            
+            if expire_cookie {
+                let expire = crate::auth::expire_flash_cookie();
+                if let Ok(val) = axum::http::HeaderValue::from_str(&expire) {
+                    response.headers_mut().append(axum::http::header::SET_COOKIE, val);
                 }
-
-            let rendered = render_control_flow(
-                &html,
-                &context,
-            );
-
-            let rendered = rendered.replacen(
-                "</body>",
-                &format!(
-                    r#"<script>
-            history.replaceState(null, "", {});
-            </script>
-            </body>"#,
-                    serde_json::to_string(path).unwrap()
-                ),
-                1,
-            );
-
-            (
-                axum::http::StatusCode::OK,
-                Html(rendered),
-            )
-                .into_response()
+            }
+            
+            response
         }
-
         Err(_) => {
             let not_found = build_dir.join("404.html");
-
             match fs::read_to_string(not_found) {
-                Ok(html) => (
-                    axum::http::StatusCode::NOT_FOUND,
-                    Html(html),
-                )
-                    .into_response(),
-
-                Err(_) => (
-                    axum::http::StatusCode::NOT_FOUND,
-                    Html("404 - Page Not Found".to_string()),
-                )
-                    .into_response(),
+                Ok(html) => (StatusCode::NOT_FOUND, Html(html)).into_response(),
+                Err(_) => (StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response(),
             }
         }
     }
@@ -631,6 +710,7 @@ async fn cache_middleware(req: Request, next: Next) -> Response {
 }
 
 pub fn build(release: bool) -> Result<(), String> {
+    crate::state::set_building(true); // ← ADD THIS LINE
     if release {
         println!("⚡ VLO release build...");
     } else {
@@ -650,11 +730,15 @@ pub fn build(release: bool) -> Result<(), String> {
     fs::create_dir_all(build_dir.join("static"))
         .expect("Failed to create .vlo/build directory");
 
+    // Collect all route guards into a single manifest
+    let mut routes_manifest = serde_json::Map::new();
+
     // Recursive page builder
     fn build_pages(
         dir: &Path,
         pages_root: &Path,
         build_dir: &Path,
+        manifest: &mut serde_json::Map<String, serde_json::Value>,
     ) -> Result<(), String> {
         let entries = fs::read_dir(dir)
             .map_err(|e| format!("Failed to read pages directory: {}", e))?;
@@ -662,9 +746,8 @@ pub fn build(release: bool) -> Result<(), String> {
         for entry in entries.flatten() {
             let file_path = entry.path();
 
-            // Recurse into subdirectories (e.g., pages/admin/)
             if file_path.is_dir() {
-                build_pages(&file_path, pages_root, build_dir)?;
+                build_pages(&file_path, pages_root, build_dir, manifest)?;
                 continue;
             }
 
@@ -672,7 +755,6 @@ pub fn build(release: bool) -> Result<(), String> {
                 continue;
             }
 
-            // Calculate relative page path: "docs", "admin/dashboard", etc.
             let relative_page_path = file_path
                 .strip_prefix(pages_root)
                 .map_err(|e| format!("Failed to resolve page path: {}", e))?
@@ -683,7 +765,9 @@ pub fn build(release: bool) -> Result<(), String> {
             let content = fs::read_to_string(&file_path)
                 .unwrap_or_default();
 
-            // Pass the page path so layout hierarchy is applied!
+            // Extract guard BEFORE moving content
+            let page_guard = crate::auth::extract_page_guard(&content);
+
             let rendered = crate::router::render_vlo_for_build_at(
                 &relative_page_path,
                 content,
@@ -703,18 +787,28 @@ pub fn build(release: bool) -> Result<(), String> {
                 build_dir.join(format!("{}.html", relative_page_path))
             };
 
-            // Create subdirectories in build output if needed
             if let Some(parent) = output.parent() {
                 fs::create_dir_all(parent)
-                    .map_err(|e| {
-                        format!("Failed to create build directory: {}", e)
-                    })?;
+                    .map_err(|e| format!("Failed to create build directory: {}", e))?;
             }
 
             fs::write(&output, html)
-                .map_err(|e| {
-                    format!("Failed to write generated HTML: {}", e)
-                })?;
+                .map_err(|e| format!("Failed to write generated HTML: {}", e))?;
+
+            // ─── ADD TO ROUTES MANIFEST ────────────────────
+            if let Some(guard) = page_guard {
+                let route_path = if relative_page_path == "home" || relative_page_path == "index" {
+                    "/".to_string()
+                } else {
+                    format!("/{}", relative_page_path)
+                };
+                manifest.insert(route_path, serde_json::json!({
+                    "auth": guard.auth,
+                    "guest": guard.guest,
+                    "roles": guard.roles
+                }));
+            }
+            // ──────────────────────────────────────────────
 
             println!("  ├─ Generated: {}", output.display());
         }
@@ -722,7 +816,18 @@ pub fn build(release: bool) -> Result<(), String> {
         Ok(())
     }
 
-    build_pages(&pages, &pages, &build_dir)?;
+    build_pages(&pages, &pages, &build_dir, &mut routes_manifest)?;
+
+    // Write single routes.json manifest
+    if !routes_manifest.is_empty() {
+        let guard_count = routes_manifest.len(); // ← Get count BEFORE moving
+        let manifest_path = build_dir.join("routes.json");
+        let manifest_json = serde_json::to_string_pretty(&serde_json::Value::Object(routes_manifest))
+            .map_err(|e| format!("Failed to serialize routes manifest: {}", e))?;
+        fs::write(&manifest_path, manifest_json)
+            .map_err(|e| format!("Failed to write routes manifest: {}", e))?;
+        println!("  ├─ Routes manifest: {} guards", guard_count);
+    }
 
     if public.exists() {
         copy_dir_all(&public, &build_dir.join("static"))
@@ -874,7 +979,7 @@ pub fn resolve_directives(source: &str) -> String {
         let url_js = js_string_literal(url);
 
         let onclick = format!(
-            "if({}){{fetch({},{{method:'DELETE',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}}}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO DELETE]',e);window.location.reload()}})}}",
+            "if({}){{fetch({},{{credentials:'same-origin',method:'DELETE',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}}}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO DELETE]',e);window.location.reload()}})}}",
             confirm_js, url_js
         );
 
@@ -901,7 +1006,7 @@ pub fn resolve_directives(source: &str) -> String {
 
         if tag.eq_ignore_ascii_case("form") {
             let onsubmit = format!(
-                "event.preventDefault();fetch({},{{method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.reload()}});return false",
+                "event.preventDefault();fetch({},{{credentials:'same-origin',method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.reload()}});return false",
                 url_js
             );
             let onsubmit_attr = escape_html_attribute(&onsubmit);
@@ -915,7 +1020,7 @@ pub fn resolve_directives(source: &str) -> String {
             let param_js = js_string_literal(param);
 
             let onclick = format!(
-                "let v=prompt({});if(v!==null){{fetch({},{{method:'PUT',headers:{{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok){{let d;try{{d=await r.json()}}catch(_){{d={{}}}};throw new Error(d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.reload()}})}}",
+                "let v=prompt({});if(v!==null){{fetch({},{{credentials:'same-origin',method:'PUT',headers:{{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok){{let d;try{{d=await r.json()}}catch(_){{d={{}}}};throw new Error(d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.reload()}})}}",
                 prompt_js, url_js, param_js
             );
             let onclick_attr = escape_html_attribute(&onclick);
@@ -941,7 +1046,7 @@ pub fn resolve_directives(source: &str) -> String {
 
         if tag.eq_ignore_ascii_case("form") {
             let onsubmit = format!(
-                "event.preventDefault();fetch({},{{method:'POST',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new FormData(event.currentTarget)}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO POST]',e);window.location.reload()}});return false",
+                "event.preventDefault();fetch({},{{credentials:'same-origin',method:'POST',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new FormData(event.currentTarget)}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO POST]',e);window.location.reload()}});return false",
                 url_js
             );
             let onsubmit_attr = escape_html_attribute(&onsubmit);

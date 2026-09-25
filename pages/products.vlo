@@ -56,47 +56,8 @@
     <div class="products-list-card">
       <Card title="Products" description="{{total}} products found.">
 
-        <!-- Search & Sort Toolbar -->
-        <div class="products-toolbar">
-          <SearchBar 
-              placeholder="Search products..." 
-              button_text="Search"
-              columns="title,description"
-              variant="inline"
-          />
-          <SortSelect 
-              label="Sort:" 
-              options='
-                  [{"value":"id","label":"ID"},
-                  {"value":"title","label":"Title"},
-                  {"value":"price","label":"Price"},
-                  {"value":"stock","label":"Stock"}
-              ]' 
-          />
-
-          <Badge variant="success" text="Live" />
-        </div>
-
-        <!-- Active Filters -->
-        {if search || sort}
-          <div class="active-filters">
-            <div class="filter-tags">
-              {if search}
-                <span class="active-filter">
-                  Search: <strong>"{{search}}"</strong>
-                  <a href="?{if sort}sort={{sort}}&order={{order}}{/if}">✕</a>
-                </span>
-              {/if}
-              {if sort}
-                <span class="active-filter">
-                  Sort: <strong>{{sort}}</strong> ({{order}})
-                  <a href="?{if search}search={{search}}{/if}">✕</a>
-                </span>
-              {/if}
-            </div>
-            <a href="?" class="clear-all">Clear all filters</a>
-          </div>
-        {/if}
+        <!-- ═══ DATA TABLE TOOLBAR (Search + Sort + Order + Limit) ═══ -->
+        <DataTableToolbar _columns="title,description" />
 
         <!-- Data Table -->
         <div class="products-table-wrap">
@@ -212,24 +173,13 @@
     .header-actions { display: flex; align-items: center; gap: 12px; }
     
     .products-list-card { margin-top: 24px; }
-    .products-toolbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin: 20px 0 14px; }
-    .products-toolbar .vlo-sort-select { margin-left: auto; }
     
-    .active-filters { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
-    .filter-tags { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .active-filter { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border: 1px solid rgba(0,245,255,.2); border-radius: 7px; background: rgba(0,245,255,.04); color: #aaa; font-size: .78rem; }
-    .active-filter strong { color: #00f5ff; }
-    .active-filter a { color: #ff6680; text-decoration: none; margin-left: 4px; font-weight: 600; }
-    .active-filter a:hover { text-decoration: underline; }
-    .clear-all { color: #ff6680; font-size: .78rem; text-decoration: none; font-weight: 600; white-space: nowrap; }
-    .clear-all:hover { text-decoration: underline; }
-
     .products-table-wrap { overflow-x: auto; }
     .products-table { width: 100%; border-collapse: collapse; min-width: 900px; }
     .products-table th { padding: 13px 14px; text-align: left; background: #171717; color: #777; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; border-bottom: 1px solid #292929; }
     .products-table td { padding: 8px 5px; border-bottom: 1px solid #222; color: #ccc; font-size: 13px; vertical-align: middle; }
     .products-table tbody tr:hover { background: #161616; }
-    .products-table th:nth-child(4), .products-table td:nth-child(4) { text-align: right; }
+    .products-table th:nth-child(4), .products-table td:nth-child(4) { text-align: left; }
     .products-table th:nth-child(5), .products-table td:nth-child(5), .products-table th:nth-child(7), .products-table td:nth-child(7) { text-align: center; }
     
     .product-image { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid #333; }
@@ -279,8 +229,6 @@
       .products-header h1 { font-size: 28px; }
       .header-actions { width: 100%; justify-content: flex-start; }
       .form-grid { grid-template-columns: 1fr; }
-      .products-toolbar { flex-direction: column; align-items: stretch; }
-      .active-filters { flex-direction: column; align-items: flex-start; }
     }
   </style>
 </BaseLayout>

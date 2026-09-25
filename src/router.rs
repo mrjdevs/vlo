@@ -661,23 +661,22 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
     let component_styles = if rendered.styles.is_empty() { String::new() } else { format!("\n<style>\n{}\n</style>", rendered.styles.join("\n")) };
     
     let hmr = if dev {
-        r#"<script>
-        (requestIdleCallback || setTimeout)(function() {
-        const es = new EventSource("/__vlo_hmr");
-        es.onmessage = function() { location.reload(); };
-        window.addEventListener("beforeunload", function() { es.close(); });
-        }, 100);
-        </script>"#
+        r#"<script>(requestIdleCallback || setTimeout)(function() { const es = new EventSource("/__vlo_hmr"); es.onmessage = function() { location.reload(); }; window.addEventListener("beforeunload", function() { es.close(); }); }, 100);</script>"#
     } else { "" };
 
-    let csrf_meta = if let Some(csrf) = rendered.template_context.get("csrf_token") {
-        if let Some(token) = csrf.as_str() {
-            if !token.is_empty() { format!(r#"<meta name="csrf-token" content="{}">"#, token) } else { String::new() }
+    // ─── CSRF: Actual token in dev, placeholder in build ───
+    let csrf_meta = if dev {
+        if let Some(csrf) = rendered.template_context.get("csrf_token") {
+            if let Some(token) = csrf.as_str() {
+                if !token.is_empty() { format!(r#"<meta name="csrf-token" content="{}">"#, token) } else { String::new() }
+            } else { String::new() }
         } else { String::new() }
-    } else { String::new() };
+    } else {
+        r#"<meta name="csrf-token" content="__VLO_CSRF_PLACEHOLDER__">"#.to_string()
+    };
 
-    // ─── FLASH: Only auto-render if page doesn't handle it ───
-    let flash_html = if auto_flash {
+    // ─── FLASH: Actual HTML in dev, placeholder in build ───
+    let flash_html = if dev && auto_flash {
         if let Some(flashes) = rendered.template_context.get("flash_messages") {
             if let Some(arr) = flashes.as_array() {
                 let mut html = String::new();
@@ -686,31 +685,23 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
                     let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
                     let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
                     let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                    let border_color = match variant {
-                        "success" => "#00ff88",
-                        "error" => "#ff4444",
-                        "warning" => "#ffaa00",
-                        _ => "#00f5ff",
-                    };
-                    html.push_str(&format!(
-                        r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease">
-<span style="font-size:1.4rem">{}</span>
-<div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div>
-</div>"#,
-                        border_color, icon, title, description
-                    ));
+                    let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
+                    html.push_str(&format!(r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div>"#, border_color, icon, title, description));
                 }
-                if !html.is_empty() {
-                    html.push_str(r#"<style>@keyframes vloFlashIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}</style>
-<script>setTimeout(function(){document.querySelectorAll('.vlo-flash').forEach(function(el){el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){el.remove()},400)})},4000)</script>"#);
-                }
+                if !html.is_empty() { html.push_str(r#"<style>@keyframes vloFlashIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}</style><script>setTimeout(function(){document.querySelectorAll('.vlo-flash').forEach(function(el){el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){el.remove()},400)})},4000)</script>"#); }
                 html
             } else { String::new() }
         } else { String::new() }
+    } else if !dev {
+        r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#.to_string()
     } else {
-        String::new() // Page handles flash rendering itself
+        String::new()
     };
-    // ─────────────────────────────────────────────────────────
+
+    // ─── ACTIVE NAV LINKS: Client-side JS for build mode ───
+    let active_link_js = if !dev {
+        r#"<script>(function(){var p=window.location.pathname;document.querySelectorAll('a[href]').forEach(function(a){var h=a.getAttribute('href');if(!h||h.startsWith('http')||h.startsWith('#')||h.startsWith('javascript'))return;if(h==='/'&&p==='/'){a.classList.add('active')}else if(h!=='/'&&p.startsWith(h)){a.classList.add('active')}})})()</script>"#
+    } else { "" };
 
     let mut html = rendered.html.clone();
     html = html.replace("{{title}}", title);
@@ -719,6 +710,8 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
     if !component_styles.is_empty() { html = html.replacen("</head>", &format!("{}\n</head>", component_styles), 1); }
     if !flash_html.is_empty() { html = html.replacen("</body>", &format!("{}\n</body>", flash_html), 1); }
     if !hmr.is_empty() { html = html.replacen("</body>", &format!("{}\n</body>", hmr), 1); }
+    if !active_link_js.is_empty() { html = html.replacen("</body>", &format!("{}\n</body>", active_link_js), 1); }
+    
     html
 }
 

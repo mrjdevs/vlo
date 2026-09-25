@@ -1,0 +1,292 @@
+<div class="vlo-datatable-toolbar">
+  <!-- Main Toolbar Row -->
+  <form method="get" action="" class="vlo-toolbar-form">
+    <!-- Search Input -->
+    <div class="vlo-search-group">
+      <span class="vlo-search-icon">🔍</span>
+      <input 
+        type="text" 
+        name="search" 
+        class="vlo-search-input" 
+        placeholder="Search..." 
+        value="{{search}}"
+        autocomplete="off"
+      />
+      {if search}
+        <a href="?{if sort}sort={{sort}}&order={{order}}{/if}{if limit && limit != 20}&limit={{limit}}{/if}{if _columns}&_columns={{_columns}}{/if}" class="vlo-search-clear">✕</a>
+      {/if}
+    </div>
+
+    <!-- Sort Column -->
+    <div class="vlo-control-group">
+      <label class="vlo-control-label">Sort:</label>
+      <select name="sort" class="vlo-control-input" onchange="this.form.submit()">
+        <option value="">None</option>
+        <option value="id" {if sort == "id"}selected{/if}>ID</option>
+        <option value="title" {if sort == "title"}selected{/if}>Title</option>
+        <option value="price" {if sort == "price"}selected{/if}>Price</option>
+        <option value="stock" {if sort == "stock"}selected{/if}>Stock</option>
+        <option value="created_at" {if sort == "created_at"}selected{/if}>Date</option>
+      </select>
+    </div>
+
+    <!-- Order Direction -->
+    <div class="vlo-control-group">
+      <select name="order" class="vlo-control-input vlo-order-input" onchange="this.form.submit()">
+        <option value="asc" {if order == "asc"}selected{/if}>↑ Asc</option>
+        <option value="desc" {if order == "desc"}selected{/if}>↓ Desc</option>
+      </select>
+    </div>
+
+    <!-- Limit Selector (hardcoded for SSR state preservation) -->
+    <div class="vlo-control-group">
+      <label class="vlo-control-label">Show:</label>
+      <select name="limit" class="vlo-control-input vlo-limit-input" onchange="this.form.submit()">
+        <option value="10" {if limit == 10}selected{/if}>10</option>
+        <option value="20" {if limit == 20}selected{/if}>20</option>
+        <option value="30" {if limit == 30}selected{/if}>30</option>
+        <option value="50" {if limit == 50}selected{/if}>50</option>
+        <option value="100" {if limit == 100}selected{/if}>100</option>
+      </select>
+    </div>
+
+    <!-- Hidden Fields for State Preservation -->
+    {if _columns}
+      <input type="hidden" name="_columns" value="{{_columns}}" />
+    {/if}
+    {if page && page != 1}
+      <input type="hidden" name="page" value="{{page}}" />
+    {/if}
+  </form>
+
+  <!-- Active Filters Row -->
+  {if search || sort || (limit && limit != 20)}
+    <div class="vlo-active-filters">
+      <div class="vlo-filter-tags">
+        {if search}
+          <span class="vlo-filter-tag">
+            Search: <strong>"{{search}}"</strong>
+            <a href="?{if sort}sort={{sort}}&order={{order}}{/if}{if limit && limit != 20}&limit={{limit}}{/if}{if _columns}&_columns={{_columns}}{/if}" class="vlo-filter-remove">✕</a>
+          </span>
+        {/if}
+        {if sort}
+          <span class="vlo-filter-tag">
+            Sort: <strong>{{sort}}</strong> ({{order}})
+            <a href="?{if search}search={{search}}{/if}{if limit && limit != 20}&limit={{limit}}{/if}{if _columns}&_columns={{_columns}}{/if}" class="vlo-filter-remove">✕</a>
+          </span>
+        {/if}
+        {if limit && limit != 20}
+          <span class="vlo-filter-tag">
+            Per page: <strong>{{limit}}</strong>
+            <a href="?{if search}search={{search}}{/if}{if sort}&sort={{sort}}&order={{order}}{/if}{if _columns}&_columns={{_columns}}{/if}" class="vlo-filter-remove">✕</a>
+          </span>
+        {/if}
+      </div>
+      <a href="?" class="vlo-clear-all">Clear all</a>
+    </div>
+  {/if}
+</div>
+
+<style>
+.vlo-datatable-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 20px 0 14px;
+}
+
+.vlo-toolbar-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ─── Search Group ─── */
+.vlo-search-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 200px;
+  max-width: 360px;
+}
+
+.vlo-search-icon {
+  position: absolute;
+  left: 12px;
+  font-size: 0.85rem;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.vlo-search-input {
+  width: 100%;
+  padding: 8px 36px 8px 36px;
+  border: 1px solid var(--border, #292929);
+  border-radius: 7px;
+  background: var(--surface, #111);
+  color: var(--text, #eee);
+  font-size: 0.75rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.vlo-search-input:focus {
+  border-color: var(--primary, #00f5ff);
+  box-shadow: 0 0 0 2px rgba(0, 245, 255, 0.1);
+}
+
+.vlo-search-input::placeholder {
+  color: #555;
+}
+
+.vlo-search-clear {
+  position: absolute;
+  right: 10px;
+  color: #666;
+  text-decoration: none;
+  font-size: 0.75rem;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.2s;
+  line-height: 1;
+}
+
+.vlo-search-clear:hover {
+  color: #ff4444;
+}
+
+/* ─── Control Groups (Sort, Order, Limit) ─── */
+.vlo-control-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.vlo-control-label {
+  color: #777;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.vlo-control-input {
+  padding: 8px 12px;
+  border: 1px solid var(--border, #292929);
+  border-radius: 7px;
+  background: var(--surface, #111);
+  color: var(--text, #eee);
+  font-size: 0.75rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23777' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+
+.vlo-control-input:focus {
+  border-color: var(--primary, #00f5ff);
+}
+
+.vlo-control-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.vlo-order-input {
+  min-width: 76px;
+}
+
+.vlo-limit-input {
+  min-width: 68px;
+}
+
+/* ─── Active Filters ─── */
+.vlo-active-filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  flex-wrap: wrap;
+}
+
+.vlo-filter-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.vlo-filter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border: 1px solid rgba(0, 245, 255, 0.2);
+  border-radius: 7px;
+  background: rgba(0, 245, 255, 0.04);
+  color: #aaa;
+  font-size: 0.72rem;
+}
+
+.vlo-filter-tag strong {
+  color: var(--primary, #00f5ff);
+}
+
+.vlo-filter-remove {
+  color: #ff6680;
+  text-decoration: none;
+  margin-left: 2px;
+  font-weight: 600;
+  font-size: 0.7rem;
+  transition: color 0.15s;
+}
+
+.vlo-filter-remove:hover {
+  color: #ff4444;
+  text-decoration: underline;
+}
+
+.vlo-clear-all {
+  color: #ff6680;
+  font-size: 0.72rem;
+  text-decoration: none;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+
+.vlo-clear-all:hover {
+  color: #ff4444;
+  text-decoration: underline;
+}
+
+/* ─── Responsive ─── */
+@media (max-width: 768px) {
+  .vlo-toolbar-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .vlo-search-group {
+    max-width: none;
+    width: 100%;
+  }
+
+  .vlo-control-group {
+    width: 100%;
+  }
+
+  .vlo-control-input {
+    flex: 1;
+  }
+}
+</style>

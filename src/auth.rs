@@ -694,15 +694,23 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
     }
 
     if identifier.is_empty() || password.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Credentials required"})))
-            .into_response();
+        let flash = encode_flash("error", "⚠️", "Login Failed", "Credentials required");
+        let mut response = (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Credentials required"}))).into_response();
+        if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) {
+            response.headers_mut().append(header::SET_COOKIE, val);
+        }
+        return response;
     }
 
     let user = match find_user_by_identifier(&identifier).await {
         Some(u) => u,
         None => {
-            return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"})))
-                .into_response()
+            let flash = encode_flash("error", "⚠️", "Login Failed", "Invalid credentials");
+            let mut response = (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response();
+            if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) {
+                response.headers_mut().append(header::SET_COOKIE, val);
+            }
+            return response;
         }
     };
     let hash = match fetch_password_hash(user.id).await {
@@ -713,8 +721,12 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
         }
     };
     if !verify_password(&password, &hash) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"})))
-            .into_response();
+        let flash = encode_flash("error", "⚠️", "Login Failed", "Invalid credentials");
+        let mut response = (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response();
+        if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) {
+            response.headers_mut().append(header::SET_COOKIE, val);
+        }
+        return response;
     }
     let (token, lifetime) = match create_session(user.id, remember_me).await { // ← UPDATED
         Ok(t) => t,
