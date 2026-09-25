@@ -30,6 +30,16 @@
                     <label for="password">{{auth_password_field}}</label>
                     <input type="password" id="password" name="{{auth_password_field}}" placeholder="••••••••" required />
                 </div>
+                
+                <!-- ═══ REMEMBER ME CHECKBOX ═══ -->
+                <div class="auth-field auth-remember">
+                    <label class="auth-checkbox-label">
+                        <input type="checkbox" name="remember_me" value="true" />
+                        <span class="auth-checkbox-custom"></span>
+                        <span>Remember me for 30 days</span>
+                    </label>
+                </div>
+
                 <button type="submit" class="auth-submit">Sign In →</button>
             </form>
 
@@ -195,6 +205,62 @@
     outline: none;
     border-color: rgba(0,245,255,.45);
     box-shadow: 0 0 0 3px rgba(0,245,255,.08);
+}
+
+/* =========================================
+   REMEMBER ME CHECKBOX
+========================================= */
+.auth-remember {
+    margin-top: -6px;
+}
+
+.auth-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    /* Reset inherited .auth-field label styles */
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    color: inherit;
+}
+
+.auth-checkbox-label input[type="checkbox"] {
+    display: none;
+}
+
+.auth-checkbox-custom {
+    width: 18px;
+    height: 18px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    background: #090909;
+    display: grid;
+    place-items: center;
+    transition: all .2s ease;
+    flex-shrink: 0;
+}
+
+.auth-checkbox-label input[type="checkbox"]:checked + .auth-checkbox-custom {
+    background: #00f5ff;
+    border-color: #00f5ff;
+}
+
+.auth-checkbox-label input[type="checkbox"]:checked + .auth-checkbox-custom::after {
+    content: "✓";
+    color: #000;
+    font-size: .75rem;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.auth-checkbox-label span:last-child {
+    color: #888;
+    font-size: .78rem;
 }
 
 /* =========================================

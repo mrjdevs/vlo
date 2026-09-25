@@ -279,11 +279,15 @@ fn now_timestamp() -> i64 {
         .as_secs() as i64
 }
 
-pub async fn create_session(user_id: i64) -> Result<String, String> {
+pub async fn create_session(user_id: i64, remember_me: bool) -> Result<(String, i64), String> {
     let cfg = auth_config();
     let pool = DB_POOL.get().ok_or("Database not configured")?;
     let token = generate_token();
-    let expires_at = now_timestamp() + cfg.session_lifetime;
+    
+    // 30 days if remember_me, otherwise default lifetime (usually 24 hours)
+    let lifetime = if remember_me { 30 * 24 * 60 * 60 } else { cfg.session_lifetime };
+    let expires_at = now_timestamp() + lifetime;
+    
     let p1 = cfg.placeholder(pool, 1);
     let p2 = cfg.placeholder(pool, 2);
     let p3 = cfg.placeholder(pool, 3);
@@ -297,7 +301,8 @@ pub async fn create_session(user_id: i64) -> Result<String, String> {
         DbPool::MySql(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
     };
     result.map_err(|e| format!("Failed to create session: {}", e))?;
-    Ok(token)
+    
+    Ok((token, lifetime))
 }
 
 pub async fn get_user_from_session(token: &str) -> Option<User> {
@@ -361,6 +366,28 @@ pub async fn delete_session(token: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub async fn cleanup_expired_sessions() -> Result<u64, String> {
+    let cfg = auth_config();
+    let pool = DB_POOL.get().ok_or("Database not configured")?;
+    let now = now_timestamp();
+    let p1 = cfg.placeholder(pool, 1);
+    let sql = format!(
+        "DELETE FROM {} WHERE {} < {}",
+        cfg.session_table, cfg.session_expires_at, p1
+    );
+    
+    // Extract rows_affected() inside each arm to unify the return type to Result<u64, sqlx::Error>
+    let rows_affected = match pool {
+        DbPool::Sqlite(c) => sqlx::query(&sql).bind(now).execute(c).await.map(|r| r.rows_affected()),
+        DbPool::Postgres(c) => sqlx::query(&sql).bind(now).execute(c).await.map(|r| r.rows_affected()),
+        DbPool::MySql(c) => sqlx::query(&sql).bind(now).execute(c).await.map(|r| r.rows_affected()),
+    };
+    
+    match rows_affected {
+        Ok(count) => Ok(count),
+        Err(e) => Err(format!("Failed to cleanup sessions: {}", e)),
+    }
+}
 async fn find_user_by_identifier(identifier: &str) -> Option<User> {
     let cfg = auth_config();
     let pool = DB_POOL.get()?;
@@ -591,6 +618,7 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
 
     let mut identifier = String::new();
     let mut password = String::new();
+    let mut remember_me = false; // ← ADD THIS
 
     if content_type.contains("multipart/form-data") {
         match axum::extract::Multipart::from_request(req, &()).await {
@@ -598,8 +626,15 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
                 while let Ok(Some(field)) = multipart.next_field().await {
                     let name = field.name().unwrap_or("").to_string();
                     let value = field.text().await.unwrap_or_default();
-                    if name == id_field { identifier = value; }
-                    else if name == pw_field { password = value; }
+                    
+                    if name == id_field { 
+                        identifier = value; 
+                    } else if name == pw_field { 
+                        password = value; 
+                    } else if name == "remember_me" { 
+                        let v = value.to_lowercase();
+                        remember_me = v == "on" || v == "true" || v == "1";
+                    }
                 }
             }
             Err(_) => {
@@ -610,8 +645,19 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
     } else if content_type.contains("application/json") {
         match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
             Ok(payload) => {
-                identifier = payload.get(&id_field).and_then(|v| v.as_str()).unwrap_or("").into();
-                password = payload.get(&pw_field).and_then(|v| v.as_str()).unwrap_or("").into();
+                identifier = payload.get(&id_field)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .into();
+                    
+                password = payload.get(&pw_field)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .into();
+                    
+                remember_me = payload.get("remember_me")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
             }
             Err(_) => {
                 return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid JSON"})))
@@ -625,8 +671,15 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
                     let mut p = pair.splitn(2, '=');
                     if let (Some(k), Some(v)) = (p.next(), p.next()) {
                         let v = urlencoding::decode(v).unwrap_or_default().to_string();
-                        if k == id_field { identifier = v; }
-                        else if k == pw_field { password = v; }
+                        
+                        if k == id_field { 
+                            identifier = v; 
+                        } else if k == pw_field { 
+                            password = v; 
+                        } else if k == "remember_me" { 
+                            let val = v.to_lowercase();
+                            remember_me = val == "on" || val == "true" || val == "1";
+                        }
                     }
                 }
             }
@@ -663,7 +716,7 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
         return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"})))
             .into_response();
     }
-    let token = match create_session(user.id).await {
+    let (token, lifetime) = match create_session(user.id, remember_me).await { // ← UPDATED
         Ok(t) => t,
         Err(e) => {
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success":false,"error":e})))
@@ -671,9 +724,10 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
         }
     };
 
+    // ← UPDATED to use `lifetime` instead of `cfg.session_lifetime`
     let cookie = format!(
         "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
-        cfg.cookie_name, token, cfg.session_lifetime
+        cfg.cookie_name, token, lifetime
     );
     let mut response = Json(json!({
         "success": true,

@@ -125,6 +125,31 @@ async fn rate_limit_cleanup_task() {
     }
 }
 
+async fn session_cleanup_task() {
+    // Run immediately on startup to clear stale sessions from when server was offline
+    match crate::auth::cleanup_expired_sessions().await {
+        Ok(count) => {
+            if count > 0 {
+                crate::vlo_debug!("🧹 Startup session cleanup: purged {} expired sessions", count);
+            }
+        }
+        Err(e) => crate::vlo_debug!("⚠️ Startup session cleanup failed: {}", e),
+    }
+
+    loop {
+        // Sleep for 1 hour (3600 seconds)
+        tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+        match crate::auth::cleanup_expired_sessions().await {
+            Ok(count) => {
+                if count > 0 {
+                    crate::vlo_debug!("🧹 Hourly session cleanup: purged {} expired sessions", count);
+                }
+            }
+            Err(e) => crate::vlo_debug!("⚠️ Hourly session cleanup failed: {}", e),
+        }
+    }
+}
+
 pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
     state::set_app_mode(state::AppMode::Development);
     let root = get_project_root();
@@ -223,6 +248,7 @@ pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
     println!("⚡ VLO dev server: http://{}", addr);
     // Spawn background cleanup task
     tokio::spawn(rate_limit_cleanup_task());
+    tokio::spawn(session_cleanup_task()); // ← ADD THIS
     if let Err(error) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
@@ -330,6 +356,7 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
     println!("⚡ VLO production server: http://{}", addr);
     // Spawn background cleanup task
     tokio::spawn(rate_limit_cleanup_task());
+    tokio::spawn(session_cleanup_task()); // ← ADD THIS
     
     if let Err(error) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
