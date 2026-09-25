@@ -187,3 +187,34 @@ impl RenderedPage {
         self.styles.push(format!("{}\n{}", marker, css));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Ops: Start time for health check uptime
+// ---------------------------------------------------------------------------
+static START_TIME: std::sync::OnceLock<std::time::SystemTime> = std::sync::OnceLock::new();
+
+pub fn init_start_time() {
+    START_TIME.set(std::time::SystemTime::now()).ok();
+}
+
+pub fn uptime_seconds() -> u64 {
+    START_TIME.get()
+        .and_then(|t| std::time::SystemTime::now().duration_since(*t).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// Ops: Request ID
+// ---------------------------------------------------------------------------
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct RequestId(pub String);
+
+pub fn generate_request_id() -> String {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("req-{:x}-{}", timestamp, std::process::id())
+}

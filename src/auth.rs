@@ -562,6 +562,26 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
     let id_field = cfg.identifier_field.clone();
     let pw_field = cfg.password_field.clone();
 
+    // ─── RATE LIMITING ──────────────────────────────────────
+    let client_ip = req.headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or("unknown").trim().to_string())
+        .or_else(|| {
+            req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map(|ci| ci.0.ip().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    if !check_rate_limit(&client_ip) {
+        crate::vlo_debug!("🚫 Rate limit exceeded for IP: {}", client_ip);
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({
+            "success": false,
+            "error": "Too many login attempts. Please try again in 60 seconds."
+        }))).into_response();
+    }
+    // ────────────────────────────────────────────────────────
+
     let content_type = req
         .headers()
         .get(header::CONTENT_TYPE)
@@ -828,4 +848,41 @@ pub fn flash_cookie_header(encoded: &str) -> String {
 
 pub fn expire_flash_cookie() -> String {
     format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", FLASH_COOKIE)
+}
+
+// ---------------------------------------------------------------------------
+// Rate Limiting
+// ---------------------------------------------------------------------------
+static RATE_LIMITS: LazyLock<std::sync::Mutex<std::collections::HashMap<String, Vec<std::time::SystemTime>>>> = 
+    LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+const RATE_LIMIT_WINDOW_SECS: u64 = 60;
+const RATE_LIMIT_MAX_ATTEMPTS: usize = 5;
+
+pub fn check_rate_limit(ip: &str) -> bool {
+    let now = std::time::SystemTime::now();
+    let mut limits = RATE_LIMITS.lock().unwrap();
+    
+    let entries = limits.entry(ip.to_string()).or_insert_with(Vec::new);
+    
+    // Remove entries older than the window
+    entries.retain(|t| {
+        now.duration_since(*t).unwrap_or_default() < std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS)
+    });
+    
+    if entries.len() >= RATE_LIMIT_MAX_ATTEMPTS {
+        return false;
+    }
+    
+    entries.push(now);
+    true
+}
+#[allow(dead_code)]
+pub fn cleanup_rate_limits() {
+    let now = std::time::SystemTime::now();
+    let mut limits = RATE_LIMITS.lock().unwrap();
+    limits.retain(|_, entries| {
+        entries.retain(|t| now.duration_since(*t).unwrap_or_default() < std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS));
+        !entries.is_empty()
+    });
 }

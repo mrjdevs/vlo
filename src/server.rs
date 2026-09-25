@@ -5,6 +5,7 @@ use crate::{
     state::{self, get_project_root},
     template::{escape_html_attribute, render_control_flow}};
 use axum::{
+    http::StatusCode,
     response::{Html, IntoResponse},
     routing::get,
     Router,
@@ -78,6 +79,52 @@ pub enum Commands {
         provider: String,
     },
 }
+// ---------------------------------------------------------------------------
+// Health Check Endpoint
+// ---------------------------------------------------------------------------
+async fn healthz_handler() -> impl IntoResponse {
+    let db_status = crate::database::DB_POOL.get().is_some();
+    let status = if db_status { "healthy" } else { "degraded" };
+    let http_status = if db_status { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+
+    (http_status, axum::Json(serde_json::json!({
+        "status": status,
+        "uptime_seconds": crate::state::uptime_seconds(),
+        "database": if db_status { "connected" } else { "disconnected" },
+        "version": env!("CARGO_PKG_VERSION")
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// Request ID Middleware
+// ---------------------------------------------------------------------------
+async fn request_id_middleware(mut req: Request, next: Next) -> Response {
+    let request_id = req.headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| crate::state::generate_request_id());
+    
+    req.extensions_mut().insert(crate::state::RequestId(request_id.clone()));
+    
+    let mut response = next.run(req).await;
+    response.headers_mut().insert(
+        "x-request-id",
+        request_id.parse().unwrap(),
+    );
+    response
+}
+// ---------------------------------------------------------------------------
+// Background: Rate Limit Cleanup Task
+// ---------------------------------------------------------------------------
+async fn rate_limit_cleanup_task() {
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await; // 5 minutes
+        crate::auth::cleanup_rate_limits();
+        crate::vlo_debug!("🧹 Rate limit cleanup completed");
+    }
+}
+
 pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
     state::set_app_mode(state::AppMode::Development);
     let root = get_project_root();
@@ -97,6 +144,7 @@ pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
         .route("/", get(home_handler))
         .route("/:path", get(page_handler))
         .route("/uploads/*path", get(serve_file))
+        .route("/healthz", get(healthz_handler))  // ← ADD THIS
         .route("/api/files/upload", axum::routing::post(upload_file))
         .route("/api/files/:id/download", get(download_file))
         .route(
@@ -139,6 +187,7 @@ pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
         .layer(middleware::from_fn(cache_middleware))
         // Middleware execution order: session -> api_auth -> csrf
         // Layers execute in REVERSE order (last added runs first)
+        .layer(middleware::from_fn(request_id_middleware))  // ← ADD THIS (before CSRF)
         .layer(axum::middleware::from_fn(auth::csrf_middleware))        // Runs 3rd
         .layer(axum::middleware::from_fn(auth::api_auth_middleware))    // Runs 2nd
         .layer(axum::middleware::from_fn(auth::session_middleware))     // Runs 1st (MUST BE LAST)
@@ -172,7 +221,8 @@ pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
     };
 
     println!("⚡ VLO dev server: http://{}", addr);
-
+    // Spawn background cleanup task
+    tokio::spawn(rate_limit_cleanup_task());
     if let Err(error) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
@@ -200,6 +250,7 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
     }
 
     let app = Router::new()
+        .route("/healthz", get(healthz_handler))  // ← ADD THIS
         .route("/api/files/upload", axum::routing::post(upload_file))
         .route("/api/files/:id/download", get(download_file))
         .route("/api/files/:id", get(get_file).delete(delete_file))
@@ -239,6 +290,7 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
         .layer(middleware::from_fn(cache_middleware))
         // Middleware execution order: session -> api_auth -> csrf
         // Layers execute in REVERSE order (last added runs first)
+        .layer(middleware::from_fn(request_id_middleware))  // ← ADD THIS
         .layer(axum::middleware::from_fn(auth::csrf_middleware))        // Runs 3rd
         .layer(axum::middleware::from_fn(auth::api_auth_middleware))    // Runs 2nd
         .layer(axum::middleware::from_fn(auth::session_middleware))     // Runs 1st (MUST BE LAST)
@@ -276,7 +328,9 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
     };
 
     println!("⚡ VLO production server: http://{}", addr);
-
+    // Spawn background cleanup task
+    tokio::spawn(rate_limit_cleanup_task());
+    
     if let Err(error) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await

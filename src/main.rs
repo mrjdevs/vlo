@@ -28,6 +28,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
+    crate::state::init_start_time();
     if let Err(error) = run().await {
         eprintln!("❌ {}", error);
         std::process::exit(1);
