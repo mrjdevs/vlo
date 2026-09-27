@@ -296,7 +296,15 @@ pub async fn api_route_handler(
             };
         }
     };
-
+        // ─── INSERT THIS BLOCK RIGHT HERE ────────────────────────
+    let resource = normalize_resource(&endpoint);
+    if !valid_identifier(&resource) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
+            "success": false, 
+            "error": "Invalid API resource"
+        }))).into_response();
+    }
+    // ─────────────────────────────────────────────────────────
     let operation = match crud_operation(&method) {
         Some(value) => value,
         None => return (StatusCode::METHOD_NOT_ALLOWED, Json(serde_json::json!({"success": false, "error": "Unsupported HTTP method"}))).into_response(),

@@ -1,6 +1,6 @@
 [package]
 name = "vlo"
-version = "0.8.4"
+version = "0.8.5"
 edition = "2021"
 authors = ["MRJDEV <mrjdev@gmail.com>"]
 description = "VLO - A zero-boilerplate full-stack web framework"
@@ -23,7 +23,9 @@ clap = { version = "4", features = ["derive"] }
 # File system, watching, & utilities
 notify = "6"
 regex = "1.10"
-serde_json = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_urlencoded = "0.7"
+serde_json = "1"
 dotenvy = "0.15"
 
 # Multi-database support (SQLite, PostgreSQL, MySQL)
