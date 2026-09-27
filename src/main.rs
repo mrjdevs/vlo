@@ -10,6 +10,8 @@ mod utils;
 mod files;
 mod files_api;
 mod auth;  // ← NEW
+mod modules;         // ← Handles loading (src/modules.rs)
+mod module_handler;
 
 use clap::Parser;
 
@@ -54,6 +56,7 @@ async fn run() -> Result<(), String> {
 
             auth::init_auth_config();
             auth::init_session_secret();
+            modules::init_modules()?;  // ← ADD THIS
 
             let port = port
                 .map(|value| {
@@ -78,6 +81,7 @@ async fn run() -> Result<(), String> {
 
             auth::init_auth_config();
             auth::init_session_secret();
+            modules::init_modules()?;  // ← ADD THIS
 
             let port = port
                 .map(|value| {

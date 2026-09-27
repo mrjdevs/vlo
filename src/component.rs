@@ -27,7 +27,7 @@ pub fn component_path(name: &str) -> Option<PathBuf> {
         return Some(direct);
     }
 
-    // 2. layouts/*/{name}.vlo  (nested layouts, e.g. layouts/admin/DashboardLayout.vlo)
+    // 2. layouts/*/{name}.vlo
     if let Ok(entries) = fs::read_dir(&layouts) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -44,6 +44,11 @@ pub fn component_path(name: &str) -> Option<PathBuf> {
     let component = root.join("components").join(format!("{}.vlo", name));
     if component.exists() {
         return Some(component);
+    }
+
+    // 4. modules/*/components/{name}.vlo  ← NEW
+    if let Some(module_component) = crate::modules::find_module_component(name) {
+        return Some(module_component);
     }
 
     None
@@ -293,6 +298,42 @@ pub fn render_component_file(
     let default_slot = apply_active_nav_class(&default_slot, context);
 
     let mut render_ctx = context.template_context.clone();
+
+    // ─── MODULE COMPONENT HANDLING ─────────────────────────────
+    let is_module_component = path.to_string_lossy().contains("modules");
+    
+    if is_module_component {
+        if let Some(module_path) = path.parent().and_then(|p| p.parent()) {
+            
+            // Fetch raw data from source prop BEFORE calling handler
+            let raw_data = if let Some(source) = props.get("source").and_then(|v| v.as_str()) {
+                let action = source.trim_start_matches("/api/");
+                crate::router::fetch_api_data_sync(action, &render_ctx)
+                    .get("data")
+                    .cloned()
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            
+            match crate::module_handler::execute_module_handler(
+                module_path,
+                &props,
+                raw_data,  // ← Vec<Value>, not &render_ctx
+            ) {
+                Ok(response) => {
+                    render_ctx.insert("data".to_string(), serde_json::json!(response.data));
+                    render_ctx.insert("meta".to_string(), serde_json::json!(response.meta));
+                    render_ctx.insert("config".to_string(), serde_json::json!(response.config));
+                }
+                Err(e) => {
+                    crate::vlo_debug!("⚠️ Module handler error for {}: {}", name, e);
+                }
+            }
+        }
+    }
+    // ───────────────────────────────────────────────────────────
 
     render_ctx.extend(props.clone());
 

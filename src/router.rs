@@ -120,8 +120,15 @@ pub fn resolve_data_sources(source: &str, page_context: &HashMap<String, Value>)
 
         let tag = cap.get(1).unwrap().as_str();
         let before = cap.get(2).unwrap().as_str();
-        let action = cap.get(3).unwrap().as_str().trim_start_matches("/api/").trim_matches('/').to_string();
+        let action_path = cap.get(3).unwrap().as_str().trim_start_matches("/api/").trim_matches('/').to_string();
         let after = cap.get(4).unwrap().as_str();
+
+        // Extract just the action name for the variable (e.g., "get_dashboard_stats" from "dash/get_dashboard_stats")
+        let variable_name = action_path
+            .split('/')
+            .last()
+            .unwrap_or(&action_path)
+            .replace("-", "_");
 
         let close = format!("</{}>", tag);
         let open = format!("<{}", tag);
@@ -154,7 +161,7 @@ pub fn resolve_data_sources(source: &str, page_context: &HashMap<String, Value>)
 
         result.push_str(&source[last_end..full.start()]);
         let inner = &source[full.end()..close_pos];
-        let (rendered, computed) = evaluate_data_source_block(inner, &action, page_context);
+        let (rendered, computed) = evaluate_data_source_block(inner, &action_path, &variable_name, page_context);
         
         for (key, value) in computed { all_computed.insert(key, value); }
         result.push_str(&format!("<{}{}{}>{}</{}>", tag, before, after, rendered, tag));
@@ -311,18 +318,20 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
     }
 }
 
-pub fn evaluate_data_source_block(inner: &str, action: &str, page_context: &HashMap<String, Value>) -> (String, HashMap<String, Value>) {
-    let api_response = fetch_api_data_sync(action, page_context);
+pub fn evaluate_data_source_block(
+    inner: &str,
+    action_path: &str,
+    variable_name: &str,
+    page_context: &HashMap<String, Value>,
+) -> (String, HashMap<String, Value>) {
+    let api_response = fetch_api_data_sync(action_path, page_context);
     let mut context = page_context.clone();
     let mut computed: HashMap<String, Value> = HashMap::new();
 
-    let var_name = action
-        .trim_start_matches("get_").trim_start_matches("post_").trim_start_matches("put_")
-        .trim_start_matches("patch_").trim_start_matches("delete_");
-
-    // 1. Extract the "data" array for the loop variable (e.g., "users", "products")
+    // 1. Extract the "data" array for the loop variable
     let data = api_response.get("data").cloned().unwrap_or(Value::Array(vec![]));
-    context.insert(var_name.to_string(), data);
+    context.insert(variable_name.to_string(), data.clone());
+    computed.insert(variable_name.to_string(), data);
 
     // 2. Extract the "pagination" object and inject its fields globally
     if let Some(pagination) = api_response.get("pagination").and_then(|p| p.as_object()) {
@@ -660,11 +669,29 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
     let dev = state::app_mode().is_dev();
     let component_styles = if rendered.styles.is_empty() { String::new() } else { format!("\n<style>\n{}\n</style>", rendered.styles.join("\n")) };
     
+    // ─── MODULE STYLES ─────────────────────────────────────
+    let module_styles = crate::modules::get_all_module_styles();
+    let module_style_block = if module_styles.is_empty() { 
+        String::new() 
+    } else { 
+        format!("\n<style>\n{}\n</style>", module_styles) 
+    };
+    // ─────────────────────────────────────────────────────────
+
+    // ─── MODULE SCRIPTS ────────────────────────────────────
+    let module_scripts = crate::modules::get_all_module_scripts();
+    let module_script_block = if module_scripts.is_empty() { 
+        String::new() 
+    } else { 
+        format!("\n<script>\n{}\n</script>", module_scripts) 
+    };
+    // ─────────────────────────────────────────────────────────
+
     let hmr = if dev {
         r#"<script>(requestIdleCallback || setTimeout)(function() { const es = new EventSource("/__vlo_hmr"); es.onmessage = function() { location.reload(); }; window.addEventListener("beforeunload", function() { es.close(); }); }, 100);</script>"#
     } else { "" };
 
-    // ─── CSRF: Actual token in dev, placeholder in build ───
+    // ─── CSRF ──────────────────────────────────────────────
     let csrf_meta = if dev {
         if let Some(csrf) = rendered.template_context.get("csrf_token") {
             if let Some(token) = csrf.as_str() {
@@ -674,8 +701,9 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
     } else {
         r#"<meta name="csrf-token" content="__VLO_CSRF_PLACEHOLDER__">"#.to_string()
     };
+    // ─────────────────────────────────────────────────────────
 
-    // ─── FLASH: Actual HTML in dev, placeholder in build ───
+    // ─── FLASH ─────────────────────────────────────────────
     let flash_html = if dev && auto_flash {
         if let Some(flashes) = rendered.template_context.get("flash_messages") {
             if let Some(arr) = flashes.as_array() {
@@ -686,9 +714,14 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
                     let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
                     let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
                     let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
-                    html.push_str(&format!(r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div>"#, border_color, icon, title, description));
+                    html.push_str(&format!(
+                        r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div>"#,
+                        border_color, icon, title, description
+                    ));
                 }
-                if !html.is_empty() { html.push_str(r#"<style>@keyframes vloFlashIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}</style><script>setTimeout(function(){document.querySelectorAll('.vlo-flash').forEach(function(el){el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){el.remove()},400)})},4000)</script>"#); }
+                if !html.is_empty() {
+                    html.push_str(r#"<style>@keyframes vloFlashIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}</style><script>setTimeout(function(){document.querySelectorAll('.vlo-flash').forEach(function(el){el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){el.remove()},400)})},4000)</script>"#);
+                }
                 html
             } else { String::new() }
         } else { String::new() }
@@ -697,20 +730,24 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
     } else {
         String::new()
     };
+    // ─────────────────────────────────────────────────────────
 
-    // ─── ACTIVE NAV LINKS: Client-side JS for build mode ───
+    // ─── ACTIVE NAV LINKS (build mode) ─────────────────────
     let active_link_js = if !dev {
         r#"<script>(function(){var p=window.location.pathname;document.querySelectorAll('a[href]').forEach(function(a){var h=a.getAttribute('href');if(!h||h.startsWith('http')||h.startsWith('#')||h.startsWith('javascript'))return;if(h==='/'&&p==='/'){a.classList.add('active')}else if(h!=='/'&&p.startsWith(h)){a.classList.add('active')}})})()</script>"#
     } else { "" };
+    // ─────────────────────────────────────────────────────────
 
     let mut html = rendered.html.clone();
     html = html.replace("{{title}}", title);
     
     if !csrf_meta.is_empty() { html = html.replacen("</head>", &format!("{}\n</head>", csrf_meta), 1); }
     if !component_styles.is_empty() { html = html.replacen("</head>", &format!("{}\n</head>", component_styles), 1); }
+    if !module_style_block.is_empty() { html = html.replacen("</head>", &format!("{}\n</head>", module_style_block), 1); }
     if !flash_html.is_empty() { html = html.replacen("</body>", &format!("{}\n</body>", flash_html), 1); }
-    if !hmr.is_empty() { html = html.replacen("</body>", &format!("{}\n</body>", hmr), 1); }
+    if !module_script_block.is_empty() { html = html.replacen("</body>", &format!("{}\n</body>", module_script_block), 1); }
     if !active_link_js.is_empty() { html = html.replacen("</body>", &format!("{}\n</body>", active_link_js), 1); }
+    if !hmr.is_empty() { html = html.replacen("</body>", &format!("{}\n</body>", hmr), 1); }
     
     html
 }

@@ -231,3 +231,52 @@ pub fn set_building(building: bool) {
 pub fn is_building() -> bool {
     IS_BUILDING.load(Ordering::Relaxed)
 }
+
+// ---------------------------------------------------------------------------
+// Module System State
+// ---------------------------------------------------------------------------
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleManifest {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+    #[serde(default)]
+    pub exports: ModuleExports,
+    #[serde(default)]
+    pub config: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ModuleExports {
+    #[serde(default)]
+    pub components: Vec<String>,
+    #[serde(default)]
+    pub api: Vec<String>,
+    #[serde(default)]
+    pub styles: Vec<String>,
+    #[serde(default)]
+    pub scripts: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedModule {
+    pub manifest: ModuleManifest,
+    pub path: PathBuf,
+    pub components: Vec<PathBuf>,
+    pub api_sql: HashMap<String, String>,
+    pub styles: Vec<String>,
+    pub scripts: Vec<String>,
+}
+
+static MODULE_REGISTRY: LazyLock<Mutex<Vec<LoadedModule>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+pub fn get_module_registry() -> &'static LazyLock<Mutex<Vec<LoadedModule>>> {
+    &MODULE_REGISTRY
+}

@@ -1,0 +1,10 @@
+<script server>
+{
+  "get_products_chart": "SELECT * FROM products;",
+  "get_category_stats": "SELECT category, COUNT(*) as product_count, SUM(price) as total_revenue, AVG(price) as avg_price, SUM(stock) as total_stock FROM products GROUP BY category;",
+  "get_price_distribution": "SELECT CASE WHEN price < 25 THEN 'Under $25' WHEN price < 50 THEN '$25-$50' WHEN price < 100 THEN '$50-$100' ELSE 'Over $100' END as price_range, COUNT(*) as count FROM products GROUP BY price_range;",
+  "get_stock_status": "SELECT CASE WHEN stock = 0 THEN 'Out of Stock' WHEN stock < 5 THEN 'Low Stock' ELSE 'In Stock' END as status, COUNT(*) as count FROM products GROUP BY status;",
+  "get_monthly_products": "SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count FROM products GROUP BY month ORDER BY month DESC LIMIT 12;",
+  "get_dashboard_stats": "SELECT COUNT(*) as total_products, ROUND(SUM(price), 2) as total_revenue, ROUND(AVG(price), 2) as avg_price, COUNT(DISTINCT category) as total_categories FROM products;"
+}
+</script>

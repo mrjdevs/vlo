@@ -17,8 +17,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+
 // ---------------------------------------------------------------------------
-// API Action Cache
+// API Action Cache (supports namespaces)
 // ---------------------------------------------------------------------------
 struct CachedActions {
     actions: HashMap<String, String>,
@@ -44,11 +45,63 @@ pub fn strip_server_block(content: &str) -> String {
     content.to_string()
 }
 
-pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
-    let file = get_project_root().join("pages/api/api.vlo");
-    let metadata = fs::metadata(&file).map_err(|_| format!("API file not found: {}", file.display()))?;
-    let modified = metadata.modified().unwrap_or(UNIX_EPOCH);
+/// Load actions from a single api.vlo file
+fn load_actions_from_file(file: &Path) -> HashMap<String, String> {
+    let mut actions = HashMap::new();
+    
+    if let Ok(content) = fs::read_to_string(file) {
+        if let Some(block) = extract_server_block(&content) {
+            let clean = block.trim_start_matches('\u{feff}').replace('\u{a0}', " ").replace('\r', "");
+            if let Ok(json) = serde_json::from_str::<Value>(&clean) {
+                if let Some(object) = json.as_object() {
+                    for (name, value) in object {
+                        if let Some(sql) = value.as_str() {
+                            actions.insert(name.clone(), sql.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    actions
+}
 
+/// Get the latest modification time across all api.vlo files
+fn get_api_modified_time(api_dir: &Path) -> SystemTime {
+    let mut latest = UNIX_EPOCH;
+    
+    // Check main api.vlo
+    let main_file = api_dir.join("api.vlo");
+    if let Ok(meta) = fs::metadata(&main_file) {
+        if let Ok(modified) = meta.modified() {
+            if modified > latest { latest = modified; }
+        }
+    }
+    
+    // Check namespace subdirectories
+    if let Ok(entries) = fs::read_dir(api_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let ns_file = path.join("api.vlo");
+                if let Ok(meta) = fs::metadata(&ns_file) {
+                    if let Ok(modified) = meta.modified() {
+                        if modified > latest { latest = modified; }
+                    }
+                }
+            }
+        }
+    }
+    
+    latest
+}
+
+pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
+    let api_dir = get_project_root().join("pages/api");
+    let modified = get_api_modified_time(&api_dir);
+
+    // Check cache
     if let Ok(cache) = API_ACTIONS_CACHE.lock() {
         if let Some(cached) = cache.as_ref() {
             if cached.modified == modified {
@@ -58,23 +111,51 @@ pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
         }
     }
 
-    let content = fs::read_to_string(&file).map_err(|e| format!("Could not read {}: {}", file.display(), e))?;
-    let block = extract_server_block(&content).ok_or_else(|| format!("No <script server> block in {}", file.display()))?;
-    let clean = block.trim_start_matches('\u{feff}').replace('\u{a0}', " ").replace('\r', "");
-    
-    let json: Value = serde_json::from_str(&clean).map_err(|e| format!("Invalid JSON in {}: {}", file.display(), e))?;
-    let object = json.as_object().ok_or_else(|| "API definitions must be a JSON object".to_string())?;
-
     let mut actions = HashMap::new();
-    for (name, value) in object {
-        if let Some(sql) = value.as_str() {
-            actions.insert(name.clone(), sql.to_string());
+
+    // ─── LOAD MAIN API (pages/api/api.vlo) ──────────────────
+    let main_file = api_dir.join("api.vlo");
+    if main_file.exists() {
+        let main_actions = load_actions_from_file(&main_file);
+        crate::vlo_debug!("📡 Loaded {} actions from api.vlo", main_actions.len());
+        actions.extend(main_actions);
+    }
+    // ─────────────────────────────────────────────────────────
+
+    // ─── LOAD NAMESPACED APIs (pages/api/*/api.vlo) ─────────
+    if let Ok(entries) = fs::read_dir(&api_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+            
+            let namespace = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            
+            let ns_file = path.join("api.vlo");
+            if !ns_file.exists() { continue; }
+            
+            let ns_actions = load_actions_from_file(&ns_file);
+            crate::vlo_debug!("📡 Loaded {} actions from api/{}/api.vlo", ns_actions.len(), namespace);
+            
+            // Store with namespace prefix: "dash/get_category_stats"
+            for (name, sql) in ns_actions {
+                actions.insert(format!("{}/{}", namespace, name), sql);
+            }
         }
     }
+    // ─────────────────────────────────────────────────────────
+
+    // Also merge module APIs
+    let module_actions = crate::modules::get_module_api_actions();
+    actions.extend(module_actions);
 
     if let Ok(mut cache) = API_ACTIONS_CACHE.lock() {
         *cache = Some(CachedActions { actions: actions.clone(), modified });
     }
+    
+    crate::vlo_debug!("📡 Total API actions available: {}", actions.len());
     Ok(actions)
 }
 
@@ -216,32 +297,70 @@ pub async fn api_route_handler(
         }
     };
 
-    let resource = normalize_resource(&endpoint);
-    if !valid_identifier(&resource) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"success": false, "error": "Invalid API resource"}))).into_response();
-    }
-
     let operation = match crud_operation(&method) {
         Some(value) => value,
         None => return (StatusCode::METHOD_NOT_ALLOWED, Json(serde_json::json!({"success": false, "error": "Unsupported HTTP method"}))).into_response(),
     };
-
-    let explicit_action = ["get_", "post_", "put_", "patch_", "delete_"].iter().any(|prefix| endpoint.starts_with(prefix));
-    let action_name = if explicit_action { endpoint.clone() } else { format!("{}_{}", operation, resource) };
 
     let actions = match load_api_actions() {
         Ok(value) => value,
         Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error}))).into_response(),
     };
 
-    let mut sql = match actions.get(&action_name) {
-        Some(value) => value.clone(),
-        None => return (StatusCode::NOT_FOUND, Json(serde_json::json!({"success": false, "error": "API operation not found", "action": action_name}))).into_response(),
+    let explicit_action = ["get_", "post_", "put_", "patch_", "delete_"].iter().any(|prefix| endpoint.starts_with(prefix));
+    let mut action_name = if explicit_action {
+        endpoint.clone()
+    } else {
+        format!("{}_{}", operation, endpoint)
     };
 
-    if let Some(id_value) = id.clone() { query.insert("id".to_string(), id_value); }
+    // ─── ACTION RESOLUTION (Direct or Namespaced) ──────────────
+    let mut sql = match actions.get(&action_name) {
+        Some(value) => value.clone(),
+        None => {
+            // Try namespaced lookup: /api/{namespace}/{action}
+            if let Some(id_val) = &id {
+                let namespaced_action = format!("{}/{}", endpoint, id_val);
+                if let Some(value) = actions.get(&namespaced_action) {
+                    crate::vlo_debug!("📡 Resolved namespaced action: {}", namespaced_action);
+                    action_name = namespaced_action;
+                    query.remove("id"); // The "id" was actually the action name
+                    value.clone()
+                } else {
+                    return (StatusCode::NOT_FOUND, Json(serde_json::json!({
+                        "success": false, 
+                        "error": "API operation not found", 
+                        "action": action_name,
+                        "namespaced_attempt": namespaced_action
+                    }))).into_response();
+                }
+            } else {
+                return (StatusCode::NOT_FOUND, Json(serde_json::json!({
+                    "success": false, 
+                    "error": "API operation not found", 
+                    "action": action_name
+                }))).into_response();
+            }
+        }
+    };
+    // ─────────────────────────────────────────────────────────────
 
-    if id.is_some() && operation == "get" && !sql.contains("{{id}}") && !sql.contains("{id}") {
+    // Insert real ID into query params if it wasn't consumed by namespace resolution
+    let is_namespaced = action_name.contains('/');
+    if let Some(id_value) = id.clone() {
+        if !is_namespaced {
+            query.insert("id".to_string(), id_value);
+        }
+    }
+
+    let mut params = serde_json::Map::new();
+    for (key, value) in query {
+        if key != "action" { params.insert(key, query_string_to_value(&value)); }
+    }
+
+    // Auto-inject WHERE id = {id} for GET by ID requests
+    let is_id_request = params.contains_key("id") && operation == "get";
+    if is_id_request && !sql.contains("{{id}}") && !sql.contains("{id}") {
         let upper = sql.to_uppercase();
         if let Some(pos) = upper.find(" ORDER BY ") {
             let before = sql[..pos].trim_end();
@@ -253,11 +372,6 @@ pub async fn api_route_handler(
             sql = if trimmed.to_uppercase().contains(" WHERE ") { format!("{} AND id = {{id}}", trimmed) } 
                   else { format!("{} WHERE id = {{id}}", trimmed) };
         }
-    }
-
-    let mut params = serde_json::Map::new();
-    for (key, value) in query {
-        if key != "action" { params.insert(key, query_string_to_value(&value)); }
     }
 
     // ─── DEFAULT PAGINATION PARAMS ───────────────────────────
@@ -282,8 +396,8 @@ pub async fn api_route_handler(
         None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Database not configured"}))).into_response(),
     };
 
-    let action_type = if action_name.starts_with("put") || action_name.starts_with("patch") || method == Method::PUT || method == Method::PATCH { "updated" }
-                      else if action_name.starts_with("delete") || method == Method::DELETE { "deleted" }
+    let action_type = if action_name.contains("put") || action_name.contains("patch") || method == Method::PUT || method == Method::PATCH { "updated" }
+                      else if action_name.contains("delete") || method == Method::DELETE { "deleted" }
                       else { "created" };
 
     crate::vlo_debug!("🔧 VLO DEBUG: Executing SQL = {}", sql);
@@ -310,7 +424,7 @@ pub async fn api_route_handler(
             );
 
             // ─── AUTO-PAGINATION FOR GET LIST ENDPOINTS ──────────────────────
-            if method == Method::GET && id.is_none() {
+            if method == Method::GET && !params.contains_key("id") {
                 let count_sql = generate_count_sql(&sql);
                 if !count_sql.is_empty() {
                     if let Ok(count_res) = execute_api_sql(pool, &count_sql, &params).await {
