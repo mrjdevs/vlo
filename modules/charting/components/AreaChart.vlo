@@ -1,0 +1,31 @@
+<div class="vlo-chart vlo-chart-area" style="--chart-color: {{color}}">
+  {if title}
+    <div class="vlo-chart-header">
+      <h4 class="vlo-chart-title">{{title}}</h4>
+      <div class="vlo-chart-summary">
+        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Total</span><span class="vlo-chart-stat-value">{{meta.total}}</span></span>
+        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Average</span><span class="vlo-chart-stat-value">{{meta.avg_value}}</span></span>
+      </div>
+    </div>
+  {/if}
+
+  <div class="vlo-chart-area-body">
+    <svg viewBox="0 0 400 220" preserveAspectRatio="none" class="vlo-area-svg">
+      <line x1="0" y1="50" x2="400" y2="50" stroke="#292929" stroke-width="0.5"/>
+      <line x1="0" y1="100" x2="400" y2="100" stroke="#292929" stroke-width="0.5"/>
+      <line x1="0" y1="150" x2="400" y2="150" stroke="#292929" stroke-width="0.5"/>
+
+      <path d="{{config.area_data}}" fill="var(--chart-color)" opacity=".12"/>
+      <path d="{{config.path_data}}" fill="none" stroke="var(--chart-color)" stroke-width="2"/>
+
+      {for point in data}
+        <circle cx="{{point.x}}" cy="{{point.y}}" r="3.5" fill="var(--chart-color)"/>
+        <text x="{{point.x}}" y="215" text-anchor="middle" class="vlo-area-label">{if point.label}{{point.label}}{else}Other{/if}</text>
+      {/for}
+    </svg>
+  </div>
+
+  {if !data}
+    <div class="vlo-chart-empty"><p>No data available</p></div>
+  {/if}
+</div>

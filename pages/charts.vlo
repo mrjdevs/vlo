@@ -1,0 +1,53 @@
+<BaseLayout
+    title="Charts"
+    auth="false"
+    roles="Admin, Editor, User"
+    
+    footer="<Footer />"
+>
+
+<main class="dashboard-content">
+           <!-- ═══ STATS SUMMARY ═══ -->
+<div data-source="/api/dash/get_dashboard_stats">
+    {for stat in dashboard_stats}
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-icon">📦</div>
+            <div class="stat-content">
+                <div class="stat-value">{{stat.total_products}}</div>
+                <div class="stat-label">Total Products</div>
+            </div>
+        </div>
+    {/for}
+</div>
+
+<!-- ═══ PRIMARY CHARTS (2-column grid) ═══ -->
+    <div class="charts-grid charts-primary">
+
+<LollipopChart
+    source="/api/dash/get_category_stats"
+    title="Products by Category"
+    label_column="category"
+    value_column="product_count"
+    limit="8"
+    color="#ffaa00"
+/>
+<BarChart
+    source="/api/dash/get_category_stats"
+    title="Category Ranking"
+    label_column="category"
+    value_column="total_revenue"
+    limit="8"
+    color="#00f5ff"
+/>
+<PieChart
+    source="/api/dash/get_category_stats"
+    title="Revenue by Category-00"
+    label_column="category"
+    value_column="total_revenue"
+    aggregation="sum"
+    group_by="category"
+/>
+</div>
+</main>
+</BaseLayout>

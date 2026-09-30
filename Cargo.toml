@@ -15,7 +15,7 @@ axum = { version = "0.7", features = ["http1", "json", "query", "tokio", "multip
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "fs"] }
 futures-util = "0.3"    # Required for HMR SSE streams
 async-stream = "0.3"    # Required for HMR SSE streams
-urlencoding = "2"
+urlencoding = "2.1"
 
 # Command line interface
 clap = { version = "4", features = ["derive"] }
@@ -32,19 +32,11 @@ dotenvy = "0.15"
 sqlx = {
     version = "0.8",
     default-features = false,
-    features = [
-        "runtime-tokio",
-        "tls-rustls",
-        "sqlite",
-        "postgres",
-        "mysql",
-        "json",
-        "macros"
-    ]
+    features = ["runtime-tokio", "tls-rustls", "sqlite", "postgres", "mysql", "json", "macros"]
 }
 
 tower-http = { version = "0.5.2", features = ["fs", "compression-gzip"] }
-
+chrono = { version = "0.4", features = ["clock"] }
 # Password hashing (includes OsRng for secure tokens)
 argon2 = "0.5"
 

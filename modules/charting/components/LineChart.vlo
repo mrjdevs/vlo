@@ -1,0 +1,50 @@
+<div class="vlo-chart vlo-chart-line" style="--chart-color: {{color}}">
+  {if title}
+    <div class="vlo-chart-header">
+      <h4 class="vlo-chart-title">{{title}}</h4>
+      <div class="vlo-chart-summary">
+        <span class="vlo-chart-stat">
+          <span class="vlo-chart-stat-label">Total</span>
+          <span class="vlo-chart-stat-value">{{meta.total | number:2}}</span>
+        </span>
+        <span class="vlo-chart-stat">
+          <span class="vlo-chart-stat-label">Average</span>
+          <span class="vlo-chart-stat-value">{{meta.avg_value | number:2}}</span>
+        </span>
+      </div>
+    </div>
+  {/if}
+
+  <div class="vlo-chart-body vlo-chart-line-body">
+    <svg viewBox="0 0 400 200" preserveAspectRatio="none" class="vlo-line-svg">
+      <!-- Grid lines -->
+      <line x1="0" y1="50" x2="400" y2="50" stroke="#292929" stroke-width="0.5"/>
+      <line x1="0" y1="100" x2="400" y2="100" stroke="#292929" stroke-width="0.5"/>
+      <line x1="0" y1="150" x2="400" y2="150" stroke="#292929" stroke-width="0.5"/>
+      
+      <!-- Line path (JS will fill the 'd' attribute) -->
+      <path class="vlo-line-path" fill="none" stroke="var(--chart-color)" stroke-width="2"/>
+      
+      <!-- Data points (JS will fill cx/cy) -->
+      {for point in data}
+        <circle class="vlo-line-point" 
+                data-value="{{point.value}}" 
+                data-label="{{point.label}}" 
+                r="4" 
+                fill="var(--chart-color)"/>
+      {/for}
+    </svg>
+    
+    <div class="vlo-line-labels">
+      {for point in data}
+        <span class="vlo-line-label">{if point.label}{{point.label}}{else}Other{/if}</span>
+      {/for}
+    </div>
+  </div>
+
+  {if !data}
+    <div class="vlo-chart-empty">
+      <p>No data available</p>
+    </div>
+  {/if}
+</div>

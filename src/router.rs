@@ -324,27 +324,49 @@ pub fn evaluate_data_source_block(
     variable_name: &str,
     page_context: &HashMap<String, Value>,
 ) -> (String, HashMap<String, Value>) {
-    let api_response = fetch_api_data_sync(action_path, page_context);
+    // 1. Infer the actual action name if it's a RESTful resource path
+    let action_name = if action_path.contains('/') 
+        || action_path.starts_with("get_") 
+        || action_path.starts_with("post_") 
+        || action_path.starts_with("put_") 
+        || action_path.starts_with("delete_") 
+    {
+        action_path.to_string()
+    } else {
+        format!("get_{}", action_path)
+    };
+    
+    // 2. Fetch using the inferred action name
+    let api_response = fetch_api_data_sync(&action_name, page_context);
     let mut context = page_context.clone();
     let mut computed: HashMap<String, Value> = HashMap::new();
-
-    // 1. Extract the "data" array for the loop variable
+    
+    // 3. Extract the "data" array for the loop variable
     let data = api_response.get("data").cloned().unwrap_or(Value::Array(vec![]));
     context.insert(variable_name.to_string(), data.clone());
-    computed.insert(variable_name.to_string(), data);
-
-    // 2. Extract the "pagination" object and inject its fields globally
+    computed.insert(variable_name.to_string(), data.clone());
+    
+    // 🔥 HELPER: Also insert without "get_" prefix if it exists, for cleaner templates
+    // This allows `{for stat in dashboard_stats}` to work even if the action is `get_dashboard_stats`
+    if variable_name.starts_with("get_") {
+        let clean_name = variable_name.trim_start_matches("get_").to_string();
+        if !clean_name.is_empty() {
+            context.insert(clean_name.clone(), data.clone());
+            computed.insert(clean_name, data);
+        }
+    }
+    
+    // 4. Extract the "pagination" object and inject its fields globally
     if let Some(pagination) = api_response.get("pagination").and_then(|p| p.as_object()) {
         for (key, value) in pagination {
             context.insert(key.clone(), value.clone());
             computed.insert(key.clone(), value.clone());
         }
     }
-
+    
     let rendered = render_control_flow(inner, &context);
     (rendered, computed)
 }
-
 // ---------------------------------------------------------------------------
 // Rendering entry points
 // ---------------------------------------------------------------------------
@@ -667,29 +689,52 @@ pub async fn render_404() -> impl IntoResponse {
 
 pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> String {
     let dev = state::app_mode().is_dev();
-    let component_styles = if rendered.styles.is_empty() { String::new() } else { format!("\n<style>\n{}\n</style>", rendered.styles.join("\n")) };
+    let component_styles = if rendered.styles.is_empty() { 
+        String::new() 
+    } else { 
+        format!("\n<style>\n{}\n</style>", rendered.styles.join("\n")) 
+    };
     
-    // ─── MODULE STYLES ─────────────────────────────────────
-    let module_styles = crate::modules::get_all_module_styles();
-    let module_style_block = if module_styles.is_empty() { 
+    // ─── SELECTIVE MODULE STYLES ───────────────────────────
+    let mut module_styles = String::new();
+    let all_modules = crate::modules::get_modules();
+    for module in &all_modules {
+        if rendered.used_modules.contains(&module.manifest.name) {
+            if !module.styles.is_empty() {
+                module_styles.push_str(&module.styles.join("\n"));
+                module_styles.push('\n');
+            }
+        }
+    }
+    let module_style_block = if module_styles.trim().is_empty() { 
         String::new() 
     } else { 
-        format!("\n<style>\n{}\n</style>", module_styles) 
+        format!("\n<style>\n{}\n</style>", module_styles.trim()) 
     };
-    // ─────────────────────────────────────────────────────────
+    // ───────────────────────────────────────────────────────
 
-    // ─── MODULE SCRIPTS ────────────────────────────────────
-    let module_scripts = crate::modules::get_all_module_scripts();
-    let module_script_block = if module_scripts.is_empty() { 
+    // ─── SELECTIVE MODULE SCRIPTS ──────────────────────────
+    let mut module_scripts = String::new();
+    for module in &all_modules {
+        if rendered.used_modules.contains(&module.manifest.name) {
+            if !module.scripts.is_empty() {
+                module_scripts.push_str(&module.scripts.join("\n"));
+                module_scripts.push('\n');
+            }
+        }
+    }
+    let module_script_block = if module_scripts.trim().is_empty() { 
         String::new() 
     } else { 
-        format!("\n<script>\n{}\n</script>", module_scripts) 
+        format!("\n<script>\n{}\n</script>", module_scripts.trim()) 
     };
-    // ─────────────────────────────────────────────────────────
+    // ───────────────────────────────────────────────────────
 
     let hmr = if dev {
-        r#"<script>(requestIdleCallback || setTimeout)(function() { const es = new EventSource("/__vlo_hmr"); es.onmessage = function() { location.reload(); }; window.addEventListener("beforeunload", function() { es.close(); }); }, 100);</script>"#
-    } else { "" };
+        r#"<script>(requestIdleCallback || setTimeout)(function() { const es = new EventSource("/__vlo_hmr"); es.onmessage = function() { location.reload(); }; window.addEventListener("beforeunload", function() { es.close(); }); }, { timeout: 100 });</script>"#
+    } else {
+        ""
+    };
 
     // ─── CSRF ──────────────────────────────────────────────
     let csrf_meta = if dev {
@@ -701,7 +746,7 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
     } else {
         r#"<meta name="csrf-token" content="__VLO_CSRF_PLACEHOLDER__">"#.to_string()
     };
-    // ─────────────────────────────────────────────────────────
+    // ───────────────────────────────────────────────────────
 
     // ─── FLASH ─────────────────────────────────────────────
     let flash_html = if dev && auto_flash {
@@ -730,13 +775,13 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
     } else {
         String::new()
     };
-    // ─────────────────────────────────────────────────────────
+    // ───────────────────────────────────────────────────────
 
     // ─── ACTIVE NAV LINKS (build mode) ─────────────────────
     let active_link_js = if !dev {
         r#"<script>(function(){var p=window.location.pathname;document.querySelectorAll('a[href]').forEach(function(a){var h=a.getAttribute('href');if(!h||h.startsWith('http')||h.startsWith('#')||h.startsWith('javascript'))return;if(h==='/'&&p==='/'){a.classList.add('active')}else if(h!=='/'&&p.startsWith(h)){a.classList.add('active')}})})()</script>"#
     } else { "" };
-    // ─────────────────────────────────────────────────────────
+    // ───────────────────────────────────────────────────────
 
     let mut html = rendered.html.clone();
     html = html.replace("{{title}}", title);

@@ -1,7 +1,7 @@
 use regex::Regex;
 use serde_json::Value;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -157,10 +157,15 @@ pub fn app_mode() -> AppMode {
 // (query params, data-source results, etc.). `insert` forwards into it, which
 // is what router.rs relies on — so it is now genuinely used (no dead code).
 // ---------------------------------------------------------------------------
+
+
+// ... (keep all other code above this) ...
+
 pub struct RenderedPage {
     pub html: String,
     pub styles: Vec<String>,
     pub template_context: HashMap<String, Value>,
+    pub used_modules: HashSet<String>, // 🔥 NEW: Track which modules are used on this page
 }
 
 impl Default for RenderedPage {
@@ -169,22 +174,27 @@ impl Default for RenderedPage {
             html: String::new(),
             styles: Vec::new(),
             template_context: HashMap::new(),
+            used_modules: HashSet::new(), // 🔥 NEW
         }
     }
 }
 
 impl RenderedPage {
-    // Accepts &str / &String (via deref coercion) — router.rs passes &String.
     pub fn insert(&mut self, key: &str, value: Value) {
         self.template_context.insert(key.to_string(), value);
     }
-
+    
     pub fn add_style(&mut self, name: &str, css: &str) {
         let marker = format!("/* VLO:{} */", name);
         if self.styles.iter().any(|style| style.contains(&marker)) {
             return;
         }
         self.styles.push(format!("{}\n{}", marker, css));
+    }
+    
+    // 🔥 NEW: Helper to record module usage for selective asset injection
+    pub fn add_used_module(&mut self, module_name: &str) {
+        self.used_modules.insert(module_name.to_string());
     }
 }
 

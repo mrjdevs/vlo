@@ -1,0 +1,29 @@
+<div class="vlo-chart vlo-chart-progress" style="--chart-color: {{color}}">
+  {if title}
+    <div class="vlo-chart-header">
+      <h4 class="vlo-chart-title">{{title}}</h4>
+      <div class="vlo-chart-summary">
+        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Max</span><span class="vlo-chart-stat-value">{{meta.max_value}}</span></span>
+        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Average</span><span class="vlo-chart-stat-value">{{meta.avg_value}}</span></span>
+      </div>
+    </div>
+  {/if}
+
+  <div class="vlo-progress-body">
+    {for point in data}
+      <div class="vlo-progress-row">
+        <div class="vlo-progress-head">
+          <span class="vlo-progress-label">{if point.label}{{point.label}}{else}Other{/if}</span>
+          <span class="vlo-progress-value">{{point.value}}</span>
+        </div>
+        <div class="vlo-progress-track">
+          <div class="vlo-progress-fill" style="width: {{point.percentage}}%"></div>
+        </div>
+      </div>
+    {/for}
+  </div>
+
+  {if !data}
+    <div class="vlo-chart-empty"><p>No data available</p></div>
+  {/if}
+</div>

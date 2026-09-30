@@ -940,8 +940,7 @@ pub fn render_interpolations(
     template: &str,
     context: &HashMap<String, Value>,
 ) -> String {
-    // One linear pass instead of re-scanning from byte 0 per interpolation.
-    let preserve = crate::state::is_building(); // ← ADD THIS
+    let preserve = crate::state::is_building();
     let in_quotes = quote_mask(template);
 
     PROP_RE
@@ -949,12 +948,20 @@ pub fn render_interpolations(
             let full = captures.get(0).unwrap();
             let key = captures[1].trim();
             
-            // ← UPDATE THIS CHECK to include `preserve`
-            if preserve && is_runtime_var(key) && !context.contains_key(key) {
+            // Extract base key to check for preservation (e.g., "product.title" from "product.title | upper")
+            let base_key = key.split('|').next().unwrap_or(key).trim();
+            
+            if preserve && is_runtime_var(base_key) && !context.contains_key(base_key) {
                 return full.as_str().to_string();
             }
             
-            let value = format_value(&get_nested_value(key, context));
+            // Apply modifiers if a chain is present
+            let value = if let Some((base, chain)) = key.split_once('|') {
+                let base_val = get_nested_value(base.trim(), context);
+                crate::modifier::apply(base_val, chain)
+            } else {
+                format_value(&get_nested_value(key, context))
+            };
 
             if in_quotes[full.start()] {
                 escape_html_attribute(&value)
@@ -1033,13 +1040,22 @@ fn render_control_flow_internal(
                 let end = pos + 2 + end_rel;
                 let key = template[pos + 2..end].trim();
                 
-                if preserve_unresolved && is_runtime_var(key) && !context.contains_key(key) {
+                // Extract base key for preservation check
+                let base_key = key.split('|').next().unwrap_or(key).trim();
+                
+                if preserve_unresolved && is_runtime_var(base_key) && !context.contains_key(base_key) {
                     result.push_str(&template[pos..end + 2]);
                     cursor = end + 2;
                     continue;
                 }
                 
-                let value = format_value(&get_nested_value(key, context));
+                // Apply modifiers if present
+                let value = if let Some((base, chain)) = key.split_once('|') {
+                    let base_val = get_nested_value(base.trim(), context);
+                    crate::modifier::apply(base_val, chain)
+                } else {
+                    format_value(&get_nested_value(key, context))
+                };
 
                 if in_quotes[pos] {
                     result.push_str(&escape_html_attribute(&value));
@@ -1115,6 +1131,7 @@ fn is_runtime_var(var: &str) -> bool {
         "has_next" | "has_prev" | "prev_page" | "next_page" |
         "logged_in" | "user_name" | "user_role" | "user_email" |
         "flash_messages" | "flash_variant" | "flash_icon" | "flash_title" | "flash_description" |
-        "csrf_token" | "auth_identifier_field" | "auth_password_field" // ← ADDED
+        "csrf_token" | "auth_identifier_field" | "auth_password_field" |
+        "data" | "meta" | "config" // 🔥 ADDED: Preserves module component {for} loops during build
     )
 }

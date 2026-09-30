@@ -266,88 +266,127 @@ pub fn render_component_file(
         Some(path) => path,
         None => return format!("<!-- Missing component: {} -->", name),
     };
-
+    
     let compiled = match read_component_template(&path) {
         Some(template) => template,
         None => return format!("<!-- Missing template: {} -->", name),
     };
+    
+    let props = parse_props_v7(props_str);
+    let is_module_component = path.to_string_lossy().contains("modules");
+
+    // 1. Track module usage and CSS even during build so styles are injected
+    if is_module_component {
+        if let Some(module_path) = path.parent().and_then(|p| p.parent()) {
+            if let Some(module_name) = module_path.file_name().and_then(|n| n.to_str()) {
+                context.add_used_module(module_name);
+            }
+        }
+    }
 
     if !compiled.css.trim().is_empty() {
         context.add_style(name, compiled.css.trim());
     }
 
-    let template = &compiled.template;
-    let props = parse_props_v7(props_str);
-
-    let (raw_named_slots, raw_default_slot) =
-        parse_slot_content(children);
-
-    let mut named_slots = HashMap::new();
-
-    for (slot_name, slot_content) in raw_named_slots {
-        let rendered =
-            render_nested_vlo_content(&slot_content, context);
-
-        named_slots.insert(slot_name, rendered);
+    // 🔥 CRITICAL FIX: Preserve data-driven module components during build
+    // so they remain in the HTML for 'serve' to evaluate with live DB data.
+    if is_module_component && crate::state::is_building() && props.contains_key("source") {
+        let mut out = format!("<{}", name);
+        let trimmed_props = props_str.trim();
+        if !trimmed_props.is_empty() {
+            out.push(' ');
+            out.push_str(trimmed_props);
+        }
+        
+        if children.is_empty() {
+            if !trimmed_props.ends_with('/') && !is_void_tag(name) {
+                out.push_str(" /");
+            }
+            out.push('>');
+        } else {
+            let clean_props = trimmed_props.trim_end_matches('/').trim();
+            out = format!("<{}", name);
+            if !clean_props.is_empty() {
+                out.push(' ');
+                out.push_str(clean_props);
+            }
+            out.push('>');
+            out.push_str(children);
+            out.push_str(&format!("</{}>", name));
+        }
+        return out;
     }
 
-    let default_slot =
-        render_nested_vlo_content(&raw_default_slot, context);
+    let template = &compiled.template;
+    let (raw_named_slots, raw_default_slot) = parse_slot_content(children);
     
-    // Apply active class to nav links during rendering (not post-render)
+    let mut named_slots = HashMap::new();
+    for (slot_name, slot_content) in raw_named_slots {
+        let rendered = render_nested_vlo_content(&slot_content, context);
+        named_slots.insert(slot_name, rendered);
+    }
+    
+    let default_slot = render_nested_vlo_content(&raw_default_slot, context);
     let default_slot = apply_active_nav_class(&default_slot, context);
-
-    let mut render_ctx = context.template_context.clone();
-
-    // ─── MODULE COMPONENT HANDLING ─────────────────────────────
-    let is_module_component = path.to_string_lossy().contains("modules");
     
+    let mut render_ctx = context.template_context.clone();
+    
+    // ─── MODULE COMPONENT HANDLING (RUNTIME) ─────────────────────────────
     if is_module_component {
+        println!("🔥🔥🔥 [VLO] FOUND MODULE COMPONENT: {}", name); // FORCE PRINT
         if let Some(module_path) = path.parent().and_then(|p| p.parent()) {
-            
-            // Fetch raw data from source prop BEFORE calling handler
+            if let Some(module_name) = module_path.file_name().and_then(|n| n.to_str()) {
+                context.add_used_module(module_name);
+            }
+
             let raw_data = if let Some(source) = props.get("source").and_then(|v| v.as_str()) {
-                let action = source.trim_start_matches("/api/");
-                crate::router::fetch_api_data_sync(action, &render_ctx)
+                let action = source.trim_start_matches("/api/").trim_matches('/');
+                println!("📡 [VLO] Fetching API for {}: action='{}'", name, action); // FORCE PRINT
+                
+                let api_response = crate::router::fetch_api_data_sync(action, &render_ctx);
+                println!("📡 [VLO] API Response for {}: {:?}", name, api_response); // FORCE PRINT
+
+                api_response
                     .get("data")
                     .cloned()
                     .and_then(|v| v.as_array().cloned())
                     .unwrap_or_default()
             } else {
+                println!("⚠️ [VLO] No 'source' prop found for {}. Props: {:?}", name, props.keys().collect::<Vec<_>>()); // FORCE PRINT
                 Vec::new()
             };
             
-            match crate::module_handler::execute_module_handler(
-                module_path,
-                &props,
-                raw_data,  // ← Vec<Value>, not &render_ctx
-            ) {
+            println!("🔄 [VLO] Executing module handler for {} with {} rows", name, raw_data.len()); // FORCE PRINT
+            match crate::module_handler::execute_module_handler(module_path, &props, raw_data) {
                 Ok(response) => {
-                    render_ctx.insert("data".to_string(), serde_json::json!(response.data));
-                    render_ctx.insert("meta".to_string(), serde_json::json!(response.meta));
-                    render_ctx.insert("config".to_string(), serde_json::json!(response.config));
+                    println!("✅ [VLO] Handler produced {} transformed rows for {}", response.data.len(), name); // FORCE PRINT
+                    
+                    let data_json = serde_json::json!(response.data);
+                    let meta_json = serde_json::json!(response.meta);
+                    let config_json = serde_json::json!(response.config);
+                    
+                    render_ctx.insert("data".to_string(), data_json.clone());
+                    render_ctx.insert("meta".to_string(), meta_json.clone());
+                    render_ctx.insert("config".to_string(), config_json.clone());
+                    
+                    context.insert("data", data_json);
+                    context.insert("meta", meta_json);
+                    context.insert("config", config_json);
                 }
                 Err(e) => {
-                    crate::vlo_debug!("⚠️ Module handler error for {}: {}", name, e);
+                    println!("❌ [VLO] Module handler error for {}: {}", name, e); // FORCE PRINT
                 }
             }
         }
     }
     // ───────────────────────────────────────────────────────────
-
+    
     render_ctx.extend(props.clone());
-
-    render_ctx.insert(
-        "children".to_string(),
-        Value::String(default_slot.clone()),
-    );
-
-    let rendered =
-        render_component_template(template, &render_ctx);
-
-    let rendered =
-        render_slots(&rendered, &named_slots, &default_slot);
-
+    render_ctx.insert("children".to_string(), Value::String(default_slot.clone()));
+    
+    let rendered = render_component_template(template, &render_ctx);
+    let rendered = render_slots(&rendered, &named_slots, &default_slot);
+    
     let incoming_class = props.get("class").and_then(|value| {
         if let Value::String(value) = value {
             Some(value.clone())
@@ -355,111 +394,63 @@ pub fn render_component_file(
             None
         }
     });
-
-    let attributes =
-        build_component_attributes(template, &props);
-
+    
+    let attributes = build_component_attributes(template, &props);
     if attributes.is_empty() && incoming_class.is_none() {
         return rendered;
     }
-
-    let skip_check =
-        STYLE_RE.replace_all(&rendered, "");
-
-    if let Some(first_tag) = ELEMENT_RE
-        .captures(&skip_check)
+    
+    let skip_check = STYLE_RE.replace_all(&rendered, "");
+    if let Some(first_tag) = ELEMENT_RE.captures(&skip_check)
         .and_then(|captures| captures.get(1))
-        .map(|value| value.as_str().to_string())
+        .map(|value| value.as_str().to_string()) 
     {
-        if first_tag.eq_ignore_ascii_case("style")
-            || first_tag.eq_ignore_ascii_case("script")
-        {
+        if first_tag.eq_ignore_ascii_case("style") || first_tag.eq_ignore_ascii_case("script") {
             return rendered;
         }
     }
-
+    
     if let Some(captures) = ELEMENT_RE.captures(&rendered) {
         let full_match = captures.get(0).unwrap();
         let tag_name = captures.get(1).unwrap().as_str();
-
-        let existing_attributes = captures
-            .get(2)
-            .map(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        let (existing_attributes, class_attr) =
-            if let Some(extra) = incoming_class
-                .as_deref()
-                .map(|class| class.trim())
-                .filter(|class| !class.is_empty())
-            {
-                if let Some(class_match) =
-                    CLASS_RE.captures(&existing_attributes)
-                {
-                    let existing_value = class_match
-                        .get(2)
-                        .or_else(|| class_match.get(3))
-                        .map(|value| value.as_str())
-                        .unwrap_or("")
-                        .trim();
-
-                    let merged =
-                        if existing_value.is_empty() {
-                            format!("class=\"{}\"", extra)
-                        } else {
-                            format!(
-                                "class=\"{} {}\"",
-                                existing_value, extra
-                            )
-                        };
-
-                    let stripped = CLASS_RE
-                        .replace(&existing_attributes, "")
-                        .trim()
-                        .to_string();
-
-                    (stripped, Some(merged))
+        let existing_attributes = captures.get(2).map(|value| value.as_str()).unwrap_or("").to_string();
+        
+        let (existing_attributes, class_attr) = if let Some(extra) = incoming_class.as_deref().map(|class| class.trim()).filter(|class| !class.is_empty()) {
+            if let Some(class_match) = CLASS_RE.captures(&existing_attributes) {
+                let existing_value = class_match.get(2).or_else(|| class_match.get(3)).map(|value| value.as_str()).unwrap_or("").trim();
+                let merged = if existing_value.is_empty() {
+                    format!("class=\"{}\"", extra)
                 } else {
-                    (
-                        existing_attributes,
-                        Some(format!("class=\"{}\"", extra)),
-                    )
-                }
+                    format!("class=\"{} {}\"", existing_value, extra)
+                };
+                let stripped = CLASS_RE.replace(&existing_attributes, "").trim().to_string();
+                (stripped, Some(merged))
             } else {
-                (existing_attributes, None)
-            };
-
+                (existing_attributes, Some(format!("class=\"{}\"", extra)))
+            }
+        } else {
+            (existing_attributes, None)
+        };
+        
         let attributes = match class_attr {
             Some(class) if attributes.is_empty() => class,
             Some(class) => format!("{} {}", class, attributes),
             None => attributes,
         };
-
+        
         if attributes.is_empty() {
             return rendered;
         }
-
-        let replacement =
-            if existing_attributes.trim().is_empty() {
-                format!("<{} {}>", tag_name, attributes)
-            } else {
-                format!(
-                    "<{} {} {}>",
-                    tag_name,
-                    existing_attributes.trim(),
-                    attributes
-                )
-            };
-
-        return format!(
-            "{}{}{}",
-            &rendered[..full_match.start()],
-            replacement,
-            &rendered[full_match.end()..]
-        );
+        
+        let replacement = if existing_attributes.trim().is_empty() {
+            format!("<{} {}>", tag_name, attributes)
+        } else {
+            format!("<{} {} {}>", tag_name, existing_attributes.trim(), attributes)
+        };
+        
+        return format!("{}{}{}", &rendered[..full_match.start()], replacement, &rendered[full_match.end()..]);
     }
-
+    
     rendered
 }
 

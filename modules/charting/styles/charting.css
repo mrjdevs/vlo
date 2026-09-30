@@ -1,0 +1,217 @@
+.vlo-chart{background:var(--surface,#111);border:1px solid var(--border,#292929);border-radius:12px;padding:24px;margin:16px 0;font-family:inherit}
+.vlo-chart-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;gap:16px}
+.vlo-chart-title{margin:0;font-size:16px;font-weight:600;color:var(--text,#eee);line-height:1.3}
+.vlo-chart-summary{display:flex;gap:20px;flex-shrink:0}
+.vlo-chart-stat{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.vlo-chart-stat-label{font-size:11px;color:#777;text-transform:uppercase;letter-spacing:.5px}
+.vlo-chart-stat-value{font-size:18px;font-weight:700;color:var(--text,#eee)}
+
+/* Bar Chart */
+.vlo-chart-body{display:flex;align-items:flex-end;gap:12px;height:220px;padding-top:20px}
+.vlo-bar-wrapper{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;min-width:0}
+.vlo-bar-value{font-size:11px;font-weight:600;color:var(--text,#eee);white-space:nowrap}
+.vlo-bar-track{width:100%;max-width:40px;height:180px;background:rgba(255,255,255,.03);border-radius:6px;position:relative;overflow:hidden;display:flex;align-items:flex-end}
+.vlo-bar-fill{width:100%;background:var(--chart-color,#00f5ff);border-radius:6px 6px 0 0;transition:height .6s cubic-bezier(.4,0,.2,1);min-height:2px}
+.vlo-bar-label{font-size:11px;color:#888;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.2}
+
+/* Line Chart */
+.vlo-chart-line-body{display:block;height:220px;padding:0;position:relative;overflow:visible}
+.vlo-line-svg{display:block;width:100%;height:220px;overflow:visible}
+.vlo-line-label{fill:#666;font-size:11px;white-space:nowrap}
+
+/* HorizontalBarChart */
+.vlo-hbar-body{display:flex;flex-direction:column;gap:14px;height:220px;padding:10px 0;overflow:auto}
+.vlo-hbar-row{display:flex;flex-direction:column;gap:6px}
+.vlo-hbar-head{display:flex;justify-content:space-between;gap:12px}
+.vlo-hbar-label{font-size:11px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vlo-hbar-value{font-size:11px;font-weight:600;color:var(--text,#eee);white-space:nowrap}
+.vlo-hbar-track{height:8px;background:rgba(255,255,255,.05);border-radius:4px;overflow:hidden}
+.vlo-hbar-fill{height:100%;background:var(--chart-color,#00f5ff);border-radius:4px;transition:width .6s cubic-bezier(.4,0,.2,1)}
+
+/* ProgressChart */
+.vlo-progress-body{display:flex;flex-direction:column;gap:16px;height:220px;padding:20px 0;overflow:auto}
+.vlo-progress-row{display:flex;flex-direction:column;gap:7px}
+.vlo-progress-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.vlo-progress-label{font-size:11px;color:#aaa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vlo-progress-value{font-size:11px;font-weight:700;color:var(--text,#eee);white-space:nowrap}
+.vlo-progress-track{height:10px;background:rgba(255,255,255,.04);border-radius:6px;overflow:hidden}
+.vlo-progress-fill{height:100%;background:linear-gradient(90deg,var(--chart-color,#00f5ff),color-mix(in srgb,var(--chart-color,#00f5ff) 55%,white));border-radius:6px;transition:width .6s ease}
+
+/* LollipopChart */
+.vlo-lollipop-body{display:flex;align-items:flex-end;gap:14px;height:220px;padding:10px 4px 0}
+.vlo-lollipop-item{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px}
+.vlo-lollipop-value{font-size:10px;font-weight:700;color:var(--text,#eee);white-space:nowrap}
+.vlo-lollipop-track{position:relative;width:2px;height:170px;background:rgba(255,255,255,.08)}
+.vlo-lollipop-line{position:absolute;bottom:0;left:0;width:2px;background:var(--chart-color,#00f5ff);transition:height .6s ease}
+.vlo-lollipop-dot{position:absolute;left:50%;width:10px;height:10px;background:var(--chart-color,#00f5ff);border-radius:50%;transform:translate(-50%,50%)}
+.vlo-lollipop-label{width:100%;font-size:10px;color:#777;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+ /* piechart */
+
+.vlo-chart-pie {
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.vlo-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.vlo-chart-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.vlo-chart-summary {
+  display: flex;
+  gap: 20px;
+}
+
+.vlo-chart-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.vlo-chart-stat-label {
+  font-size: 0.75rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.vlo-chart-stat-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #00f5ff;
+}
+
+.vlo-pie-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: center;
+}
+
+.vlo-pie-visual {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.vlo-pie-svg {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+  aspect-ratio: 1 / 1; /* 🔥 CRITICAL: Prevents SVG from collapsing to 0 height */
+  display: block;
+  overflow: visible;
+}
+
+.vlo-pie-slice {
+  stroke: #1a1a2e;
+  stroke-width: 2px;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  cursor: pointer;
+  transform-origin: center;
+}
+
+.vlo-pie-slice:hover {
+  opacity: 0.85;
+  transform: scale(1.03);
+}
+
+.vlo-pie-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.vlo-pie-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.vlo-pie-legend-item:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.vlo-pie-legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.vlo-pie-legend-label {
+  flex: 1;
+  color: #ccc;
+}
+
+.vlo-pie-legend-value {
+  font-weight: 600;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+.vlo-chart-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 600px) {
+  .vlo-pie-body {
+    grid-template-columns: 1fr;
+  }
+  .vlo-chart-header {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .vlo-chart-summary {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* Empty */
+.vlo-chart-empty{display:flex;align-items:center;justify-content:center;height:200px;color:#666;font-size:14px}
+.vlo-chart-empty p{margin:0}
+
+/* Responsive */
+@media(max-width:768px){
+  .vlo-chart-header{flex-direction:column;align-items:flex-start}
+  .vlo-chart-summary{width:100%;justify-content:flex-start}
+  .vlo-chart-body{gap:8px;height:180px}
+  .vlo-chart-line-body{flex-direction:column;align-items:stretch;gap:0;height:220px;padding:0}
+  .vlo-line-svg{height:190px}
+  .vlo-line-labels{flex-direction:row;height:30px;margin:0;padding:8px 6px 0}
+  .vlo-bar-track{height:140px}
+  .vlo-bar-value,.vlo-bar-label{font-size:10px}
+}
+
+@media(max-width:480px){
+  .vlo-chart{padding:16px}
+  .vlo-chart-body{height:150px}
+  .vlo-chart-line-body{height:190px}
+  .vlo-line-svg{height:160px}
+  .vlo-line-labels{height:30px;padding:8px 4px 0}
+  .vlo-bar-track{height:110px}
+}

@@ -1,0 +1,150 @@
+{
+"name": "charting",
+"version": "1.1.0",
+"author": "vlo-community",
+"description": "Chart components with dynamic data aggregation and date period support",
+"dependencies": [],
+"exports": {
+"components": [
+"BarChart",
+"LineChart",
+"HorizontalBarChart",
+"ProgressChart",
+"LollipopChart"
+],
+"styles": ["charting.css"],
+"scripts": ["charting.js"]
+},
+"handler": {
+"transforms": [
+{
+"op": "date_extract",
+"when": "{{date_column}}",
+"field": "{{date_column}}",
+"value": "{{date_period|month}}",
+"to": "_period_label"
+},
+{
+"op": "map",
+"from": "{{label_column}}",
+"to": "label"
+},
+{
+"op": "map",
+"from": "{{value_column}}",
+"to": "value"
+},
+{
+"op": "group",
+"when": "{{group_by}}",
+"key": "{{group_by}}",
+"value": "value",
+"agg": "sum"
+},
+{
+"op": "sort",
+"key": "{{sort_key|label}}",
+"order": "{{sort_order|asc}}"
+},
+{
+"op": "limit",
+"count": "{{limit|12}}"
+}
+],
+"meta": {
+"total": {
+"op": "sum",
+"field": "value"
+},
+"max_value": {
+"op": "max",
+"field": "value"
+},
+"min_value": {
+"op": "min",
+"field": "value"
+},
+"avg_value": {
+"op": "avg",
+"field": "value"
+},
+"series_count": {
+"op": "count",
+"field": "value"
+}
+},
+"computed": {
+"percentage": {
+"op": "percent_of_max",
+"field": "value"
+},
+"share": {
+"op": "percent_of_total",
+"field": "value"
+},
+"rank": {
+"op": "rank",
+"field": "value",
+"order": "desc"
+},
+"cumulative": {
+"op": "cumulative_sum",
+"field": "value"
+},
+"running_avg": {
+"op": "running_avg",
+"field": "value"
+},
+"normalized": {
+"op": "normalize",
+"field": "value"
+},
+"ratio": {
+"op": "ratio",
+"field": "value",
+"against": "total"
+},
+"difference": {
+"op": "difference",
+"field": "value"
+},
+"change": {
+"op": "percent_change",
+"field": "value"
+},
+"min_distance": {
+"op": "distance_from_min",
+"field": "value"
+},
+"max_distance": {
+"op": "distance_from_max",
+"field": "value"
+},
+"index": {
+"op": "index",
+"field": "value",
+"base": 100
+},
+"z_score": {
+"op": "z_score",
+"field": "value"
+},
+"is_max": {
+"op": "is_max",
+"field": "value"
+},
+"is_min": {
+"op": "is_min",
+"field": "value"
+},
+"is_positive": {
+"op": "is_positive",
+"field": "value"
+},
+"is_negative": {
+"op": "is_negative",
+"field": "value"
+}
+}
+}
+}

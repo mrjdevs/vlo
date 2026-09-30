@@ -45,7 +45,7 @@
         <div class="stat-card">
             <div class="stat-icon">💰</div>
             <div class="stat-content">
-                <div class="stat-value">${{stat.total_revenue}}</div>
+                <div class="stat-value">${{stat.total_revenue|number:2}}</div>
                 <div class="stat-label">Total Revenue</div>
             </div>
         </div>
@@ -129,9 +129,134 @@
     limit="8"
     color="#ffaa00"
 />
+<BarChart
+    source="/api/dash/get_category_stats"
+    title="Category Ranking"
+    label_column="category"
+    value_column="total_revenue"
+    limit="8"
+    color="#00f5ff"
+/>
+
+<ProgressChart
+    source="/api/dash/get_category_stats"
+    title="Category Performance"
+    label_column="category"
+    value_column="product_count"
+    limit="8"
+    color="#00ff88"
+/>
+<LollipopChart
+    source="/api/dash/get_category_stats"
+    title="Top Categories"
+    label_column="category"
+    value_column="product_count"
+    limit="8"
+    color="#ffaa00"
+/>
+<CumulativeChart
+    source="/api/dash/get_sales_stats"
+    title="Cumulative Revenue"
+    label_column="date"
+    value_column="price"
+    limit="30"
+    color="#00f5ff"
+/>
+<LineChart 
+    source="/api/dash/get_monthly_products"
+    title="Smoothed Monthly Trend"
+    label_column="month"
+    value_column="count"
+    computed="running_avg" 
+    color="#a78bfa"
+/>
+<PieChart 
+    source="/api/dash/get_category_stats"
+    title="Revenue Share-Pie"
+    label_column="category"
+    value_column="product_count"
+    computed="sum"
+/>
+<LineChart 
+    source="/api/dash/get_monthly_products"
+    title="Growth Index (Base 100)"
+    label_column="month"
+    value_column="count"
+    computed="index"
+/>
+<LineChart
+    source="/api/dash/get_sales_stats"
+    title="Revenue Trend"
+    label_column="date"
+    value_column="price"
+    limit="12"
+    computed="running_avg"
+    color="#00f5ff"
+/>
+
+<LineChart
+    source="/api/dash/get_sales_stats"
+    title="Revenue Growth Index"
+    label_column="date"
+    value_column="price"
+    limit="12"
+    computed="index"
+    color="#ffaa00"
+/>
+<LineChart
+    source="/api/dash/get_sales_stats"
+    title="Revenue Trend---"
+    label_column="created_at"
+    value_column="price"
+    limit="6"
+    computed="running_avg"
+    color="#00f5ff"
+/>
+<LineChart
+    source="/api/dash/get_sales_stats"
+    title="Revenue Trend-xxx"
+    date_column="created_at"
+    value_column="price"
+    period="month"
+    aggregation="sum"
+    limit="12"
+    computed="running_avg"
+    color="#00f5ff"
+/>
+<PieChart
+    source="/api/get_products"
+    title="Revenue by Category-00"
+    label_column="created_at|year"
+    value_column="price"
+    aggregation="count"
+    group_by="category"
+/>
+<LineChart
+  source="/api/dash/get_category_stats"
+  title="Revenue by Month"
+  label_column="created_at"
+  value_column="total_revenue"
+/>
+-----------------------------------------------------------------------------------------------
+<!-- Monthly trend -->
+<LineChart source="/api/get_products" title="Monthly Sales" 
+    date_column="created_at|month" value_column="price" limit="12" />
+
+<!-- Quarterly revenue -->
+<BarChart source="/api/get_products" title="Quarterly Revenue" 
+    date_column="created_at|quarter" value_column="price" limit="8" />
+
+<!-- Weekly activity -->
+<LineChart source="/api/get_products" title="Weekly Activity" 
+    date_column="created_at|week" value_column="stock" limit="52" />
+
+<!-- Yearly overview -->
+<BarChart source="/api/get_products" title="Yearly Overview" 
+    date_column="created_at|year" value_column="price" limit="10" />
+
                 <LineChart 
                     source="/api/dash/get_category_stats"
-                    title="Revenue by Category"
+                    title="Revenue by Category.."
                     label_column="category"
                     value_column="total_revenue"
                     limit="8"
@@ -296,6 +421,7 @@
 
         </main>
     </div>
+
 </BaseLayout>
 
 <style>

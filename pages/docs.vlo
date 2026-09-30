@@ -1,7 +1,6 @@
 <BaseLayout title="Project Guidelines" 
-
-    footer='<Footer />
-'>
+    footer='<Footer />'
+>
     <div class="guidelines-page">
         <header class="guidelines-hero">
             <div class="hero-badge"><span class="pulse"></span> VLO PROJECT GUIDELINES</div>
@@ -11,6 +10,7 @@
                 <span>✦ Architecture</span>
                 <span>✦ Components</span>
                 <span>✦ Templating</span>
+                <span>✦ Modules</span>
                 <span>✦ Flash Messages</span>
                 <span>✦ Pagination</span>
                 <span>✦ Branding</span>
@@ -27,6 +27,7 @@
                     <a href="#components"><span>04</span> Components</a>
                     <a href="#props"><span>05</span> Props</a>
                     <a href="#templating"><span>06</span> Templating</a>
+                    <a href="#modifiers"><span>06a</span> Modifiers</a>
                     <a href="#pages"><span>07</span> Pages</a>
                     <a href="#layouts"><span>08</span> Layouts</a>
                     <a href="#styling"><span>09</span> Styling</a>
@@ -35,11 +36,12 @@
                     <a href="#performance"><span>12</span> Performance</a>
                     <a href="#accessibility"><span>13</span> Accessibility</a>
                     <a href="#security"><span>14</span> Security</a>
-                    <a href="#api-database"><span>15</span> API & Database</a>
-                    <a href="#flash"><span>16</span> Flash Messages</a>
-                    <a href="#pagination"><span>17</span> Pagination</a>
-                    <a href="#workflow"><span>18</span> Development Workflow</a>
-                    <a href="#checklist"><span>19</span> Checklist</a>
+                    <a href="#modules"><span>15</span> Modules & Charting</a>
+                    <a href="#api-database"><span>16</span> API & Database</a>
+                    <a href="#flash"><span>17</span> Flash Messages</a>
+                    <a href="#pagination"><span>18</span> Pagination</a>
+                    <a href="#workflow"><span>19</span> Development Workflow</a>
+                    <a href="#checklist"><span>20</span> Checklist</a>
                 </nav>
                 <div class="sidebar-card">
                     <div class="sidebar-icon">✦</div>
@@ -107,6 +109,12 @@
 │   ├── MainNav.vlo
 │   └── admin/
 │       └── AdminLayout.vlo
+├── modules/
+│   └── charting/
+│       ├── module.json
+│       ├── components/
+│       ├── styles/
+│       └── scripts/
 ├── schema.sql
 └── .env</code></pre>
                     </div>
@@ -114,6 +122,7 @@
                         <div><strong>pages/</strong><p>Application routes and complete pages. Supports subdirectories.</p></div>
                         <div><strong>components/</strong><p>Reusable UI building blocks.</p></div>
                         <div><strong>layouts/</strong><p>Shared page structures with automatic hierarchical resolution.</p></div>
+                        <div><strong>modules/</strong><p>Self-contained extension packages (components, styles, handlers).</p></div>
                         <div><strong>schema.sql</strong><p>Database schema (DDL statements for all tables).</p></div>
                     </div>
                 </section>
@@ -265,7 +274,7 @@
                     <p class="component-note">Use <code>{for item in collection}</code> to iterate over arrays from API responses. Supports an <code>{else}</code> block that renders when the collection is empty.</p>
                     <div class="code-card">
                         <div class="code-header"><span>Loop rendering</span><span>VLO</span></div>
-                        <pre><code>&lt;tbody data-source="/api/get_products"&gt;
+                        <pre><code>&lt;tbody data-source="/api/products"&gt;
     {for product in products}
         &lt;tr&gt;
             &lt;td&gt;#{{product.id}}&lt;/td&gt;
@@ -280,19 +289,15 @@
 &lt;/tbody&gt;</code></pre>
                     </div>
                     <div class="info-grid">
-                        <div><strong>{for item in collection}</strong><p>Iterates over an array. The collection name matches the API action name minus its prefix.</p></div>
+                        <div><strong>{for item in collection}</strong><p>Iterates over an array. The collection name matches the API resource name (e.g., <code>/api/products</code> → <code>products</code>).</p></div>
                         <div><strong>{else}...{/for}</strong><p>Renders fallback content when the collection is empty.</p></div>
-                    </div>
-                    <div class="rule-card">
-                        <strong>Naming convention</strong>
-                        <p>The loop variable name is derived from the API action. Action <code>get_products</code> → collection <code>products</code>. The prefix <code>get_</code> is stripped automatically.</p>
                     </div>
                     <h3>Data Sources</h3>
                     <p class="component-note">Bind an HTML element to an API endpoint using the <code>data-source</code> attribute. VLO fetches the data server-side and injects it into the template context before rendering.</p>
                     <div class="code-card">
                         <div class="code-header"><span>Data binding</span><span>VLO</span></div>
-                        <pre><code>&lt;!-- Element receives data from /api/get_products --&gt;
-&lt;tbody data-source="/api/get_products"&gt;
+                        <pre><code>&lt;!-- Element receives data from /api/products --&gt;
+&lt;tbody data-source="/api/products"&gt;
     {for product in products}
         &lt;tr&gt;
             &lt;td&gt;{{product.id}}&lt;/td&gt;
@@ -306,7 +311,7 @@
 &lt;/tbody&gt;</code></pre>
                     </div>
                     <div class="info-grid">
-                        <div><strong>data-source="/api/get_products"</strong><p>Calls the <code>get_products</code> action defined in <code>pages/api/api.vlo</code>.</p></div>
+                        <div><strong>data-source="/api/products"</strong><p>Calls the <code>get_products</code> action defined in <code>pages/api/api.vlo</code>.</p></div>
                         <div><strong>Server-side only</strong><p>Data is fetched during rendering. No client-side fetch needed.</p></div>
                     </div>
                     <h3>Form Directives</h3>
@@ -356,6 +361,39 @@
                     <div class="rule-card">
                         <strong>Server-side only</strong>
                         <p>All templating (<code>{if}</code>, <code>{for}</code>, <code>{{}}</code>) is resolved on the server. The browser receives fully rendered HTML. No JavaScript framework needed for data display.</p>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="modifiers">
+                    <div class="section-number">06a</div>
+                    <h2>Modifiers</h2>
+                    <p class="section-lead">Transform and format data directly in the template using the pipe <code>|</code> syntax. Modifiers are applied from left to right, making it easy to chain operations.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Modifier examples</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- Text formatting --&gt;
+&lt;p&gt;{{ product.title | upper | truncate:30 }}&lt;/p&gt;
+
+&lt;!-- Number formatting --&gt;
+&lt;p&gt;Price: {{ product.price | number:2 }}&lt;/p&gt;
+&lt;p&gt;Total: {{ total_revenue | currency:"$" }}&lt;/p&gt;
+&lt;p&gt;Growth: {{ growth | percent:1 }}&lt;/p&gt;
+
+&lt;!-- Fallbacks and utilities --&gt;
+&lt;p&gt;{{ user.bio | default:"No bio provided." | nl2br }}&lt;/p&gt;</code></pre>
+                    </div>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Modifier</span><span>Description</span><span>Example</span></div>
+                        <div class="naming-row"><span>upper / lower</span><span>Change text case</span><span>{{ text | upper }}</span></div>
+                        <div class="naming-row"><span>number:n</span><span>Format with 'n' decimals and thousands separators</span><span>{{ val | number:2 }}</span></div>
+                        <div class="naming-row"><span>currency:sym</span><span>Format as currency with custom symbol</span><span>{{ val | currency:"€" }}</span></div>
+                        <div class="naming-row"><span>truncate:n</span><span>Truncate to 'n' characters with ellipsis</span><span>{{ text | truncate:50 }}</span></div>
+                        <div class="naming-row"><span>default:val</span><span>Fallback if empty, null, or "null"</span><span>{{ val | default:"N/A" }}</span></div>
+                        <div class="naming-row"><span>nl2br</span><span>Convert newlines to &lt;br&gt; tags</span><span>{{ text | nl2br }}</span></div>
+                        <div class="naming-row"><span>escape</span><span>HTML-encode special characters</span><span>{{ text | escape }}</span></div>
+                    </div>
+                    <div class="rule-card">
+                        <strong>Default values with pipe</strong>
+                        <p>The syntax <code>{{ prop | default:"fallback" }}</code> is the cleanest way to handle missing data without wrapping the element in an <code>{if}</code> block.</p>
                     </div>
                 </section>
 
@@ -559,12 +597,75 @@ AUTH_API_PUBLIC_ROUTES=/api/public,/api/health</code></pre>
                     </div>
                 </section>
 
-                <section class="doc-section" id="api-database">
+                <section class="doc-section" id="modules">
                     <div class="section-number">15</div>
+                    <h2>Modules & Charting</h2>
+                    <p class="section-lead">VLO supports a modular extension system. Modules are self-contained packages of components, styles, scripts, and declarative data handlers that can be dropped into the <code>modules/</code> directory.</p>
+                    
+                    <h3>Using Built-in Modules</h3>
+                    <p class="component-note">VLO ships with a powerful <code>charting</code> module. Components automatically fetch, transform, and render data based on props, requiring zero custom Rust code.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Charting examples</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- Bar Chart: Grouped and aggregated automatically --&gt;
+&lt;BarChart 
+    source="/api/dash/get_category_stats"
+    title="Revenue by Category"
+    label_column="category"
+    value_column="total_revenue"
+    limit="8"
+    color="#00f5ff"
+/&gt;
+
+&lt;!-- Pie Chart: Automatically calculates shares and SVG paths --&gt;
+&lt;PieChart 
+    source="/api/dash/get_category_stats"
+    title="Revenue Share"
+    label_column="category"
+    value_column="total_revenue"
+    computed="share"
+/&gt;
+
+&lt;!-- Line Chart: With running average computation --&gt;
+&lt;LineChart 
+    source="/api/dash/get_monthly_products"
+    title="Smoothed Monthly Trend"
+    label_column="month"
+    value_column="count"
+    computed="running_avg"
+    color="#a78bfa"
+/&gt;</code></pre>
+                    </div>
+
+                    <h3>Advanced Chart Props</h3>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Prop</span><span>Description</span><span>Example</span></div>
+                        <div class="naming-row"><span>date_column</span><span>Extract date periods (year, month, week, quarter, day)</span><span>date_column="created_at|month"</span></div>
+                        <div class="naming-row"><span>computed</span><span>Override the displayed value with a computed metric</span><span>computed="percent_of_total"</span></div>
+                        <div class="naming-row"><span>group_by</span><span>Group raw data by a specific column before rendering</span><span>group_by="category"</span></div>
+                    </div>
+
+                    <h3>Module Structure</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>modules/charting/</span><span>Directory</span></div>
+                        <pre><code>modules/
+└── charting/
+    ├── module.json          # Manifest, exports, and handler rules
+    ├── components/          # .vlo component files (BarChart, PieChart, etc.)
+    ├── styles/              # Module-specific CSS (auto-injected)
+    └── scripts/             # Module-specific JS (auto-injected)</code></pre>
+                    </div>
+                    <div class="rule-card">
+                        <strong>Declarative Handler Pipeline</strong>
+                        <p>Modules use a JSON pipeline in <code>module.json</code> to <code>map</code>, <code>group</code>, <code>sort</code>, and <code>limit</code> data. This allows the community to build and share complex, reusable data components without touching the framework core.</p>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="api-database">
+                    <div class="section-number">16</div>
                     <h2>API & Database</h2>
                     <p class="section-lead">VLO provides a centralized API definition system backed by SQL. Write standard SQL queries in a single file and they become REST endpoints automatically.</p>
                     <h3>API Definitions</h3>
-                    <p class="component-note">All API actions are defined in <code>pages/api/api.vlo</code> inside a <code>&lt;script server&gt;</code> block as JSON.</p>
+                    <p class="component-note">All API actions are defined in <code>pages/api/api.vlo</code> (or namespaced subdirectories) inside a <code>&lt;script server&gt;</code> block as JSON.</p>
                     <div class="code-card">
                         <div class="code-header"><span>pages/api/api.vlo</span><span>JSON</span></div>
                         <pre><code>&lt;script server&gt;
@@ -583,6 +684,23 @@ AUTH_API_PUBLIC_ROUTES=/api/public,/api/health</code></pre>
                         <div><strong>Auto-pagination</strong><p><code>page</code>, <code>limit</code>, and <code>offset</code> are injected automatically.</p></div>
                         <div><strong>Memory cache</strong><p>Definitions are cached and reload only when the file changes.</p></div>
                     </div>
+
+                    <h3>Namespaced APIs</h3>
+                    <p class="component-note">For larger projects, organize API definitions into subdirectories. A file at <code>pages/api/dash/api.vlo</code> can be accessed via <code>/api/dash/get_stats</code>.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/api/dash/api.vlo</span><span>JSON</span></div>
+                        <pre><code>&lt;script server&gt;
+{
+  "get_category_stats": "SELECT category, SUM(price) as total_revenue FROM products GROUP BY category",
+  "get_monthly_products": "SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count FROM products GROUP BY month"
+}
+&lt;/script&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Automatic Discovery</strong><p>VLO scans all <code>pages/api/*/api.vlo</code> files on startup and caches them in memory.</p></div>
+                        <div><strong>Clean URLs</strong><p>The namespace becomes part of the route: <code>/api/dash/get_category_stats</code>.</p></div>
+                    </div>
+
                     <h3>Database Support</h3>
                     <p class="component-note">VLO supports SQLite, PostgreSQL, and MySQL. Configure via environment variables.</p>
                     <div class="code-card">
@@ -608,7 +726,7 @@ DB_SCHEMA=schema.mysql.sql</code></pre>
                     </div>
                     <h3>API Response Format</h3>
                     <div class="code-card">
-                        <div class="code-header"><span>GET /api/get_products?page=2&limit=10</span><span>JSON</span></div>
+                        <div class="code-header"><span>GET /api/products?page=2&limit=10</span><span>JSON</span></div>
                         <pre><code>{
   "success": true,
   "data": [
@@ -633,7 +751,7 @@ DB_SCHEMA=schema.mysql.sql</code></pre>
                 </section>
 
                 <section class="doc-section" id="flash">
-                    <div class="section-number">16</div>
+                    <div class="section-number">17</div>
                     <h2>Flash Messages</h2>
                     <p class="section-lead">Flash messages provide one-time feedback after form submissions and API actions. They use cookie-based storage — no database table required, no URL pollution, and they auto-dismiss.</p>
                     <h3>How it works</h3>
@@ -725,7 +843,7 @@ DB_SCHEMA=schema.mysql.sql</code></pre>
                 </section>
 
                 <section class="doc-section" id="pagination">
-                    <div class="section-number">17</div>
+                    <div class="section-number">18</div>
                     <h2>Pagination</h2>
                     <p class="section-lead">VLO provides automatic pagination for any <code>get_*</code> API action that includes <code>LIMIT</code> and <code>OFFSET</code>. No manual COUNT queries, no math, no boilerplate.</p>
                     <h3>How it works</h3>
@@ -800,7 +918,7 @@ DB_SCHEMA=schema.mysql.sql</code></pre>
                     &lt;th&gt;ID&lt;/th&gt;&lt;th&gt;Name&lt;/th&gt;&lt;th&gt;Email&lt;/th&gt;&lt;th&gt;Role&lt;/th&gt;&lt;th&gt;Actions&lt;/th&gt;
                 &lt;/tr&gt;
             &lt;/thead&gt;
-            &lt;tbody data-source="/api/get_users"&gt;
+            &lt;tbody data-source="/api/users"&gt;
                 {for user in users}
                 &lt;tr&gt;
                     &lt;td&gt;#{{user.id}}&lt;/td&gt;
@@ -836,7 +954,7 @@ DB_SCHEMA=schema.mysql.sql</code></pre>
                 </section>
 
                 <section class="doc-section" id="workflow">
-                    <div class="section-number">18</div>
+                    <div class="section-number">19</div>
                     <h2>Development Workflow</h2>
                     <p class="section-lead">Keep changes small, understandable and easy to review.</p>
                     <div class="workflow">
@@ -868,7 +986,7 @@ vlo serve --port 8080</code></pre>
                 </section>
 
                 <section class="doc-section" id="checklist">
-                    <div class="section-number">19</div>
+                    <div class="section-number">20</div>
                     <h2>Pre-Release Checklist</h2>
                     <p class="section-lead">Before considering a feature complete, verify the following.</p>
                     <div class="checklist">

@@ -1,6 +1,5 @@
 <BaseLayout title="Product Management">
   <div class="products-page">
-
     {if flash_messages}
       <Toast />
     {/if}
@@ -74,7 +73,7 @@
                 <th>Actions</th>
               </tr>
             </thead>
-            <tbody data-source="/api/get_products">
+            <tbody data-source="/api/products">
               {for product in products}
               <tr>
                 <td>#{{product.id}}</td>
@@ -103,7 +102,7 @@
                     {/if}
                   {/if}
                 </td>
-                <td><span>{{product.created_at}}</span></td>
+                <td><span>{{product.created_at|date}}</span></td>
                 <td>
                   <div class="product-actions">
                     <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('edit-{{product.id}}').classList.add('active')" title="Edit">✎</button>

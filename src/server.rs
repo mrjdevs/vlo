@@ -1,12 +1,13 @@
 use crate::{
     api::{api_handler_id, api_handler_path, api_handler_root},
     files_api::{delete_file, download_file, get_file, serve_file, upload_file},
-    router::{hmr_handler, home_handler, not_found_handler, page_handler, watch_files, resolve_data_sources},
+    router::{hmr_handler, home_handler, not_found_handler, page_handler, watch_files},
     state::{self, get_project_root},
-    template::{escape_html_attribute, render_control_flow}};
+    template::escape_html_attribute,
+};
 use axum::{
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::IntoResponse,
     routing::get,
     Router,
 };
@@ -27,7 +28,6 @@ use axum::middleware::{self, Next};
 use axum::extract::Request;
 use axum::response::Response;
 use axum::http::header::{CACHE_CONTROL, HeaderValue};
-
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -485,20 +485,15 @@ async fn serve_build_page(
     let path = uri.path();
     let page_name = if path == "/" { "index" } else { path.trim_start_matches('/') };
 
-    // ─── 1. MANUALLY RESOLVE AUTH (Bypass Axum fallback layer quirks) ─────
+    // ─── 1. MANUALLY RESOLVE AUTH ──────────────────────────
     let mut auth = req.extensions().get::<crate::auth::AuthUser>().cloned();
-    
-    // If middleware didn't run (common with Axum fallbacks) or didn't find a user,
-    // manually parse the cookie and query the database.
     if auth.is_none() || auth.as_ref().map_or(true, |a| a.user.is_none()) {
         let cookie_header = req.headers().get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok());
         let cookie_name = crate::auth::auth_config().cookie_name.clone();
         if let Some(header) = cookie_header {
             if let Some(token) = crate::auth::parse_cookie_header(header, &cookie_name) {
-                crate::vlo_debug!("🔐 MANUAL SESSION: Found token {}", &token[..8.min(token.len())]);
                 let user = crate::auth::get_user_from_session(&token).await;
                 if user.is_some() {
-                    crate::vlo_debug!("🔐 MANUAL SESSION: User resolved successfully");
                     auth = Some(crate::auth::AuthUser {
                         user,
                         csrf_token: Some(crate::auth::compute_csrf_token(&token)),
@@ -508,16 +503,13 @@ async fn serve_build_page(
             }
         }
     }
-    // ─────────────────────────────────────────────────────────────────────
 
-    // ─── 2. EXTRACT FLASH EARLY ────────────────────────────────────────
+    // ─── 2. EXTRACT FLASH EARLY ────────────────────────────
     let flash_encoded = req.headers().get("cookie")
         .and_then(|v| v.to_str().ok())
         .and_then(|h| crate::auth::parse_cookie_header(h, crate::auth::FLASH_COOKIE));
-        
     let mut flash_html = String::new();
     let mut expire_cookie = false;
-    
     if let Some(encoded) = flash_encoded {
         if let Some(flash) = crate::auth::decode_flash(&encoded) {
             let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
@@ -525,7 +517,6 @@ async fn serve_build_page(
             let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
             let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
             let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
-            
             flash_html = format!(
                 r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div><style>@keyframes vloFlashIn{{from{{opacity:0;transform:translateX(40px)}}to{{opacity:1;transform:translateX(0)}}}}</style><script>setTimeout(function(){{document.querySelectorAll('.vlo-flash').forEach(function(el){{el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){{el.remove()}},400)}})}},4000)</script>"#, 
                 border_color, icon, title, description
@@ -534,57 +525,37 @@ async fn serve_build_page(
         }
     }
 
-        // ─── 3. CHECK AUTH GUARD FROM ROUTES MANIFEST ──────────────────────
+    // ─── 3. CHECK AUTH GUARD ───────────────────────────────
     let manifest_path = build_dir.join("routes.json");
-    
-    crate::vlo_debug!("🛡️ GUARD: Checking path '{}'", path);
-    crate::vlo_debug!("🛡️ GUARD: User authenticated = {}", auth.as_ref().map_or(false, |a| a.user.is_some()));
-
-    // ─── EXTRACT `next` PARAMETER FOR REDIRECTS ─────────────
     let raw_query = uri.query().unwrap_or("");
-    let next_decoded = raw_query.split('&')
-        .find_map(|pair| {
-            let mut parts = pair.splitn(2, '=');
-            let key = parts.next()?;
-            let value = parts.next().unwrap_or("");
-            if key == "next" {
-                Some(urlencoding::decode(value).unwrap_or_default().into_owned())
-            } else {
-                None
-            }
-        });
+    let next_decoded = raw_query.split('&').find_map(|pair| {
+        let mut parts = pair.splitn(2, '=');
+        let key = parts.next()?;
+        let value = parts.next().unwrap_or("");
+        if key == "next" { Some(urlencoding::decode(value).unwrap_or_default().into_owned()) } else { None }
+    });
     let next_ref = next_decoded.as_deref();
-    // ─────────────────────────────────────────────────────────
 
     if manifest_path.exists() {
-        if let Ok(manifest_str) = fs::read_to_string(&manifest_path) {
+        if let Ok(manifest_str) = std::fs::read_to_string(&manifest_path) {
             if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_str) {
                 if let Some(routes) = manifest.as_object() {
                     if let Some(route_config) = routes.get(path) {
                         let guard = crate::auth::PageGuard {
                             auth: route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false),
                             guest: route_config.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
-                            roles: route_config.get("roles")
-                                .and_then(|v| v.as_array())
-                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                                .unwrap_or_default(),
+                            roles: route_config.get("roles").and_then(|v| v.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
                         };
-                        
-                        crate::vlo_debug!("🛡️ GUARD: Route '{}' requires auth={}, guest={}, roles={:?}", path, guard.auth, guard.guest, guard.roles);
-                        
                         let user = auth.as_ref().and_then(|a| a.user.clone());
-                        if let Some(mut response) = crate::auth::check_page_guard(&guard, &user, path, next_ref) { // ← NOW next_ref
-                            crate::vlo_debug!("🛡️ GUARD: Access DENIED for '{}', redirecting...", path);
-                            
+                        if let Some(mut response) = crate::auth::check_page_guard(&guard, &user, path, next_ref) {
                             if expire_cookie {
-                                let expire = crate::auth::expire_flash_cookie();
-                                if let Ok(val) = axum::http::HeaderValue::from_str(&expire) {
+                                if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
                                     response.headers_mut().append(axum::http::header::SET_COOKIE, val);
                                 }
                             }
                             return response;
                         }
-                        crate::vlo_debug!("🛡️ GUARD: Access GRANTED for '{}'", path);
                     }
                 }
             }
@@ -593,10 +564,10 @@ async fn serve_build_page(
 
     let filename = if path == "/" { "index.html".to_string() } else { format!("{}.html", page_name) };
     let file = build_dir.join(&filename);
-
-    match fs::read_to_string(&file) {
+    
+    match std::fs::read_to_string(&file) {
         Ok(html) => {
-            let query: HashMap<String, String> = uri.query().unwrap_or("").split('&')
+            let query: std::collections::HashMap<String, String> = uri.query().unwrap_or("").split('&')
                 .filter_map(|pair| {
                     let mut parts = pair.splitn(2, '=');
                     let key = parts.next()?;
@@ -604,16 +575,16 @@ async fn serve_build_page(
                     Some((key.to_string(), urlencoding::decode(value).unwrap_or_else(|_| value.into()).to_string()))
                 }).collect();
             
-            let mut context = HashMap::new();
+            let mut context = std::collections::HashMap::new();
             for (key, value) in &query {
                 if let Ok(n) = value.parse::<i64>() { context.insert(key.clone(), serde_json::Value::Number(n.into())); }
                 else { context.insert(key.clone(), serde_json::Value::String(value.clone())); }
             }
-
+            
             let cfg = crate::auth::auth_config();
             context.insert("auth_identifier_field".to_string(), serde_json::Value::String(cfg.identifier_field.clone()));
             context.insert("auth_password_field".to_string(), serde_json::Value::String(cfg.password_field.clone()));
-
+            
             if let Some(auth_user) = &auth {
                 if let Some(user) = &auth_user.user {
                     context.insert("logged_in".to_string(), serde_json::Value::Bool(true));
@@ -622,11 +593,10 @@ async fn serve_build_page(
                     context.insert("user_email".to_string(), serde_json::Value::String(user.email.clone()));
                 }
             }
-
+            
             if !context.contains_key("limit") { context.insert("limit".to_string(), serde_json::Value::Number(20.into())); }
             if !context.contains_key("page") { context.insert("page".to_string(), serde_json::Value::Number(1.into())); }
             if !context.contains_key("order") { context.insert("order".to_string(), serde_json::Value::String("asc".to_string())); }
-            
             if let (Some(p), Some(l)) = (context.get("page").and_then(|v| v.as_i64()), context.get("limit").and_then(|v| v.as_i64())) {
                 let offset = (p.max(1) - 1) * l.max(1);
                 context.insert("offset".to_string(), serde_json::Value::Number(offset.into()));
@@ -634,32 +604,51 @@ async fn serve_build_page(
                 context.insert("next_page".to_string(), serde_json::Value::Number((p + 1).into()));
             }
 
-            let (html_with_data, computed_vars) = resolve_data_sources(&html, &context);
+            // ─── 4. RESOLVE DATA SOURCES ───────────────────
+            let (html_with_data, computed_vars) = crate::router::resolve_data_sources(&html, &context);
             let mut context = context;
             for (key, value) in computed_vars { context.insert(key, value); }
-            
-            let rendered = render_control_flow(&html_with_data, &context);
 
+            // ─── 5. 🔥 DYNAMIC COMPONENT RENDERING ─────────
+            let mut render_page = crate::state::RenderedPage {
+                html: html_with_data,
+                styles: Vec::new(),
+                template_context: context.clone(),
+                used_modules: std::collections::HashSet::new(),
+            };
+
+            for _ in 0..20 {
+                let previous = render_page.html.clone();
+                let current_html = render_page.html.clone(); // Clone to satisfy borrow checker
+                render_page.html = crate::component::render_components(&current_html, &mut render_page);
+                if render_page.html == previous { break; }
+            }
+
+            // ─── 6. FINAL CONTROL FLOW & WRAP ──────────────
+            let rendered_html = crate::template::render_control_flow(&render_page.html, &render_page.template_context);
+            render_page.html = rendered_html; // 🔥 Update so wrap_html can use it
+            
             let csrf_token = auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default();
-            let mut rendered = rendered.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
-            rendered = rendered.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
-
-            let mut response = (StatusCode::OK, Html(rendered)).into_response();
             
+            // 🔥 CRITICAL: Use wrap_html to inject module scripts/styles!
+            let mut final_html = crate::router::wrap_html(&page_name, &render_page, false);
+            
+            final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
+            final_html = final_html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
+            
+            let mut response = (axum::http::StatusCode::OK, axum::response::Html(final_html)).into_response();
             if expire_cookie {
-                let expire = crate::auth::expire_flash_cookie();
-                if let Ok(val) = axum::http::HeaderValue::from_str(&expire) {
+                if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
                     response.headers_mut().append(axum::http::header::SET_COOKIE, val);
                 }
             }
-            
             response
         }
         Err(_) => {
             let not_found = build_dir.join("404.html");
-            match fs::read_to_string(not_found) {
-                Ok(html) => (StatusCode::NOT_FOUND, Html(html)).into_response(),
-                Err(_) => (StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response(),
+            match std::fs::read_to_string(not_found) {
+                Ok(html) => (axum::http::StatusCode::NOT_FOUND, axum::response::Html(html)).into_response(),
+                Err(_) => (axum::http::StatusCode::NOT_FOUND, axum::response::Html("404 - Page Not Found".to_string())).into_response(),
             }
         }
     }

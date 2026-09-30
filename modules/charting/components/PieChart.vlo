@@ -1,0 +1,48 @@
+<div class="vlo-chart vlo-chart-pie" style="--chart-color: {{color}}">
+  {if title}
+    <div class="vlo-chart-header">
+      <h4 class="vlo-chart-title">{{title}}</h4>
+      <div class="vlo-chart-summary">
+        <span class="vlo-chart-stat">
+          <span class="vlo-chart-stat-label">Total</span>
+          <span class="vlo-chart-stat-value">{{meta.total | number:2}}</span>
+        </span>
+        <span class="vlo-chart-stat">
+          <span class="vlo-chart-stat-label">Items</span>
+          <span class="vlo-chart-stat-value">{{meta.series_count}}</span>
+        </span>
+      </div>
+    </div>
+  {/if}
+
+  <div class="vlo-chart-body vlo-pie-body">
+    <div class="vlo-pie-visual">
+      <svg viewBox="0 0 200 200" class="vlo-pie-svg" role="img" aria-label="{{title}}">
+        {for slice in data}
+          <path class="vlo-pie-slice" 
+                data-value="{{slice.value}}" 
+                data-label="{{slice.label}}" 
+                data-share="{{slice.share}}" />
+        {/for}
+      </svg>
+    </div>
+
+    <div class="vlo-pie-legend">
+      {for point in data}
+        <div class="vlo-pie-legend-item" data-label="{{point.label}}">
+          <span class="vlo-pie-legend-dot"></span>
+          <span class="vlo-pie-legend-label">{if point.label}{{point.label}}{else}Other{/if}</span>
+          <span class="vlo-pie-legend-value">{{point.share | number:1}}%</span>
+        </div>
+      {/for}
+    </div>
+  </div>
+
+  {if !data}
+    <div class="vlo-chart-empty">
+      <p>No data available</p>
+    </div>
+  {/if}
+
+  <!-- INLINE SCRIPT REMOVED: charting.js handles this globally and safely -->
+</div>
