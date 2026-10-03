@@ -150,8 +150,10 @@ async fn session_cleanup_task() {
     }
 }
 
+
 pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
     state::set_app_mode(state::AppMode::Development);
+    crate::router::init_live_broadcast(); // 🔥 ADD THIS LINE
     let root = get_project_root();
     let pages_path = root.join("pages");
     let public_path = root.join("public");
@@ -169,56 +171,33 @@ pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
         .route("/", get(home_handler))
         .route("/:path", get(page_handler))
         .route("/uploads/*path", get(serve_file))
-        .route("/healthz", get(healthz_handler))  // ← ADD THIS
+        .route("/healthz", get(healthz_handler))
         .route("/api/files/upload", axum::routing::post(upload_file))
         .route("/api/files/:id/download", get(download_file))
-        .route(
-            "/api/files/:id",
-            get(get_file).delete(delete_file),
-        )
-        .route(
-            "/api",
-            get(api_handler_root)
-                .post(api_handler_root)
-                .put(api_handler_root)
-                .patch(api_handler_root)
-                .delete(api_handler_root),
-        )
-        .route(
-            "/api/:resource",
-            get(api_handler_path)
-                .post(api_handler_path)
-                .put(api_handler_path)
-                .patch(api_handler_path)
-                .delete(api_handler_path),
-        )
-        .route(
-            "/api/:resource/:id",
-            get(api_handler_id)
-                .post(api_handler_id)
-                .put(api_handler_id)
-                .patch(api_handler_id)
-                .delete(api_handler_id),
-        )
-        // ─── Auth routes ─────────────────────────────────────
+        .route("/api/files/:id", get(get_file).delete(delete_file))
+        .route("/api", get(api_handler_root).post(api_handler_root).put(api_handler_root).patch(api_handler_root).delete(api_handler_root))
+        .route("/api/:resource", get(api_handler_path).post(api_handler_path).put(api_handler_path).patch(api_handler_path).delete(api_handler_path))
+        .route("/api/:resource/:id", get(api_handler_id).post(api_handler_id).put(api_handler_id).patch(api_handler_id).delete(api_handler_id))
         .route("/api/auth/login", axum::routing::post(auth::login_handler))
         .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
         .route("/api/auth/me", axum::routing::get(auth::me_handler))
-        // ─────────────────────────────────────────────────────
+        .route("/__vlo_sse", get(crate::router::sse_handler))
+        .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
+        .route("/api/broadcast", axum::routing::post(broadcast_handler))
         .route("/__vlo_hmr", get(move || hmr_handler(tx)))
         .nest_service("/static", ServeDir::new(public_path_service))
+        
+        // 🔥 FIX: Fallback MUST be above layers to receive middleware extensions
+        .fallback(not_found_handler)
+        
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(CompressionLayer::new())
         .layer(middleware::from_fn(cache_middleware))
-        // Middleware execution order: session -> api_auth -> csrf
-        // Layers execute in REVERSE order (last added runs first)
-        .layer(middleware::from_fn(request_id_middleware))  // ← ADD THIS (before CSRF)
-        .layer(axum::middleware::from_fn(auth::csrf_middleware))        // Runs 3rd
-        .layer(axum::middleware::from_fn(auth::api_auth_middleware))    // Runs 2nd
-        .layer(axum::middleware::from_fn(auth::session_middleware))     // Runs 1st (MUST BE LAST)
-        .fallback(not_found_handler);
+        .layer(middleware::from_fn(request_id_middleware))
+        .layer(axum::middleware::from_fn(auth::csrf_middleware))
+        .layer(axum::middleware::from_fn(auth::api_auth_middleware))
+        .layer(axum::middleware::from_fn(auth::session_middleware));
 
-    // CLI arguments override .env values.
     let host_str = host
         .map(str::to_string)
         .or_else(|| std::env::var("VLO_HOST").ok())
@@ -264,7 +243,7 @@ pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
 
 pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
     state::set_app_mode(state::AppMode::Production);
-
+    crate::router::init_live_broadcast(); // 🔥 ADD THIS LINE
     let root = get_project_root();
     let build_dir = root.join(".vlo").join("build");
     let static_dir = build_dir.join("static");
@@ -276,55 +255,35 @@ pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> 
     }
 
     let app = Router::new()
-        .route("/healthz", get(healthz_handler))  // ← ADD THIS
+        .route("/healthz", get(healthz_handler))
         .route("/api/files/upload", axum::routing::post(upload_file))
         .route("/api/files/:id/download", get(download_file))
         .route("/api/files/:id", get(get_file).delete(delete_file))
-        .route(
-            "/api",
-            get(api_handler_root)
-                .post(api_handler_root)
-                .put(api_handler_root)
-                .patch(api_handler_root)
-                .delete(api_handler_root),
-        )
-        .route(
-            "/api/:resource",
-            get(api_handler_path)
-                .post(api_handler_path)
-                .put(api_handler_path)
-                .patch(api_handler_path)
-                .delete(api_handler_path),
-        )
-        .route(
-            "/api/:resource/:id",
-            get(api_handler_id)
-                .post(api_handler_id)
-                .put(api_handler_id)
-                .patch(api_handler_id)
-                .delete(api_handler_id),
-        )
-        // ─── Auth routes ─────────────────────────────────────
+        .route("/api", get(api_handler_root).post(api_handler_root).put(api_handler_root).patch(api_handler_root).delete(api_handler_root))
+        .route("/api/:resource", get(api_handler_path).post(api_handler_path).put(api_handler_path).patch(api_handler_path).delete(api_handler_path))
+        .route("/api/:resource/:id", get(api_handler_id).post(api_handler_id).put(api_handler_id).patch(api_handler_id).delete(api_handler_id))
         .route("/api/auth/login", axum::routing::post(auth::login_handler))
         .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
         .route("/api/auth/me", axum::routing::get(auth::me_handler))
-        // ─────────────────────────────────────────────────────
+        .route("/__vlo_sse", get(crate::router::sse_handler))
+        .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
+        .route("/api/broadcast", axum::routing::post(broadcast_handler))
         .route("/uploads/*path", get(serve_file))
         .nest_service("/static", ServeDir::new(static_dir))
+        
+        // 🔥 FIX: Fallback MUST be above layers to receive middleware extensions
+        .fallback(move |uri: axum::http::Uri, req: Request| async move {
+            serve_build_page(build_dir.clone(), uri, req).await
+        })
+        
         .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(CompressionLayer::new())
         .layer(middleware::from_fn(cache_middleware))
-        // Middleware execution order: session -> api_auth -> csrf
-        // Layers execute in REVERSE order (last added runs first)
-        .layer(middleware::from_fn(request_id_middleware))  // ← ADD THIS
-        .layer(axum::middleware::from_fn(auth::csrf_middleware))        // Runs 3rd
-        .layer(axum::middleware::from_fn(auth::api_auth_middleware))    // Runs 2nd
-        .layer(axum::middleware::from_fn(auth::session_middleware))     // Runs 1st (MUST BE LAST)
-        .fallback(move |uri: axum::http::Uri, req: Request| async move {
-            serve_build_page(build_dir.clone(), uri, req).await
-        });
+        .layer(middleware::from_fn(request_id_middleware))
+        .layer(axum::middleware::from_fn(auth::csrf_middleware))
+        .layer(axum::middleware::from_fn(auth::api_auth_middleware))
+        .layer(axum::middleware::from_fn(auth::session_middleware));
 
-    // CLI arguments override .env values.
     let host_str = host
         .map(str::to_string)
         .or_else(|| std::env::var("VLO_HOST").ok())
@@ -624,15 +583,13 @@ async fn serve_build_page(
                 if render_page.html == previous { break; }
             }
 
-            // ─── 6. FINAL CONTROL FLOW & WRAP ──────────────
-            let rendered_html = crate::template::render_control_flow(&render_page.html, &render_page.template_context);
-            render_page.html = rendered_html; // 🔥 Update so wrap_html can use it
+
+            // ─── 6. FINAL CONTROL FLOW & RUNTIME INJECTION ──────────────
+            // The HTML is ALREADY wrapped with styles/scripts during `vlo build`.
+            // Calling wrap_html again causes double-injection. We only resolve control flow here.
+            let mut final_html = crate::template::render_control_flow(&render_page.html, &render_page.template_context);
             
             let csrf_token = auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default();
-            
-            // 🔥 CRITICAL: Use wrap_html to inject module scripts/styles!
-            let mut final_html = crate::router::wrap_html(&page_name, &render_page, false);
-            
             final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
             final_html = final_html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
             
@@ -659,6 +616,23 @@ async fn shutdown_signal() {
         .await
         .expect("Failed to listen for Ctrl+C");
     println!("\n⚡ Shutting down VLO dev server...");
+}
+
+// Add this handler function:
+async fn broadcast_handler(
+    axum::Json(payload): axum::Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let channel = payload.get("channel")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+    
+    let value = payload.get("value")
+        .cloned()
+        .unwrap_or(serde_json::json!(null));
+    
+    crate::router::broadcast_live(channel, &value);
+    
+    (StatusCode::OK, axum::Json(serde_json::json!({"success": true})))
 }
 
 async fn cache_middleware(req: Request, next: Next) -> Response {
@@ -953,10 +927,11 @@ pub fn resolve_directives(source: &str) -> String {
     result = re_del.replace_all(&result, |caps: &regex::Captures| {
         let tag = caps.get(1).unwrap().as_str();
         let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-        let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+        let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
         let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
-        let all_attrs = format!("{} {}", attrs_before, attrs_after);
+        let url = url_raw.replace("|ajax", "");
 
+        let all_attrs = format!("{} {}", attrs_before, attrs_after);
         let confirm_re = regex::Regex::new(r#"(?is)v-confirm\s*=\s*["']([^"']*)["']"#).unwrap();
         let confirm_js = if let Some(c) = confirm_re.captures(&all_attrs) {
             let msg = c.get(1).map(|m| m.as_str()).unwrap_or("");
@@ -965,15 +940,16 @@ pub fn resolve_directives(source: &str) -> String {
 
         let clean_before = strip_vlo_directive_attrs(attrs_before);
         let clean_after = strip_vlo_directive_attrs(attrs_after);
-        let url_js = js_string_literal(url);
+        let url_js = js_string_literal(&url);
+        let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
 
         let onclick = format!(
-            "if({}){{fetch({},{{credentials:'same-origin',method:'DELETE',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}}}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO DELETE]',e);window.location.reload()}})}}",
-            confirm_js, url_js
+            "return(function(){{if({confirm}){{fetch({url},{{credentials:'same-origin',method:'DELETE',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}}}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.dispatchEvent(new CustomEvent('vlo:mutation'))}}).catch(function(e){{console.error('[VLO DELETE]',e);alert(e.message)}})}}return false}})()",
+            confirm = confirm_js,
+            url = url_js
         );
-
         let onclick_attr = escape_html_attribute(&onclick);
-        format!("<{} {} onclick=\"{}\">", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim(), onclick_attr)
+        format!("<{} {} onclick=\"{}\">", tag, all_clean, onclick_attr)
     }).into_owned();
 
     // ============================================================
@@ -986,21 +962,24 @@ pub fn resolve_directives(source: &str) -> String {
     result = re_put.replace_all(&result, |caps: &regex::Captures| {
         let tag = caps.get(1).unwrap().as_str();
         let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-        let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+        let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
         let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
-        let all_attrs = format!("{} {}", attrs_before, attrs_after);
+        let url = url_raw.replace("|ajax", "");
+
         let clean_before = strip_vlo_directive_attrs(attrs_before);
         let clean_after = strip_vlo_directive_attrs(attrs_after);
-        let url_js = js_string_literal(url);
+        let url_js = js_string_literal(&url);
+        let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
 
         if tag.eq_ignore_ascii_case("form") {
             let onsubmit = format!(
-                "event.preventDefault();fetch({},{{credentials:'same-origin',method:'PUT',headers:{{'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new URLSearchParams(new FormData(event.currentTarget))}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.reload()}});return false",
-                url_js
+                "return(function(e){{e.preventDefault();var f=e.currentTarget;if(!f.checkValidity()){{f.reportValidity();return false}}var mp=f.enctype==='multipart/form-data';var h={{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}};if(!mp)h['Content-Type']='application/x-www-form-urlencoded';fetch({url},{{credentials:'same-origin',method:'PUT',headers:h,body:mp?new FormData(f):new URLSearchParams(new FormData(f))}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}f.reset();window.dispatchEvent(new CustomEvent('vlo:mutation'));var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active')}}).catch(function(e){{console.error('[VLO PUT]',e);alert(e.message||'Request failed')}});return false}})(event)",
+                url = url_js
             );
             let onsubmit_attr = escape_html_attribute(&onsubmit);
-            format!("<{} {} onsubmit=\"{}\">", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim(), onsubmit_attr)
+            format!("<{} {} onsubmit=\"{}\">", tag, all_clean, onsubmit_attr)
         } else {
+            let all_attrs = format!("{} {}", attrs_before, attrs_after);
             let param_re = regex::Regex::new(r#"(?is)v-param\s*=\s*["']([^"']+)["']"#).unwrap();
             let param = param_re.captures(&all_attrs).and_then(|c| c.get(1)).map(|m| m.as_str()).unwrap_or("value");
             let prompt_re = regex::Regex::new(r#"(?is)v-prompt\s*=\s*["']([^"']*)["']"#).unwrap();
@@ -1009,11 +988,13 @@ pub fn resolve_directives(source: &str) -> String {
             let param_js = js_string_literal(param);
 
             let onclick = format!(
-                "let v=prompt({});if(v!==null){{fetch({},{{credentials:'same-origin',method:'PUT',headers:{{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:JSON.stringify({{{}:v}})}}).then(async r=>{{if(!r.ok){{let d;try{{d=await r.json()}}catch(_){{d={{}}}};throw new Error(d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO PUT]',e);window.location.reload()}})}}",
-                prompt_js, url_js, param_js
+                "return(function(){{var v=prompt({prompt});if(v!==null){{fetch({url},{{credentials:'same-origin',method:'PUT',headers:{{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:JSON.stringify({{{param}:v}})}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.details||d.error||'Request failed')}}window.dispatchEvent(new CustomEvent('vlo:mutation'))}}).catch(function(e){{console.error('[VLO PUT]',e);alert(e.message)}})}}return false}})()",
+                prompt = prompt_js,
+                url = url_js,
+                param = param_js
             );
             let onclick_attr = escape_html_attribute(&onclick);
-            format!("<{} {} onclick=\"{}\">", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim(), onclick_attr)
+            format!("<{} {} onclick=\"{}\">", tag, all_clean, onclick_attr)
         }
     }).into_owned();
 
@@ -1027,21 +1008,24 @@ pub fn resolve_directives(source: &str) -> String {
     result = re_post.replace_all(&result, |caps: &regex::Captures| {
         let tag = caps.get(1).unwrap().as_str();
         let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-        let url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+        let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
         let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+        let url = url_raw.replace("|ajax", "");
+
         let clean_before = strip_vlo_directive_attrs(attrs_before);
         let clean_after = strip_vlo_directive_attrs(attrs_after);
-        let url_js = js_string_literal(url);
+        let url_js = js_string_literal(&url);
+        let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
 
         if tag.eq_ignore_ascii_case("form") {
             let onsubmit = format!(
-                "event.preventDefault();fetch({},{{credentials:'same-origin',method:'POST',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:new FormData(event.currentTarget)}}).then(async r=>{{let d;try{{d=await r.json()}}catch(_){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.location.reload()}}).catch(e=>{{console.error('[VLO POST]',e);window.location.reload()}});return false",
-                url_js
+                "return(function(e){{e.preventDefault();var f=e.currentTarget;if(!f.checkValidity()){{f.reportValidity();return false}}var mp=f.enctype==='multipart/form-data';var h={{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}};if(!mp)h['Content-Type']='application/x-www-form-urlencoded';var bd=mp?new FormData(f):new URLSearchParams(new FormData(f));var un=new URLSearchParams(window.location.search).get('next');if(un&&!bd.has('next')){{bd.append('next',un)}}fetch({url},{{credentials:'same-origin',method:'POST',headers:h,body:bd}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}if(d.redirect){{window.location.href=d.redirect;return;}}f.reset();window.dispatchEvent(new CustomEvent('vlo:mutation'));var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active')}}).catch(function(e){{console.error('[VLO POST]',e);alert(e.message||'Request failed')}});return false}})(event)",
+                url = url_js
             );
             let onsubmit_attr = escape_html_attribute(&onsubmit);
             format!("<{} {} onsubmit=\"{}\">", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim(), onsubmit_attr)
         } else {
-            format!("<{} {}>", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim())
+            format!("<{} {}>", tag, all_clean)
         }
     }).into_owned();
 

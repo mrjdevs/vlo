@@ -347,6 +347,35 @@
                         <div><strong>CSRF protection</strong><p>X-CSRF-Token header is automatically attached from the meta tag.</p></div>
                         <div><strong>Toast integration</strong><p>Success/error toasts appear automatically via cookie-based flash messages.</p></div>
                         <div><strong>Clean URLs</strong><p>No <code>?status=success</code> pollution. The page reloads at its clean URL.</p></div>
+                                                <div><strong>Login Redirects</strong><p>If a <code>v-post</code> form submits to a login endpoint, VLO automatically captures the <code>?next=</code> URL parameter and redirects the browser upon successful authentication.</p></div>
+                    </div>
+                                        <h3>Real-time Updates (SSE)</h3>
+                    <p class="component-note">VLO includes a built-in Server-Sent Events (SSE) broadcast system. Use the <code>|live</code> modifier to make any value update instantly across all connected browsers when a mutation occurs.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Live stock counter</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- Renders a span that listens to the "products" SSE channel --&gt;
+&lt;span&gt;Stock: {{ product.stock | live:"products" }}&lt;/span&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Automatic Broadcasting</strong><p>Any <code>POST</code>, <code>PUT</code>, or <code>DELETE</code> API request automatically broadcasts its response payload to the SSE channel matching the resource name.</p></div>
+                        <div><strong>Smart Payloads</strong><p>If the SSE receives a full API object, it triggers a localized AJAX refresh. If it receives a simple string/number, it updates the DOM text instantly with a CSS flash animation.</p></div>
+                    </div>
+
+                    <h3>AJAX & Seamless Navigation</h3>
+                    <p class="component-note">Turn any container into an AJAX-powered wrapper using the <code>|ajax</code> modifier. Links and forms inside the wrapper intercept clicks/submits and swap the HTML without a full page reload.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>AJAX Wrapper</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- The #products-list div will intercept internal links and form submits --&gt;
+&lt;div id="products-list"&gt;
+    {{ "" | ajax:"" }} &lt;!-- Empty URL means "listen-only" wrapper --&gt;
+    
+    &lt;!-- Pagination links and search forms inside here become AJAX automatically --&gt;
+    &lt;a href="?page=2"&gt;Next Page&lt;/a&gt;
+&lt;/div&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Infinite Scroll</strong><p>Add <code>data-load-more</code> to a pagination link and <code>data-append</code> to your table body. VLO's IntersectionObserver will automatically fetch and append the next page when the user scrolls near the bottom.</p></div>
+                        <div><strong>State Preservation</strong><p>AJAX navigation preserves the browser history, updates the URL bar, and handles <code>popstate</code> (back/forward buttons) seamlessly.</p></div>
                     </div>
                     <h3>Rendering Flow</h3>
                     <div class="architecture-flow">
@@ -390,6 +419,8 @@
                         <div class="naming-row"><span>default:val</span><span>Fallback if empty, null, or "null"</span><span>{{ val | default:"N/A" }}</span></div>
                         <div class="naming-row"><span>nl2br</span><span>Convert newlines to &lt;br&gt; tags</span><span>{{ text | nl2br }}</span></div>
                         <div class="naming-row"><span>escape</span><span>HTML-encode special characters</span><span>{{ text | escape }}</span></div>
+                        <div class="naming-row"><span>live:channel</span><span>Real-time SSE updates</span><span>{{ stock | live:"products" }}</span></div>
+                        <div class="naming-row"><span>ajax:url</span><span>Client-side fetch & DOM swap</span><span>{{ "" | ajax:"" }}</span></div>
                     </div>
                     <div class="rule-card">
                         <strong>Default values with pipe</strong>
@@ -522,6 +553,7 @@ Cache-Control: private, no-cache</code></pre>
                         <div><b>03</b><p><strong>Shared runtime</strong> — Data-source queries reuse a dedicated Tokio runtime.</p></div>
                         <div><b>04</b><p><strong>Hash-based rendering</strong> — Component loops use hash comparison to avoid infinite expansion.</p></div>
                         <div><b>05</b><p><strong>CSS-only animations</strong> — Toast auto-dismiss uses pure CSS, zero JavaScript.</p></div>
+                        <div><b>06</b><p><strong>Global Middleware</strong> — Production <code>vlo serve</code> correctly applies GZIP compression, Cache-Control headers, and Session resolution to all SSR fallback routes.</p></div>
                     </div>
                 </section>
 

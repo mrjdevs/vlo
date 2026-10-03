@@ -2,6 +2,8 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
+use regex::Regex;
+use std::sync::LazyLock;
 
 pub fn init_project(
     name: &str,
@@ -160,4 +162,38 @@ INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ 
 
     println!("✅ Project initialized successfully!");
     Ok(())
+}
+
+// Add this to the bottom of src/utils.rs
+
+static CSS_COMMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/").unwrap()
+});
+
+static CSS_WS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\s+").unwrap()
+});
+
+pub fn minify_css(css: &str) -> String {
+    // 1. Remove multi-line comments
+    let no_comments = CSS_COMMENT_RE.replace_all(css, "");
+
+    // 2. Collapse all whitespace to single spaces
+    let mut minified = CSS_WS_RE.replace_all(&no_comments, " ").to_string();
+
+    // 3. Remove unnecessary spaces around syntax characters to save bytes
+    minified = minified.replace(" {", "{");
+    minified = minified.replace("{ ", "{");
+    minified = minified.replace(" }", "}");
+    minified = minified.replace(": ", ":");
+    minified = minified.replace("; ", ";");
+    minified = minified.replace(", ", ",");
+    minified = minified.replace("> ", ">");
+    minified = minified.replace(" +", "+");
+    minified = minified.replace("+ ", "+");
+    minified = minified.replace(" >", ">");
+    minified = minified.replace("[ ", "[");
+    minified = minified.replace(" ]", "]");
+
+    minified.trim().to_string()
 }

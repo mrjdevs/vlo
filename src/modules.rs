@@ -174,23 +174,3 @@ pub fn get_module_api_actions() -> HashMap<String, String> {
     }
     actions
 }
-
-/// Get all module styles combined
-pub fn get_all_module_styles() -> String {
-    let modules = get_modules();
-    modules.iter()
-        .flat_map(|m| m.styles.iter())
-        .cloned()
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Get all module scripts combined
-pub fn get_all_module_scripts() -> String {
-    let modules = get_modules();
-    modules.iter()
-        .flat_map(|m| m.scripts.iter())
-        .cloned()
-        .collect::<Vec<_>>()
-        .join("\n")
-}

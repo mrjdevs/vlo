@@ -81,6 +81,7 @@ async fn run() -> Result<(), String> {
             database::init_db().await?;
             auth::init_auth_config();
             auth::init_session_secret();
+            crate::router::init_live_broadcast();
             modules::init_modules()?; 
 
             let port = port
@@ -98,6 +99,7 @@ async fn run() -> Result<(), String> {
             state::set_app_mode(state::AppMode::Production);
             database::init_db().await?;
             modules::init_modules()?; // 🔥 CRITICAL: Ensures modules are loaded if deploy triggers an internal build
+            crate::router::init_live_broadcast();
             server::deploy(provider).await?;
         }
 

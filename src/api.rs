@@ -457,7 +457,11 @@ pub async fn api_route_handler(
                 }
             }
             // ─────────────────────────────────────────────────────────────────
-
+            // 🔥 ADD THIS: Broadcast live updates for mutations (POST, PUT, DELETE)
+            if method != Method::GET {
+                let resource = normalize_resource(&endpoint);
+                crate::router::broadcast_live(&resource, &data);
+            }
             if method != Method::GET {
                 let (icon, title) = match action_type {
                     "updated" => ("✏️", "Update Successful"),

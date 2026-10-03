@@ -295,7 +295,407 @@ fn m_excerpt(v: String, arg: Option<String>) -> String {
     if end == 0 { end = limit; }
     format!("{}...", chars[..end].iter().collect::<String>().trim_end())
 }
+// ── Image Optimization ──────────────────────────────────────────────────
+fn m_image(v: String, arg: Option<String>) -> String {
+    let url = v.trim().trim_matches('"').trim_matches('\'');
+    if url.is_empty() { return String::new(); }
 
+    let mut width = 800;
+    let mut height = 600;
+    let mut format = String::from("webp");
+    let mut blur = false;
+    let mut quality = 80;
+    let mut sizes = String::from("100vw");
+
+    if let Some(options) = arg {
+        for opt in options.split(',') {
+            let opt = opt.trim();
+
+            if opt.starts_with("w=") {
+                width = opt[2..].parse().unwrap_or(width);
+            } else if opt.starts_with("h=") {
+                height = opt[2..].parse().unwrap_or(height);
+            } else if opt.starts_with("q=") {
+                quality = opt[2..].parse().unwrap_or(quality);
+            } else if opt.starts_with("sizes=") {
+                sizes = opt[6..].to_string();
+            } else if opt == "webp" || opt == "avif" || opt == "jpg" || opt == "png" {
+                format = opt.to_string();
+            } else if opt == "blur" {
+                blur = true;
+            }
+        }
+    }
+
+    let encoded_url = urlencoding::encode(url);
+    let opt_base = "/api/vlo/optimize";
+
+    let src_1x = format!(
+        "{}?src={}&w={}&h={}&f={}&q={}",
+        opt_base, encoded_url, width, height, format, quality
+    );
+
+    let src_2x = format!(
+        "{}?src={}&w={}&h={}&f={}&q={}",
+        opt_base, encoded_url, width * 2, height * 2, format, quality
+    );
+
+    let mut picture = String::new();
+
+    // 1. AVIF Source
+    if format != "avif" {
+        let avif_src = format!(
+            "{}?src={}&w={}&h={}&f=avif&q={}",
+            opt_base, encoded_url, width, height, quality
+        );
+
+        let avif_srcset = format!(
+            "{} 1x, {}?src={}&w={}&h={}&f=avif&q={} 2x",
+            avif_src, opt_base, encoded_url, width * 2, height * 2, quality
+        );
+
+        picture.push_str(&format!(
+            r#"<source type="image/avif" srcset="{}" sizes="{}">"#,
+            avif_srcset, sizes
+        ));
+    }
+
+    // 2. WebP Source
+    if format != "webp" {
+        let webp_src = format!(
+            "{}?src={}&w={}&h={}&f=webp&q={}",
+            opt_base, encoded_url, width, height, quality
+        );
+
+        let webp_srcset = format!(
+            "{} 1x, {}?src={}&w={}&h={}&f=webp&q={} 2x",
+            webp_src, opt_base, encoded_url, width * 2, height * 2, quality
+        );
+
+        picture.push_str(&format!(
+            r#"<source type="image/webp" srcset="{}" sizes="{}">"#,
+            webp_srcset, sizes
+        ));
+    }
+
+    // 3. Fallback Img
+    let img_srcset = format!("{} 1x, {} 2x", src_1x, src_2x);
+
+    picture.push_str(&format!(
+        r#"<img src="{}" srcset="{}" width="{}" height="{}" sizes="{}" loading="lazy" decoding="async" alt="Optimized Image""#,
+        src_1x, img_srcset, width, height, sizes
+    ));
+
+    // 4. Dependency-free inline SVG blur placeholder
+    if blur {
+        let blur_svg = format!(
+            r#"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {} {}'%3E%3Cfilter id='b'%3E%3CfeGaussianBlur stdDeviation='10'/%3E%3C/filter%3E%3Cimage width='100%25' height='100%25' filter='url(%23b)' href='{}'/%3E%3C/svg%3E"#,
+            width, height, encoded_url
+        );
+
+        picture.push_str(&format!(
+            r#" style="background: url('{}') no-repeat center / cover; opacity: 0; transition: opacity 0.4s ease-in-out;" onload="this.style.opacity=1" onerror="this.style.opacity=1""#,
+            blur_svg
+        ));
+    } else {
+        picture.push_str(r#" style="opacity: 1;""#);
+    }
+
+    picture.push_str(" /></picture>");
+    picture
+}
+// ── Real-time / Live Updates ─────────────────────────────────────────────
+fn m_live(v: String, arg: Option<String>) -> String {
+    let channel = arg.unwrap_or_else(|| "default".into());
+    format!(
+        r#"<span class="vlo-live" data-channel="{}">{}</span><script>
+(function(){{
+    if(!window.__VLO_SSE__) {{
+        window.__VLO_SSE__ = new EventSource("/__vlo_sse");
+        window.__VLO_SSE__.onmessage = function(e) {{
+            try {{
+                const data = JSON.parse(e.data);
+                if(data.channel === "{}") {{
+                    document.querySelectorAll(`[data-channel="{}"]`).forEach(el => {{
+                        // 🔥 SMART PAYLOAD HANDLING
+                        if (typeof data.value === 'object' && data.value !== null) {{
+                            // If it's a full API response, trigger global AJAX wrapper refresh
+                            window.dispatchEvent(new CustomEvent('vlo:mutation'));
+                        }} else {{
+                            // If it's a simple string/number, update the text directly
+                            el.innerHTML = data.value;
+                            el.classList.add("vlo-live-updated");
+                            setTimeout(() => el.classList.remove("vlo-live-updated"), 600);
+                        }}
+                    }});
+                }}
+            }} catch(err) {{ console.error("VLO SSE Error:", err); }}
+        }};
+    }}
+}})();
+</script>"#,
+        channel, v, channel, channel
+    )
+}
+
+
+// ── AJAX Core Script (injected ONCE by wrap_html) ─────────────────────
+// ── AJAX Core: Base queue processor (always needed if any |ajax used) ──
+// ── AJAX Core: Base queue processor (always needed if any |ajax used) ──
+pub const AJAX_CORE_BASE: &str = r##"
+(function() {
+  if (window.__VLO_AJAX_READY) return;
+  window.__VLO_AJAX_READY = true;
+  var V = window.__VLO_AJAX = { targets: [], seq: {}, busy: {}, io: null };
+  var Q = window.__VLO_AJAX_Q || [];
+
+  window.__VLO_BROADCAST__ = function(channel, value) {
+    fetch('/api/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ channel: channel, value: value })
+    }).catch(function(e) { console.error('[VLO Broadcast]', e); });
+  };
+
+  function refresh(url, sel, push) {
+    var el = document.querySelector(sel);
+    if (!el) return;
+    var id = V.seq[sel] = (V.seq[sel] || 0) + 1;
+    el.style.opacity = "0.5";
+    fetch(url, { credentials: "same-origin" })
+      .then(function(r) { return r.text(); })
+      .then(function(html) {
+        if (id !== V.seq[sel]) return;
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var fresh = doc.querySelector(sel);
+        if (!fresh) { location.href = url; return; }
+        el.innerHTML = fresh.innerHTML;
+        if (push) history.pushState({}, "", url);
+        if (window.__VLO_AJAX_WATCH__) window.__VLO_AJAX_WATCH__(sel);
+      })
+      .catch(function(e) { console.error("[VLO AJAX]", e); })
+      .then(function() { if (id === V.seq[sel]) el.style.opacity = ""; });
+  }
+
+  function register(sel, url, interval) {
+    if (V.targets.indexOf(sel) === -1) V.targets.push(sel);
+    if (url) refresh(url, sel, false);
+    if (interval > 0) setInterval(function() { refresh(url || location.href, sel, false); }, interval);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function() { if (window.__VLO_AJAX_WATCH__) window.__VLO_AJAX_WATCH__(sel); });
+    } else {
+      if (window.__VLO_AJAX_WATCH__) window.__VLO_AJAX_WATCH__(sel);
+    }
+  }
+
+  function owner(node) {
+    for (var i = 0; i !== V.targets.length; i++) {
+      var t = document.querySelector(V.targets[i]);
+      if (t && t.contains(node)) return V.targets[i];
+    }
+    return null;
+  }
+
+  document.addEventListener("click", function(e) {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var more = e.target.closest ? e.target.closest("[data-load-more]") : null;
+    if (more) {
+      e.preventDefault();
+      var ms = owner(more);
+      if (ms && window.__VLO_AJAX_LOADMORE__) window.__VLO_AJAX_LOADMORE__(ms);
+      return;
+    }
+    var a = e.target.closest ? e.target.closest("a[href]") : null;
+    if (!a || a.target || a.hasAttribute("download") || a.classList.contains("no-ajax")) return;
+    var href = a.getAttribute("href");
+    if (!href || href.charAt(0) === "#" || href.indexOf("javascript:") === 0) return;
+    var u = new URL(a.href, location.href);
+    if (u.origin !== location.origin) return;
+    var sel = owner(a);
+    if (!sel) return;
+    e.preventDefault();
+    refresh(u.href, sel, true);
+  });
+
+  document.addEventListener("submit", function(e) {
+    var f = e.target;
+    if (e.defaultPrevented || f.classList.contains("no-ajax")) return;
+    if ((f.getAttribute("method") || "get").toLowerCase() !== "get") return;
+    var sel = owner(f);
+    if (!sel) return;
+    e.preventDefault();
+    var u = new URL(f.getAttribute("action") || location.pathname, location.href);
+    var q = new URLSearchParams();
+    new FormData(f).forEach(function(v, k) {
+      if (typeof v === "string" && v !== "") q.append(k, v);
+    });
+    u.search = q.toString();
+    refresh(u.href, sel, true);
+  });
+
+  var _mutationTimer = null;
+  window.addEventListener("vlo:mutation", function() {
+    if (_mutationTimer) clearTimeout(_mutationTimer);
+    _mutationTimer = setTimeout(function() {
+      V.targets.forEach(function(s) { refresh(location.href, s, false); });
+    }, 100);
+  });
+
+  window.addEventListener("popstate", function() {
+    V.targets.forEach(function(s) { refresh(location.href, s, false); });
+  });
+
+  window.__VLO_AJAX_REFRESH__ = refresh;
+  window.__VLO_AJAX_OWNER__ = owner;
+
+  Q.forEach(function(cfg) { register(cfg.sel, cfg.url, cfg.interval); });
+})();
+"##;
+
+// ── AJAX Core: Load-more / infinite scroll (only if data-load-more exists) ──
+pub const AJAX_CORE_LOADMORE: &str = r##"
+(function() {
+  var V = window.__VLO_AJAX;
+  if (!V || !V.targets.length) return;
+  var refresh = window.__VLO_AJAX_REFRESH__;
+  var owner = window.__VLO_AJAX_OWNER__;
+  if (!refresh || !owner) return;
+
+  function loadMore(sel) {
+    var el = document.querySelector(sel);
+    var btn = el ? el.querySelector("[data-load-more]") : null;
+    if (!btn || V.busy[sel]) return;
+    V.busy[sel] = true;
+    var originalText = btn.innerText;
+    btn.innerText = "Loading...";
+    btn.style.opacity = "0.7";
+    var next = new URL(btn.getAttribute("href") || "", location.href);
+    var u = new URL(location.href);
+    u.searchParams.set("page", next.searchParams.get("page") || "2");
+    fetch(u.href, { credentials: "same-origin" })
+      .then(function(r) { return r.text(); })
+      .then(function(html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var fresh = doc.querySelector(sel);
+        if (!fresh) { location.href = u.href; return; }
+        var dst = el.querySelector("[data-append]");
+        var src = fresh.querySelector("[data-append]");
+        if (dst && src) {
+          var hasData = src.children.length > 0 && !src.querySelector('.empty-products, .empty-state, [class*="empty"]');
+          if (hasData) {
+            Array.prototype.slice.call(src.children).forEach(function(c) {
+              dst.appendChild(document.importNode(c, true));
+            });
+          }
+        } else {
+          el.innerHTML = fresh.innerHTML;
+        }
+        var nb = fresh.querySelector("[data-load-more]");
+        if (nb) btn.replaceWith(document.importNode(nb, true));
+        else btn.remove();
+        watchIfNeeded(sel);
+      })
+      .catch(function(e) {
+        console.error("[VLO AJAX more]", e);
+        btn.innerText = originalText;
+        btn.style.opacity = "1";
+      })
+      .then(function() { V.busy[sel] = false; });
+  }
+
+  function watchIfNeeded(sel) {
+    var el = document.querySelector(sel);
+    var b = el ? el.querySelector("[data-load-more][data-auto]") : null;
+    if (!b || !("IntersectionObserver" in window)) return;
+    if (!V.io) {
+      V.io = new IntersectionObserver(function(entries) {
+        entries.forEach(function(en) {
+          if (!en.isIntersecting) return;
+          V.io.unobserve(en.target);
+          var s = owner(en.target);
+          if (s) loadMore(s);
+        });
+      }, { rootMargin: "300px" });
+    }
+    V.io.observe(b);
+  }
+
+  window.__VLO_AJAX_LOADMORE__ = loadMore;
+  window.__VLO_AJAX_WATCH__ = watchIfNeeded;
+})();
+"##;
+
+// ── Kept for backward compat / ajax_js_handler route ──
+pub const AJAX_CORE_JS: &str = r##"/* replaced by modular injection */"##;
+
+fn js_lit(s: &str) -> String {
+    serde_json::to_string(s)
+        .unwrap_or_else(|_| "\"\"".into())
+        .replace("</", "<\\/")
+}
+
+
+// ── AJAX Modifier ──────────────────────────────────────────────────────
+fn m_ajax(v: String, arg: Option<String>) -> String {
+    let arg_str = arg.unwrap_or_default();
+    let parts: Vec<&str> = arg_str.split(',').map(|s| s.trim()).collect();
+    if parts.is_empty() { return v; }
+    
+    let url = parts.first().map(|s| s.trim()).unwrap_or("");
+    let interval = parts.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+    let target = parts.get(2).unwrap_or(&"").trim();
+    let mode = parts.get(3).unwrap_or(&"json").trim().to_lowercase();
+    
+    if mode == "html" {
+        if target.is_empty() { return v; }
+        // 🔥 Tiny queue push — core script injected once by wrap_html
+        return format!(
+            r#"<script>(window.__VLO_AJAX_Q=window.__VLO_AJAX_Q||[]).push({{sel:{},url:{},interval:{}}});</script>"#,
+            js_lit(target),
+            js_lit(url),
+            interval
+        );
+    }
+    
+    // JSON MODE (unchanged — small, per-element, no queue needed)
+    let safe_class = if url.is_empty() {
+        "vlo-ajax-listen".to_string()
+    } else {
+        format!("vlo-ajax-{}", url.replace('/', "-").replace('?', "-").replace('&', "-").trim_matches('-'))
+    };
+
+    format!(
+        r#"<span class="{}" data-url="{}" data-interval="{}" data-field="{}">{}</span><script>
+    (function() {{
+        function doFetch(el) {{
+            fetch(el.dataset.url, {{credentials:'same-origin'}})
+                .then(r => r.json())
+                .then(res => {{
+                    let val = res;
+                    if (el.dataset.field) {{
+                        val = el.dataset.field.split('.').reduce((o, k) => (o || {{}})[k], res);
+                    }} else if (res.data && Array.isArray(res.data) && res.data.length > 0) {{
+                        val = res.data[0];
+                    }} else if (res.pagination && res.pagination.total !== undefined) {{
+                        val = res.pagination.total;
+                    }}
+                    if (val !== undefined && val !== null) {{
+                        el.innerText = typeof val === 'object' ? JSON.stringify(val) : val;
+                        el.classList.add('vlo-ajax-updated');
+                        setTimeout(() => el.classList.remove('vlo-ajax-updated'), 600);
+                    }}
+                }}).catch(e => console.error('[VLO AJAX]', e));
+        }}
+        document.querySelectorAll('.{}').forEach(el => {{
+            doFetch(el);
+            if (el.dataset.interval > 0) setInterval(() => doFetch(el), el.dataset.interval);
+        }});
+    }})();
+    </script>"#,
+        safe_class, url, interval, target, v, safe_class
+    )
+}
 // ── Developer Experience ─────────────────────────────────────────────
 fn m_debug(v: String, arg: Option<String>) -> String {
     let label = arg.unwrap_or_else(|| "DEBUG".into());
@@ -395,6 +795,9 @@ pub fn registry() -> HashMap<&'static str, ModifierFn> {
     // HTML / content
     m.insert("strip_tags", m_strip_tags);
     m.insert("excerpt", m_excerpt);
+    m.insert("image", m_image);       // ← Added in Priority 2
+    m.insert("live", m_live);         // 🔥 NEW: Real-time SSE updates
+    m.insert("ajax", m_ajax);
 
     // Developer tools
     m.insert("debug", m_debug);

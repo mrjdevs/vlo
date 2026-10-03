@@ -589,6 +589,19 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
     let id_field = cfg.identifier_field.clone();
     let pw_field = cfg.password_field.clone();
 
+    // ─── 1. EXTRACT 'next' REDIRECT URL FROM QUERY STRING ───
+    let mut next_url = "/".to_string();
+    if let Some(q) = req.uri().query() {
+        for pair in q.split('&') {
+            let mut p = pair.splitn(2, '=');
+            if let (Some(k), Some(v)) = (p.next(), p.next()) {
+                if k == "next" {
+                    next_url = urlencoding::decode(v).unwrap_or_default().into_owned();
+                }
+            }
+        }
+    }
+
     // ─── RATE LIMITING ──────────────────────────────────────
     let client_ip = req.headers()
         .get("x-forwarded-for")
@@ -607,18 +620,11 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
             "error": "Too many login attempts. Please try again in 60 seconds."
         }))).into_response();
     }
-    // ────────────────────────────────────────────────────────
 
-    let content_type = req
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_lowercase();
-
+    let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
     let mut identifier = String::new();
     let mut password = String::new();
-    let mut remember_me = false; // ← ADD THIS
+    let mut remember_me = false;
 
     if content_type.contains("multipart/form-data") {
         match axum::extract::Multipart::from_request(req, &()).await {
@@ -626,43 +632,23 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
                 while let Ok(Some(field)) = multipart.next_field().await {
                     let name = field.name().unwrap_or("").to_string();
                     let value = field.text().await.unwrap_or_default();
-                    
-                    if name == id_field { 
-                        identifier = value; 
-                    } else if name == pw_field { 
-                        password = value; 
-                    } else if name == "remember_me" { 
-                        let v = value.to_lowercase();
-                        remember_me = v == "on" || v == "true" || v == "1";
-                    }
+                    if name == id_field { identifier = value; } 
+                    else if name == pw_field { password = value; } 
+                    else if name == "remember_me" { let v = value.to_lowercase(); remember_me = v == "on" || v == "true" || v == "1"; }
+                    else if name == "next" && !value.is_empty() { next_url = value; } // 🔥 Capture from body
                 }
             }
-            Err(_) => {
-                return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid multipart request"})))
-                    .into_response()
-            }
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid multipart request"}))).into_response()
         }
     } else if content_type.contains("application/json") {
         match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
             Ok(payload) => {
-                identifier = payload.get(&id_field)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .into();
-                    
-                password = payload.get(&pw_field)
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .into();
-                    
-                remember_me = payload.get("remember_me")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                identifier = payload.get(&id_field).and_then(|v| v.as_str()).unwrap_or("").into();
+                password = payload.get(&pw_field).and_then(|v| v.as_str()).unwrap_or("").into();
+                remember_me = payload.get("remember_me").and_then(|v| v.as_bool()).unwrap_or(false);
+                if let Some(n) = payload.get("next").and_then(|v| v.as_str()) { if !n.is_empty() { next_url = n.to_string(); } } // 🔥 Capture from JSON
             }
-            Err(_) => {
-                return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid JSON"})))
-                    .into_response()
-            }
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid JSON"}))).into_response()
         }
     } else if content_type.contains("application/x-www-form-urlencoded") {
         match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
@@ -671,34 +657,23 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
                     let mut p = pair.splitn(2, '=');
                     if let (Some(k), Some(v)) = (p.next(), p.next()) {
                         let v = urlencoding::decode(v).unwrap_or_default().to_string();
-                        
-                        if k == id_field { 
-                            identifier = v; 
-                        } else if k == pw_field { 
-                            password = v; 
-                        } else if k == "remember_me" { 
-                            let val = v.to_lowercase();
-                            remember_me = val == "on" || val == "true" || val == "1";
-                        }
+                        if k == id_field { identifier = v; } 
+                        else if k == pw_field { password = v; } 
+                        else if k == "remember_me" { let val = v.to_lowercase(); remember_me = val == "on" || val == "true" || val == "1"; }
+                        else if k == "next" && !v.is_empty() { next_url = v; } // 🔥 Capture from urlencoded
                     }
                 }
             }
-            Err(_) => {
-                return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Failed to read body"})))
-                    .into_response()
-            }
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Failed to read body"}))).into_response()
         }
     } else {
-        return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Unsupported content type"})))
-            .into_response();
+        return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Unsupported content type"}))).into_response();
     }
 
     if identifier.is_empty() || password.is_empty() {
         let flash = encode_flash("error", "⚠️", "Login Failed", "Credentials required");
         let mut response = (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Credentials required"}))).into_response();
-        if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) {
-            response.headers_mut().append(header::SET_COOKIE, val);
-        }
+        if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) { response.headers_mut().append(header::SET_COOKIE, val); }
         return response;
     }
 
@@ -707,45 +682,41 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
         None => {
             let flash = encode_flash("error", "⚠️", "Login Failed", "Invalid credentials");
             let mut response = (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response();
-            if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) {
-                response.headers_mut().append(header::SET_COOKIE, val);
-            }
+            if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) { response.headers_mut().append(header::SET_COOKIE, val); }
             return response;
         }
     };
+    
     let hash = match fetch_password_hash(user.id).await {
         Some(h) => h,
-        None => {
-            return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"})))
-                .into_response()
-        }
+        None => return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response()
     };
+    
     if !verify_password(&password, &hash) {
         let flash = encode_flash("error", "⚠️", "Login Failed", "Invalid credentials");
         let mut response = (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response();
-        if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) {
-            response.headers_mut().append(header::SET_COOKIE, val);
-        }
+        if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) { response.headers_mut().append(header::SET_COOKIE, val); }
         return response;
     }
-    let (token, lifetime) = match create_session(user.id, remember_me).await { // ← UPDATED
+    
+    let (token, lifetime) = match create_session(user.id, remember_me).await {
         Ok(t) => t,
-        Err(e) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success":false,"error":e})))
-                .into_response()
-        }
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success":false,"error":e}))).into_response()
     };
 
-    // ← UPDATED to use `lifetime` instead of `cfg.session_lifetime`
-    let cookie = format!(
-        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}",
-        cfg.cookie_name, token, lifetime
-    );
+    // ─── SANITIZE REDIRECT URL (Prevent Open Redirects) ─────
+    if !next_url.starts_with('/') || next_url.starts_with("//") || next_url.contains("://") {
+        next_url = "/".to_string();
+    }
+
+    let cookie = format!("{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}", cfg.cookie_name, token, lifetime);
+    
+    // 🔥 RETURN REDIRECT IN JSON
     let mut response = Json(json!({
         "success": true,
-        "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role }
-    }))
-    .into_response();
+        "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role },
+        "redirect": next_url
+    })).into_response();
 
     if let Ok(value) = HeaderValue::from_str(&cookie) {
         response.headers_mut().append(header::SET_COOKIE, value);

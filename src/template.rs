@@ -7,6 +7,7 @@ use std::{
 
 // Compiled once. Previously this regex was built inside
 // preserve_runtime_data_sources() on every build call.
+// ✅ FIXED
 static RUNTIME_DATA_SOURCE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(
         r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)data-source\s*=\s*["']([^"']+)["']([^>]*?)>"#,
