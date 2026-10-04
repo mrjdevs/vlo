@@ -320,9 +320,11 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
         serde_json::json!({ "data": [], "success": false })
     };
 
-    if tokio::runtime::Handle::try_current().is_ok() {
-        std::thread::spawn(move || DATA_RT.block_on(fetch_logic)).join().unwrap_or(serde_json::json!({ "data": [], "success": false }))
+    // 🔥 FIX: Use block_in_place to avoid starving the Tokio runtime
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(fetch_logic))
     } else {
+        // Fallback for CLI/build contexts where no Tokio runtime is active
         DATA_RT.block_on(fetch_logic)
     }
 }
@@ -700,127 +702,197 @@ pub async fn render_404() -> impl IntoResponse {
 pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> String {
     let dev = state::app_mode().is_dev();
 
-    // ─── 1. STYLES (idempotent — skip if already injected) ───
+    // ─── 1. STYLES ─────────────────────────────────────────
     let mut all_css = String::new();
     if !rendered.styles.is_empty() {
         all_css.push_str(&rendered.styles.join("\n"));
     }
     let all_modules = crate::modules::get_modules();
     for module in &all_modules {
-        if rendered.used_modules.contains(&module.manifest.name) {
-            if !module.styles.is_empty() {
-                all_css.push_str(&module.styles.join("\n"));
-                all_css.push('\n');
-            }
+        if rendered.used_modules.contains(&module.manifest.name) && !module.styles.is_empty() {
+            all_css.push_str(&module.styles.join("\n"));
+            all_css.push('\n');
         }
     }
+    let style_block = if all_css.trim().is_empty() {
+        String::new()
+    } else {
+        let css = if dev { all_css } else { crate::utils::minify_css(all_css.trim()) };
+        format!("\n<style>\n{}\n</style>", css)
+    };
 
-    // ─── 2. MODULE SCRIPTS ───
+    // ─── 2. MODULE SCRIPTS ─────────────────────────────────
     let mut all_js = String::new();
     for module in &all_modules {
-        if rendered.used_modules.contains(&module.manifest.name) {
-            if !module.scripts.is_empty() {
-                all_js.push_str(&module.scripts.join("\n"));
-                all_js.push('\n');
-            }
+        if rendered.used_modules.contains(&module.manifest.name) && !module.scripts.is_empty() {
+            all_js.push_str(&module.scripts.join("\n"));
+            all_js.push('\n');
         }
     }
+    let script_block = if all_js.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n<script>\n{}\n</script>", all_js.trim())
+    };
 
-    // ─── 3. ASSEMBLE ───
+    // ─── HMR ───────────────────────────────────────────────
+    let hmr = if dev {
+        r#"<script>(requestIdleCallback || setTimeout)(function() { const es = new EventSource("/__vlo_hmr"); es.onmessage = function() { location.reload(); }; window.addEventListener("beforeunload", function() { es.close(); }); }, { timeout: 100 });</script>"#
+    } else { "" };
+
+    // ─── CSRF ──────────────────────────────────────────────
+    let csrf_meta = if dev {
+        if let Some(csrf) = rendered.template_context.get("csrf_token") {
+            if let Some(token) = csrf.as_str() {
+                if !token.is_empty() { format!(r#"<meta name="csrf-token" content="{}">"#, token) } else { String::new() }
+            } else { String::new() }
+        } else { String::new() }
+    } else {
+        r#"<meta name="csrf-token" content="__VLO_CSRF_PLACEHOLDER__">"#.to_string()
+    };
+
+    // ─── FLASH ─────────────────────────────────────────────
+    let flash_html = if dev && auto_flash {
+        if let Some(flashes) = rendered.template_context.get("flash_messages") {
+            if let Some(arr) = flashes.as_array() {
+                let mut html = String::new();
+                for flash in arr {
+                    let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
+                    let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
+                    let t = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                    let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
+                    html.push_str(&format!(
+                        r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div>"#,
+                        border_color, icon, t, description
+                    ));
+                }
+                if !html.is_empty() {
+                    html.push_str(r#"<style>@keyframes vloFlashIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}</style><script>setTimeout(function(){document.querySelectorAll('.vlo-flash').forEach(function(el){el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){el.remove()},400)})},4000)</script>"#);
+                }
+                html
+            } else { String::new() }
+        } else { String::new() }
+    } else if !dev {
+        r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#.to_string()
+    } else {
+        String::new()
+    };
+
+    // ─── ACTIVE NAV (build mode) ───────────────────────────
+    let active_link_js = if !dev {
+        r#"<script id="__VLO_NAV_ACTIVE__">(function(){var p=window.location.pathname;document.querySelectorAll('a[href]').forEach(function(a){var h=a.getAttribute('href');if(!h||h.startsWith('http')||h.startsWith('#')||h.startsWith('javascript'))return;if(h==='/'&&p==='/'){a.classList.add('active')}else if(h!=='/'&&p.startsWith(h)){a.classList.add('active')}})})()</script>"#
+    } else { "" };
+
+    // 🔥 INITIALIZE HTML BEFORE CHECKING CONTENT
     let mut html = rendered.html.clone();
     html = html.replace("{{title}}", title);
 
-    // ─── CSRF (idempotent) ───
-    if !html.contains("__VLO_CSRF_PLACEHOLDER__") {
-        let csrf_meta = if dev {
-            if let Some(csrf) = rendered.template_context.get("csrf_token") {
-                if let Some(token) = csrf.as_str() {
-                    if !token.is_empty() { format!(r#"<meta name="csrf-token" content="{}">"#, token) } else { String::new() }
-                } else { String::new() }
-            } else { String::new() }
-        } else {
-            r#"<meta name="csrf-token" content="__VLO_CSRF_PLACEHOLDER__">"#.to_string()
-        };
-        if !csrf_meta.is_empty() { html = html.replacen("</head>", &format!("{}\n</head>", csrf_meta), 1); }
-    }
-
-    // ─── STYLES (idempotent — only inject once) ───
-    if !all_css.trim().is_empty() && !html.contains("/* VLO:") {
-        let css = if dev { all_css } else { crate::utils::minify_css(all_css.trim()) };
-        let style_block = format!("\n<style>\n{}\n</style>", css);
-        html = html.replacen("</head>", &format!("{}\n</head>", style_block), 1);
-    }
-
-    // ─── FLASH (idempotent) ───
-    if !html.contains("__VLO_FLASH_PLACEHOLDER__") {
-        let flash_html = if dev && auto_flash {
-            if let Some(flashes) = rendered.template_context.get("flash_messages") {
-                if let Some(arr) = flashes.as_array() {
-                    let mut fh = String::new();
-                    for flash in arr {
-                        let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
-                        let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
-                        let t = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                        let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                        let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
-                        fh.push_str(&format!(
-                            r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div>"#,
-                            border_color, icon, t, description
-                        ));
-                    }
-                    if !fh.is_empty() {
-                        fh.push_str(r#"<style>@keyframes vloFlashIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}</style><script>setTimeout(function(){document.querySelectorAll('.vlo-flash').forEach(function(el){el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){el.remove()},400)})},4000)</script>"#);
-                    }
-                    fh
-                } else { String::new() }
-            } else { String::new() }
-        } else if !dev {
-            r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#.to_string()
-        } else {
-            String::new()
-        };
-        if !flash_html.is_empty() { html = html.replacen("</body>", &format!("{}\n</body>", flash_html), 1); }
-    }
-
-    // ─── MODULE SCRIPTS (idempotent) ───
-    if !all_js.trim().is_empty() && !html.contains("__VLO_MODULE_JS__") {
-        let script_block = format!("\n<script id=\"__VLO_MODULE_JS__\">\n{}\n</script>", all_js.trim());
-        html = html.replacen("</body>", &format!("{}\n</body>", script_block), 1);
-    }
-
-    // ─── ACTIVE NAV LINKS (idempotent) ───
-    if !dev && !html.contains("__VLO_NAV_ACTIVE__") {
-        let active_link_js = r#"<script id="__VLO_NAV_ACTIVE__">(function(){var p=window.location.pathname;document.querySelectorAll('a[href]').forEach(function(a){var h=a.getAttribute('href');if(!h||h.startsWith('http')||h.startsWith('#')||h.startsWith('javascript'))return;if(h==='/'&&p==='/'){a.classList.add('active')}else if(h!=='/'&&p.startsWith(h)){a.classList.add('active')}})})()</script>"#;
-        html = html.replacen("</body>", &format!("{}\n</body>", active_link_js), 1);
-    }
-
-    // ─── HMR (dev only, idempotent) ───
-    if dev && !html.contains("__vlo_hmr") {
-        let hmr = r#"<script>(requestIdleCallback || setTimeout)(function() { const es = new EventSource("/__vlo_hmr"); es.onmessage = function() { location.reload(); }; window.addEventListener("beforeunload", function() { es.close(); }); }, { timeout: 100 });</script>"#;
-        html = html.replacen("</body>", &format!("{}\n</body>", hmr), 1);
-    }
-
-    // ─── AJAX CORE (modular + idempotent) ───
-    // Only inject if queue push exists AND core not already present
-    if html.contains("__VLO_AJAX_Q") && !html.contains("__VLO_AJAX_READY") {
-        // Always inject base (refresh, queue, click/submit delegation, mutation listener)
-        let mut ajax_scripts = format!("<script>{}</script>", crate::modifier::AJAX_CORE_BASE);
-
-        // Only inject load-more/infinite scroll code if the page actually uses it
-        if html.contains("data-load-more") || html.contains("data-append") {
-            ajax_scripts.push_str(&format!("<script>{}</script>", crate::modifier::AJAX_CORE_LOADMORE));
+    // ─── FORM VALIDATOR SCRIPT (conditional) ───────────────
+    let validate_script = if html.contains("vloValidate") || html.contains("v-validate") {
+        r###"<script>
+window.vloValidate = function(form, rules) {
+    form.querySelectorAll('.vlo-error-msg').forEach(e => e.remove());
+    let isValid = true;
+    rules.forEach(ruleObj => {
+        const input = form.elements[ruleObj.field];
+        if (!input) return;
+        const val = input.value.trim();
+        const fieldRules = ruleObj.rules.split('|');
+        for (const r of fieldRules) {
+            if (r === 'required' && !val) { showErr(input, "This field is required"); isValid = false; break; }
+            if (r === 'email' && val && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) { showErr(input, "Invalid email address"); isValid = false; break; }
+            if (r.startsWith('min:')) { const min = parseFloat(r.split(':')[1]); if (val && parseFloat(val) < min) { showErr(input, "Must be at least " + min); isValid = false; break; } }
+            if (r.startsWith('max:')) { const max = parseFloat(r.split(':')[1]); if (val && parseFloat(val) > max) { showErr(input, "Must be at most " + max); isValid = false; break; } }
         }
+    });
+    if (!isValid) return false;
+    form.onsubmit = null;
+    form.submit();
+    return false;
+};
+function showErr(input, msg) {
+    input.style.borderColor = "#ff4444";
+    const err = document.createElement('div');
+    err.className = 'vlo-error-msg';
+    err.style.cssText = "color:#ff4444;font-size:0.75rem;margin-top:4px;";
+    err.textContent = msg;
+    input.parentNode.insertBefore(err, input.nextSibling);
+}
+</script>"###
+    } else {
+        ""
+    };
 
-        html = html.replacen("</body>", &format!("{}\n</body>", ajax_scripts), 1);
+    // ─── SINGLE-PASS INJECTIONS ────────────────────────────
+    let mut head_injections = String::new();
+    if !csrf_meta.is_empty() { head_injections.push_str(&csrf_meta); head_injections.push('\n'); }
+    if !style_block.is_empty() { head_injections.push_str(&style_block); head_injections.push('\n'); }
+
+    let mut body_injections = String::new();
+    if !flash_html.is_empty() { body_injections.push_str(&flash_html); body_injections.push('\n'); }
+    if !script_block.is_empty() { body_injections.push_str(&script_block); body_injections.push('\n'); }
+    if !active_link_js.is_empty() { body_injections.push_str(active_link_js); body_injections.push('\n'); }
+    if !hmr.is_empty() { body_injections.push_str(hmr); body_injections.push('\n'); }
+    if !validate_script.is_empty() { body_injections.push_str(validate_script); body_injections.push('\n'); }
+
+    // ─── SSE INIT (dev-mode / build-time detection) ────────
+    // In serve mode the spans are rendered at request time, so the real
+    // injection happens in serve_build_page. This block covers dev mode
+    // and any page whose |sync spans ARE visible at build time.
+    if html.contains("class=\"vlo-sync\"") || html.contains("data-channel=") {
+        let sse_script = r#"<script>
+(function(){
+if(window.__VLO_SSE__) return;
+window.__VLO_SSE__ = new EventSource("/__vlo_sse");
+window.__VLO_SSE__.onmessage = function(e) {
+    try {
+    var data = JSON.parse(e.data);
+    var els = document.querySelectorAll('[data-channel="' + data.channel + '"]');
+    for (var i = 0; i < els.length; i++) {
+        if (typeof data.value === 'object' && data.value !== null) {
+        window.dispatchEvent(new CustomEvent('vlo:mutation'));
+        } else {
+        els[i].innerHTML = data.value;
+        els[i].classList.add('vlo-sync-updated');
+        (function(el){ setTimeout(function(){ el.classList.remove('vlo-sync-updated'); }, 600); })(els[i]);
+        }
+    }
+    } catch(err) { console.error('VLO SSE Error:', err); }
+};
+window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error:', e); };
+})();
+</script>"#;
+        body_injections.push_str(sse_script);
+        body_injections.push('\n');
+    }
+
+    // ─── AJAX CORE (modular) ───────────────────────────────
+    if html.contains("__VLO_AJAX_Q") {
+        let mut ajax_scripts = format!("<script>{}</script>", crate::modifier::AJAX_CORE_BASE);
+        if html.contains("data-load-more") || html.contains("data-append") {
+            ajax_scripts.push_str(&format!("\n<script>{}</script>", crate::modifier::AJAX_CORE_LOADMORE));
+        }
+        body_injections.push_str(&ajax_scripts);
+        body_injections.push('\n');
+    }
+
+    // ─── APPLY (exactly 2 splices) ─────────────────────────
+    if !head_injections.is_empty() {
+        if let Some(i) = html.find("</head>") { html.insert_str(i, &head_injections); }
+    }
+    if !body_injections.is_empty() {
+        if let Some(i) = html.rfind("</body>") { html.insert_str(i, &body_injections); }
     }
 
     html
 }
 
 pub async fn ajax_js_handler() -> impl IntoResponse {
+    let combined = format!("{}\n{}", crate::modifier::AJAX_CORE_BASE, crate::modifier::AJAX_CORE_LOADMORE);
     (
         [(axum::http::header::CONTENT_TYPE, "application/javascript; charset=utf-8")],
-        crate::modifier::AJAX_CORE_JS
+        combined
     )
 }
 
@@ -885,6 +957,7 @@ pub fn watch_files(pages: PathBuf, public: PathBuf, tx: broadcast::Sender<()>, l
             if timestamp.elapsed().as_millis() > 200 {
                 *timestamp = Instant::now();
                 if let Ok(mut cache) = state::TEMPLATE_CACHE.lock() { cache.clear(); }
+                    crate::component::clear_component_path_cache(); // 🔥 ADD THIS LINE
                 let _ = tx.send(());
                 println!("⚡ Reload");
             }

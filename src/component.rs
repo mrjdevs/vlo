@@ -14,10 +14,35 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, RwLock},
 };
 
+// ─── PATH CACHE: Avoids repeated filesystem probes per tag ───────────
+static PATH_CACHE: LazyLock<RwLock<HashMap<String, Option<PathBuf>>>> =
+    LazyLock::new(Default::default);
+
+/// Cached public entry point. Resolves once per component name, then reuses.
 pub fn component_path(name: &str) -> Option<PathBuf> {
+    // Fast path: already resolved (Some or None)
+    if let Some(hit) = PATH_CACHE.read().unwrap().get(name) {
+        return hit.clone();
+    }
+    // Slow path: resolve from disk and cache the result
+    let found = resolve_component_path_internal(name);
+    PATH_CACHE
+        .write()
+        .unwrap()
+        .insert(name.to_string(), found.clone());
+    found
+}
+
+/// Clears the cache. Called by the file watcher on HMR reloads.
+pub fn clear_component_path_cache() {
+    PATH_CACHE.write().unwrap().clear();
+}
+
+/// Internal resolver. Performs the actual filesystem lookups.
+fn resolve_component_path_internal(name: &str) -> Option<PathBuf> {
     let root = crate::state::get_project_root();
     let layouts = root.join("layouts");
 
@@ -46,7 +71,7 @@ pub fn component_path(name: &str) -> Option<PathBuf> {
         return Some(component);
     }
 
-    // 4. modules/*/components/{name}.vlo  ← NEW
+    // 4. modules/*/components/{name}.vlo
     if let Some(module_component) = crate::modules::find_module_component(name) {
         return Some(module_component);
     }
@@ -98,58 +123,42 @@ pub fn render_tag(
     source.to_string()
 }
 
-pub fn render_components(
-    source: &str,
-    context: &mut RenderedPage,
-) -> String {
-    let mut output = String::new();
+// src/component.rs - Replace render_components
+pub fn render_components(source: &str, context: &mut RenderedPage) -> String {
+    let b = source.as_bytes();
+    let mut output = String::with_capacity(source.len());
     let mut last = 0usize;
-    let chars: Vec<(usize, char)> = source.char_indices().collect();
-    let mut index = 0usize;
+    let mut i = 0usize;
 
-    while index < chars.len() {
-        let (position, character) = chars[index];
+    while i < b.len() {
+        let Some(rel) = source[i..].find('<') else { break };
+        let pos = i + rel;
+        i = pos + 1;
+        
+        if i >= b.len() || !b[i].is_ascii_uppercase() { continue; }
 
-        if character == '<'
-            && index + 1 < chars.len()
-            && chars[index + 1].1.is_ascii_uppercase()
-        {
-            let mut end = index + 1;
-
-            while end < chars.len()
-                && (chars[end].1.is_ascii_alphanumeric()
-                    || chars[end].1 == '_'
-                    || chars[end].1 == '-')
-            {
-                end += 1;
-            }
-
-            let tag = &source[chars[index + 1].0..chars[end].0];
-
-            if let Some((_, tag_end, props, children)) =
-                find_tag(&source[position..], tag)
-            {
-                output.push_str(&source[last..position]);
-                output.push_str(&render_component_file(
-                    tag,
-                    &props,
-                    &children,
-                    context,
-                ));
-
-                last = position + tag_end;
-
-                while index < chars.len() && chars[index].0 < last {
-                    index += 1;
-                }
-
+        let mut end = i;
+        while end < b.len() && (b[end].is_ascii_alphanumeric() || b[end] == b'_' || b[end] == b'-') {
+            end += 1;
+        }
+        
+        let tag = &source[i..end];
+        
+        // Validate tag boundary
+        if end < b.len() {
+            let next_ch = b[end];
+            if !(next_ch == b'>' || next_ch == b'/' || next_ch.is_ascii_whitespace()) {
                 continue;
             }
         }
 
-        index += 1;
+        if let Some((_, tag_end, props, children)) = find_tag(&source[pos..], tag) {
+            output.push_str(&source[last..pos]);
+            output.push_str(&render_component_file(tag, &props, &children, context));
+            last = pos + tag_end;
+            i = last;
+        }
     }
-
     output.push_str(&source[last..]);
     output
 }

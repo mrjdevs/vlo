@@ -1,0 +1,321 @@
+<BaseLayout title="Test Features">
+<div class="test-page">
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- HEADER                                                      -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <div class="test-header">
+    <div class="test-eyebrow">VLO / QA</div>
+    <h1>Feature Test Suite</h1>
+    <p>Every VLO feature verified against the live <code>products</code> database. No fixtures, no mocks.</p>
+    <div class="test-badges">
+      <Badge variant="success" text="Live DB" />
+      <Badge variant="info" text="SSR" />
+      <Badge variant="warning" text="{{total}} rows" />
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- Everything below runs inside a data-source so we get        -->
+  <!-- `products` + pagination vars + query params in context      -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <div data-source="/api/products">
+
+    <!-- ── 1. INTERPOLATION & CONTEXT ─────────────────────────── -->
+    <Card title="1 · Interpolation & Context" description="Variables injected from the data source and query string.">
+      <div class="grid-3">
+        <div class="kv"><span>total</span><b>{{total}}</b></div>
+        <div class="kv"><span>page</span><b>{{page}}</b></div>
+        <div class="kv"><span>total_pages</span><b>{{total_pages}}</b></div>
+        <div class="kv"><span>limit</span><b>{{limit}}</b></div>
+        <div class="kv"><span>has_next</span><b>{if has_next}true{else}false{/if}</b></div>
+        <div class="kv"><span>search</span><b>{{search | default:"(none)"}}</b></div>
+        <div class="kv"><span>first product</span><b>{{products.0.title | default:"—"}}</b></div>
+        <div class="kv"><span>nested price</span><b>{{products.0.price | default:"—"}}</b></div>
+      </div>
+    </Card>
+
+    <!-- ── 2. CONDITIONALS ────────────────────────────────────── -->
+    <Card title="2 · Conditionals" description="if / else if / else, comparisons, and truthiness.">
+      <div class="grid-2">
+        <div class="kv"><span>total &gt; 0</span><b>{if total > 0}✅ PASS{else}❌ FAIL{/if}</b></div>
+        <div class="kv"><span>page == 1</span><b>{if page == 1}✅ page is 1{else}page is {{page}}{/if}</b></div>
+        <div class="kv"><span>limit != 999</span><b>{if limit != 999}✅ PASS{else}❌ FAIL{/if}</b></div>
+        <div class="kv"><span>chained</span><b>{if total > 100}100+{else if total > 10}11–100{else}0–10{/if}</b></div>
+        <div class="kv"><span>truthy search</span><b>{if search}has search{else}no search{/if}</b></div>
+      </div>
+    </Card>
+
+    <!-- ── 3. MODIFIER LAB ────────────────────────────────────── -->
+    <Card title="3 · Modifier Lab" description="Pipe modifiers applied to live values.">
+      <table class="mini-table">
+        <thead><tr><th>Modifier</th><th>Input</th><th>Output</th></tr></thead>
+        <tbody>
+          <tr><td>upper</td><td>{{products.0.title | default:"vlo"}}</td><td><b>{{products.0.title | upper | default:"VLO"}}</b></td></tr>
+          <tr><td>lower</td><td>{{products.0.title | default:"VLO"}}</td><td><b>{{products.0.title | lower | default:"vlo"}}</b></td></tr>
+          <tr><td>capitalize</td><td>{{products.0.title | default:"vlo frame"}}</td><td><b>{{products.0.title | capitalize | default:"Vlo frame"}}</b></td></tr>
+          <tr><td>truncate:15</td><td>{{products.0.description | default:"a long description"}}</td><td><b>{{products.0.description | truncate:15 | default:"a long descri…"}}</b></td></tr>
+          <tr><td>slug</td><td>{{products.0.title | default:"Vlo Frame"}}</td><td><b>{{products.0.title | slug | default:"vlo-frame"}}</b></td></tr>
+          <tr><td>reverse</td><td>vlo</td><td><b>{{products.0.title | reverse | default:"olv"}}</b></td></tr>
+          <tr><td>currency</td><td>{{products.0.price | default:"99"}}</td><td><b>{{products.0.price | currency:"$" | default:"$99.00"}}</b></td></tr>
+          <tr><td>number:2</td><td>{{products.0.price | default:"1234.5"}}</td><td><b>{{products.0.price | number:2 | default:"1,234.50"}}</b></td></tr>
+          <tr><td>int</td><td>{{products.0.price | default:"42.9"}}</td><td><b>{{products.0.price | int | default:"42"}}</b></td></tr>
+          <tr><td>date</td><td>{{products.0.created_at | default:"2026-01-01"}}</td><td><b>{{products.0.created_at | date:"%Y-%m-%d" | default:"2026-01-01"}}</b></td></tr>
+          <tr><td>year</td><td>{{products.0.created_at | default:"2026-01-01"}}</td><td><b>{{products.0.created_at | year | default:"2026"}}</b></td></tr>
+          <tr><td>month_name</td><td>{{products.0.created_at | default:"2026-03-01"}}</td><td><b>{{products.0.created_at | month_name | default:"March"}}</b></td></tr>
+          <tr><td>default</td><td>(empty)</td><td><b>{{does_not_exist | default:"FALLBACK OK"}}</b></td></tr>
+          <tr><td>len</td><td>{{products.0.title | default:"hello"}}</td><td><b>{{products.0.title | len | default:"5"}} chars</b></td></tr>
+          <tr><td>escape</td><td>&lt;b&gt;bold&lt;/b&gt;</td><td><b>{{"<b>bold</b>" | escape}}</b></td></tr>
+          <tr><td>chain</td><td>{{products.0.title | default:"vlo frame work"}}</td><td><b>{{products.0.title | upper | truncate:10 | default:"VLO FRAME…"}}</b></td></tr>
+        </tbody>
+      </table>
+    </Card>
+
+    <!-- ── 4. LOOPS & LOOP VARIABLES ──────────────────────────── -->
+    <Card title="4 · Loops & Loop Variables" description="@index, @number, @first, @last inside {for}.">
+      <div class="loop-list">
+        {for product in products}
+          <div class="loop-item {if @first}is-first{/if} {if @last}is-last{/if}">
+            <span class="loop-num">#{{@number}}</span>
+            <span class="loop-title">{{product.title}}</span>
+            {if @first}<Badge variant="info" text="first" />{/if}
+            {if @last}<Badge variant="warning" text="last" />{/if}
+          </div>
+        {else}
+          <div class="empty-note">No products — the {else} branch rendered.</div>
+        {/for}
+      </div>
+    </Card>
+
+    <!-- ── 5. DATA TABLE + TOOLBAR + PAGINATION ───────────────── -->
+    <Card title="5 · Data Source · Search · Sort · Pagination" description="Live query against /api/products with toolbar controls.">
+
+      <DataTableToolbar _columns="title,description" />
+
+      <div class="table-wrap">
+        <table class="products-table">
+          <thead>
+            <tr>
+              <th>ID</th><th>Product</th><th>Price</th><th>Stock</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody data-append>
+            {for product in products}
+              <tr>
+                <td>#{{product.id}}</td>
+                <td>{{product.title}}</td>
+                <td>{{product.price | currency:"$"}}</td>
+                <td>
+                  {if product.stock == 0}
+                    <span class="stock-empty">Out of stock</span>
+                  {else if product.stock < 5}
+                    <span class="stock-low">{{product.stock | sync:"products"}} left</span>
+                  {else}
+                    <span class="stock-good">{{product.stock | sync:"products"}}</span>
+                  {/if}
+                </td>
+                <td>
+                  <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('t-edit-{{product.id}}').classList.add('active')">✎</button>
+                  <button type="button" class="vlo-btn vlo-btn-danger" onclick="document.getElementById('t-del-{{product.id}}').classList.add('active')">✕</button>
+                </td>
+              </tr>
+
+              <!-- EDIT MODAL (v-put on existing row) -->
+              <Modal id="t-edit-{{product.id}}" title="Edit Product">
+                <form v-put="/api/products/{{product.id}}" class="modal-form" enctype="multipart/form-data">
+                  <div class="form-grid">
+                    <div class="form-field"><label>Title</label><input type="text" name="title" value="{{product.title}}" required /></div>
+                    <div class="form-field"><label>Price</label><input type="number" name="price" value="{{product.price}}" step="0.01" min="0" required /></div>
+                    <div class="form-field"><label>Stock</label><input type="number" name="stock" value="{{product.stock}}" min="0" required /></div>
+                  </div>
+                  <div class="modal-actions">
+                    <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('t-edit-{{product.id}}').classList.remove('active')">Cancel</button>
+                    <button type="submit" class="vlo-btn vlo-btn-primary">Save</button>
+                  </div>
+                </form>
+              </Modal>
+
+              <!-- DELETE MODAL (v-delete on existing row) -->
+              <Modal id="t-del-{{product.id}}" title="Delete Product">
+                <div class="delete-confirmation">
+                  <p>Delete <strong>{{product.title}}</strong>? This cannot be undone.</p>
+                  <div class="modal-actions">
+                    <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('t-del-{{product.id}}').classList.remove('active')">Cancel</button>
+                    <button v-delete="/api/products/{{product.id}}" v-confirm="Delete this product?" class="vlo-btn vlo-btn-danger">Delete</button>
+                  </div>
+                </div>
+              </Modal>
+            {else}
+              <tr><td colspan="5" class="empty-note">No products found.</td></tr>
+            {/for}
+          </tbody>
+        </table>
+      </div>
+
+      <Pagination />
+    </Card>
+
+    <!-- ── 6. CREATE DIRECTIVE (v-post) ───────────────────────── -->
+    <Card title="6 · Create Directive (v-post)" description="Submits a new row via POST. Uses native HTML5 validation.">
+      <form v-post="/api/products" class="modal-form" enctype="multipart/form-data">
+        <div class="form-grid">
+          <div class="form-field"><label>Title</label><input type="text" name="title" placeholder="New product" required /></div>
+          <div class="form-field"><label>Description</label><input type="text" name="description" placeholder="Description" /></div>
+          <div class="form-field"><label>Price</label><input type="number" name="price" step="0.01" min="0" required /></div>
+          <div class="form-field"><label>Stock</label><input type="number" name="stock" min="0" required /></div>
+        </div>
+        <div class="form-field"><label>Image</label><FileInput name="image" accept="image/*" button="Choose Image" /></div>
+        <button type="submit" class="vlo-btn vlo-btn-primary">Create Product</button>
+      </form>
+    </Card>
+
+    <!-- ── 7. COMPONENT SHOWCASE ──────────────────────────────── -->
+    <Card title="7 · Component Showcase" description="Existing UI components rendered with props and slots.">
+      <div class="showcase">
+        <div class="showcase-row">
+          <span class="showcase-label">Alert</span>
+          <Alert variant="success" title="Success" description="This alert rendered from the Alert component." />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Badge</span>
+          <Badge variant="success" text="success" />
+          <Badge variant="info" text="info" />
+          <Badge variant="warning" text="warning" />
+          <Badge variant="error" text="error" />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Button</span>
+          <Button text="Primary" variant="primary" />
+          <Button text="Secondary" variant="secondary" />
+          <Button text="Link Button" variant="primary" href="/test" />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Link</span>
+          <Link href="/test" text="A styled link" />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Input</span>
+          <Input label="Sample input" name="sample" placeholder="Type here" />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">SlotCard</span>
+          <SlotCard title="Slotted card">
+            <slot name="body">This body came through the <b>body</b> slot.</slot>
+          </SlotCard>
+        </div>
+      </div>
+    </Card>
+
+    <!-- ── 8. REAL-TIME SYNC (SSE) ────────────────────────────── -->
+    <Card title="8 · Real-time Sync (SSE)" description="Values bound with |sync update live across tabs via /__vlo_sse.">
+      <div class="grid-3">
+        <div class="kv"><span>first product stock</span><b>{{products.0.stock | sync:"products" | default:"—"}}</b></div>
+        <div class="kv"><span>total (live)</span><b>{{total | sync:"products"}}</b></div>
+      </div>
+      <p class="hint">Edit a stock value in section 5 and watch these update in a second tab without refresh.</p>
+    </Card>
+
+    <!-- ── 9. FLASH / TOAST ───────────────────────────────────── -->
+    <Card title="9 · Flash Messages & Toast" description="Cookie-based flash rendered by the Toast component.">
+      {if flash_messages}
+        <Toast />
+      {else}
+        <p class="hint">No flash present. Trigger one by saving or deleting in sections 5/6 — the toast appears after the mutation.</p>
+      {/if}
+    </Card>
+
+    <!-- ── 10. IMAGE OPTIMIZATION ─────────────────────────────── -->
+    <Card title="10 · Image Optimization" description="The |image modifier emits responsive AVIF/WebP with blur-up.">
+      <div class="image-row">
+        {for product in products}
+          {if product.image}
+            <div class="image-cell">
+              {{product.image | image:"w=120,h=120,webp,blur"}}
+              <span>{{product.title}}</span>
+            </div>
+          {/if}
+        {/for}
+        <div class="image-cell">
+          <div class="image-placeholder">📦</div>
+          <span>fallback when no image</span>
+        </div>
+      </div>
+    </Card>
+
+    <!-- ── 11. AUTH STATE ─────────────────────────────────────── -->
+    <Card title="11 · Auth State" description="Session context injected by the auth middleware.">
+      {if logged_in}
+        <div class="grid-2">
+          <div class="kv"><span>logged_in</span><b>✅ true</b></div>
+          <div class="kv"><span>user_name</span><b>{{user_name}}</b></div>
+          <div class="kv"><span>user_role</span><b>{{user_role}}</b></div>
+          <div class="kv"><span>user_email</span><b>{{user_email}}</b></div>
+        </div>
+      {else}
+        <p class="hint">Not logged in. <a href="/login">Log in</a> to verify session variables populate.</p>
+      {/if}
+    </Card>
+
+  </div><!-- /data-source -->
+</div>
+
+<style>
+.test-page { max-width: 1100px; margin: 0 auto; padding: 32px 20px 80px; }
+.test-header { margin-bottom: 28px; }
+.test-eyebrow { color: var(--primary,#00f5ff); font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; }
+.test-header h1 { margin: 8px 0 6px; font-size: 2rem; }
+.test-header p { color: #888; margin: 0 0 14px; }
+.test-header code { background: #1a1a2e; padding: 2px 6px; border-radius: 4px; color: var(--primary,#00f5ff); }
+.test-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.test-page > [data-source] { display: flex; flex-direction: column; gap: 20px; }
+
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.kv { background: #111119; border: 1px solid #26263a; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.kv span { color: #777; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.kv b { color: #eee; font-size: 0.95rem; word-break: break-word; }
+
+.mini-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.mini-table th, .mini-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #26263a; }
+.mini-table th { color: #777; font-size: 0.72rem; text-transform: uppercase; }
+.mini-table td:first-child { color: var(--primary,#00f5ff); font-family: monospace; }
+.mini-table td b { color: #00ff88; }
+
+.loop-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.loop-item { display: flex; align-items: center; gap: 10px; background: #111119; border: 1px solid #26263a; border-radius: 8px; padding: 8px 12px; }
+.loop-item.is-first { border-color: var(--primary,#00f5ff); }
+.loop-item.is-last { border-color: #ffaa00; }
+.loop-num { color: #666; font-family: monospace; font-size: 0.75rem; width: 34px; }
+.loop-title { color: #ddd; flex: 1; }
+
+.table-wrap { overflow-x: auto; }
+.products-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.products-table th, .products-table td { padding: 10px 12px; border-bottom: 1px solid #26263a; text-align: left; }
+.products-table th { color: #888; font-size: 0.72rem; text-transform: uppercase; }
+.stock-empty { color: #ff4444; font-weight: 600; }
+.stock-low { color: #ffaa00; }
+.stock-good { color: #00ff88; }
+
+.empty-note { color: #666; font-style: italic; padding: 16px; text-align: center; }
+.hint { color: #777; font-size: 0.82rem; margin: 8px 0 0; }
+
+.showcase { display: flex; flex-direction: column; gap: 16px; }
+.showcase-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.showcase-label { color: #777; font-size: 0.75rem; text-transform: uppercase; width: 90px; flex-shrink: 0; }
+
+.image-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.image-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.image-cell span { color: #777; font-size: 0.72rem; max-width: 120px; text-align: center; }
+.image-placeholder { width: 120px; height: 120px; display: grid; place-items: center; background: #111119; border: 1px dashed #333; border-radius: 8px; font-size: 2rem; }
+
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 12px; }
+.form-field { display: flex; flex-direction: column; gap: 6px; }
+.form-field label { color: #999; font-size: 0.78rem; }
+.form-field input { padding: 8px 10px; background: #111119; border: 1px solid #26263a; border-radius: 6px; color: #eee; }
+.modal-form { display: flex; flex-direction: column; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+.delete-confirmation p { color: #ccc; }
+.delete-warning { color: #ff6680; font-size: 0.82rem; }
+</style>
+</BaseLayout>

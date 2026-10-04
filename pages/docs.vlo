@@ -349,12 +349,12 @@
                         <div><strong>Clean URLs</strong><p>No <code>?status=success</code> pollution. The page reloads at its clean URL.</p></div>
                                                 <div><strong>Login Redirects</strong><p>If a <code>v-post</code> form submits to a login endpoint, VLO automatically captures the <code>?next=</code> URL parameter and redirects the browser upon successful authentication.</p></div>
                     </div>
-                                        <h3>Real-time Updates (SSE)</h3>
-                    <p class="component-note">VLO includes a built-in Server-Sent Events (SSE) broadcast system. Use the <code>|live</code> modifier to make any value update instantly across all connected browsers when a mutation occurs.</p>
+                    <h3>Real-time Updates (SSE)</h3>
+                    <p class="component-note">VLO includes a built-in Server-Sent Events (SSE) broadcast system. Use the <code>|sync</code> modifier to make any value update instantly across all connected browsers when a mutation occurs.</p>
                     <div class="code-card">
-                        <div class="code-header"><span>Live stock counter</span><span>VLO</span></div>
+                        <div class="code-header"><span>Syncing stock counter</span><span>VLO</span></div>
                         <pre><code>&lt;!-- Renders a span that listens to the "products" SSE channel --&gt;
-&lt;span&gt;Stock: {{ product.stock | live:"products" }}&lt;/span&gt;</code></pre>
+&lt;span&gt;Stock: {{ product.stock | sync:"products" }}&lt;/span&gt;</code></pre>
                     </div>
                     <div class="info-grid">
                         <div><strong>Automatic Broadcasting</strong><p>Any <code>POST</code>, <code>PUT</code>, or <code>DELETE</code> API request automatically broadcasts its response payload to the SSE channel matching the resource name.</p></div>
@@ -419,7 +419,7 @@
                         <div class="naming-row"><span>default:val</span><span>Fallback if empty, null, or "null"</span><span>{{ val | default:"N/A" }}</span></div>
                         <div class="naming-row"><span>nl2br</span><span>Convert newlines to &lt;br&gt; tags</span><span>{{ text | nl2br }}</span></div>
                         <div class="naming-row"><span>escape</span><span>HTML-encode special characters</span><span>{{ text | escape }}</span></div>
-                        <div class="naming-row"><span>live:channel</span><span>Real-time SSE updates</span><span>{{ stock | live:"products" }}</span></div>
+                        <div class="naming-row"><span>sync:channel</span><span>Real-time SSE synchronization</span><span>{{ stock | sync:"products" }}</span></div>
                         <div class="naming-row"><span>ajax:url</span><span>Client-side fetch & DOM swap</span><span>{{ "" | ajax:"" }}</span></div>
                     </div>
                     <div class="rule-card">

@@ -51,11 +51,12 @@
     <!-- ═══ PRODUCTS LIST (AJAX WRAPPER) ═══ -->
     <!-- 🔥 Empty URL means "listen-only" - no initial fetch, just attach event listeners fix  -->
     <div id="products-ajax-wrapper">
-          {if flash_messages}
-            <Toast duration="short"/>
-          {/if}
+
       {{ "" | ajax:",0,#products-ajax-wrapper,html" }}
       
+                {if flash_messages}
+            <Toast duration="long"/>
+          {/if}
       <div class="products-list-card">
         <Card title="Products" description="{{total}} products found.">
           <DataTableToolbar _columns="title,description" />
@@ -73,7 +74,7 @@
                   <th>Actions</th>
                 </tr>
               </thead>
-              <tbody data-source="/api/products" data-append data-append>
+              <tbody data-source="/api/products" data-append>
                 {for product in products}
                 <tr>
                   <td>#{{product.id}}</td>
@@ -92,17 +93,15 @@
                     <span class="product-price {if product.price > 500}product-expensive{/if}">${{product.price}}</span>
                   </td>
                   <!-- Change "product_stock" to "products" -->
-                  <td>
+                <td>
+                  <span class="{if product.stock == 0}stock-empty{else if product.stock < 5}stock-low{else}stock-good{/if}">
                     {if product.stock == 0}
-                      <span class="stock-empty">{{0 | live:"products"}}</span>
+                      Out of Stock
                     {else}
-                      {if product.stock < 5}
-                        <span class="stock-low">{{product.stock | live:"products"}} left</span>
-                      {else}
-                        <span class="stock-good">{{product.stock | live:"products"}}</span>
-                      {/if}
+                      {{product.stock | sync:"products"}}{if product.stock < 5} left{/if}
                     {/if}
-                  </td>
+                  </span>
+                </td>
                   <td><span>{{product.created_at|date}}</span></td>
                   <td>
                     <div class="product-actions">

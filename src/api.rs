@@ -13,7 +13,7 @@ use std::{
     collections::HashMap,
     fs,
     path::Path,
-    sync::{LazyLock, Mutex},
+    sync::{LazyLock, Mutex, Arc},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -21,10 +21,7 @@ use std::{
 // ---------------------------------------------------------------------------
 // API Action Cache (supports namespaces)
 // ---------------------------------------------------------------------------
-struct CachedActions {
-    actions: HashMap<String, String>,
-    modified: SystemTime,
-}
+
 
 static API_ACTIONS_CACHE: LazyLock<Mutex<Option<CachedActions>>> = LazyLock::new(|| Mutex::new(None));
 
@@ -97,32 +94,42 @@ fn get_api_modified_time(api_dir: &Path) -> SystemTime {
     latest
 }
 
-pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
-    let api_dir = get_project_root().join("pages/api");
-    let modified = get_api_modified_time(&api_dir);
+struct CachedActions {
+    actions: Arc<HashMap<String, String>>,
+    modified: SystemTime,
+}
 
-    // Check cache
+pub fn load_api_actions() -> Result<Arc<HashMap<String, String>>, String> {
+    let api_dir = get_project_root().join("pages/api");
+    let is_dev = crate::state::app_mode().is_dev();
+    
+    // Only fetch mtime if we are in dev mode (production skips mtime checks)
+    let modified = if is_dev { get_api_modified_time(&api_dir) } else { SystemTime::UNIX_EPOCH };
+
+    // ─── 1. CHECK CACHE ─────────────────────────────────────
     if let Ok(cache) = API_ACTIONS_CACHE.lock() {
         if let Some(cached) = cache.as_ref() {
-            if cached.modified == modified {
+            // In production: always use cache if it exists
+            // In dev: only use cache if mtime matches
+            if !is_dev || cached.modified == modified {
                 crate::vlo_debug!("⚡ API actions served from memory cache");
-                return Ok(cached.actions.clone());
+                return Ok(Arc::clone(&cached.actions));
             }
         }
     }
 
+    // ─── 2. CACHE MISS: LOAD FROM DISK ──────────────────────
     let mut actions = HashMap::new();
 
-    // ─── LOAD MAIN API (pages/api/api.vlo) ──────────────────
+    // Load main API (pages/api/api.vlo)
     let main_file = api_dir.join("api.vlo");
     if main_file.exists() {
         let main_actions = load_actions_from_file(&main_file);
         crate::vlo_debug!("📡 Loaded {} actions from api.vlo", main_actions.len());
         actions.extend(main_actions);
     }
-    // ─────────────────────────────────────────────────────────
 
-    // ─── LOAD NAMESPACED APIs (pages/api/*/api.vlo) ─────────
+    // Load namespaced APIs (pages/api/*/api.vlo)
     if let Ok(entries) = fs::read_dir(&api_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -145,19 +152,25 @@ pub fn load_api_actions() -> Result<HashMap<String, String>, String> {
             }
         }
     }
-    // ─────────────────────────────────────────────────────────
 
-    // Also merge module APIs
+    // Merge module APIs
     let module_actions = crate::modules::get_module_api_actions();
     actions.extend(module_actions);
 
+    // ─── 3. UPDATE CACHE & RETURN ───────────────────────────
+    let actions_arc = Arc::new(actions);
+    
     if let Ok(mut cache) = API_ACTIONS_CACHE.lock() {
-        *cache = Some(CachedActions { actions: actions.clone(), modified });
+        *cache = Some(CachedActions { 
+            actions: Arc::clone(&actions_arc), 
+            modified 
+        });
     }
     
-    crate::vlo_debug!("📡 Total API actions available: {}", actions.len());
-    Ok(actions)
+    crate::vlo_debug!("📡 Total API actions available: {}", actions_arc.len());
+    Ok(actions_arc)
 }
+
 
 // ---------------------------------------------------------------------------
 // HTTP Handlers
@@ -247,13 +260,13 @@ async fn parse_multipart_body(multipart: &mut Multipart, query: &mut HashMap<Str
 // ---------------------------------------------------------------------------
 // Auto-Pagination Helper
 // ---------------------------------------------------------------------------
+// ─── STATIC REGEXES (Compiled once at startup) ───────────────────────
+static RE_LIMIT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)\s+LIMIT\s+\{\{.*?\}\}").unwrap());
+static RE_OFFSET: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)\s+OFFSET\s+\{\{.*?\}\}").unwrap());
+
 pub fn generate_count_sql(sql_template: &str) -> String {
-    let re_limit = regex::Regex::new(r"(?i)\s+LIMIT\s+\{\{.*?\}\}").unwrap();
-    let re_offset = regex::Regex::new(r"(?i)\s+OFFSET\s+\{\{.*?\}\}").unwrap();
-    
-    let without_limit = re_limit.replace_all(sql_template, "");
-    let stripped = re_offset.replace_all(&without_limit, "");
-    
+    let without_limit = RE_LIMIT.replace_all(sql_template, "");
+    let stripped = RE_OFFSET.replace_all(&without_limit, "");
     let stripped = stripped.trim().trim_end_matches(';');
     if stripped.is_empty() { return String::new(); }
     format!("SELECT COUNT(*) as total FROM ({}) AS _vlo_count_subquery", stripped)

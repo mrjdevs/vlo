@@ -957,12 +957,13 @@ pub fn render_interpolations(
             }
             
             // Apply modifiers if a chain is present
-            let value = if let Some((base, chain)) = key.split_once('|') {
-                let base_val = get_nested_value(base.trim(), context);
-                crate::modifier::apply(base_val, chain)
-            } else {
-                format_value(&get_nested_value(key, context))
-            };
+        let value = if let Some((base, chain)) = key.split_once('|') {
+            // 🔥 FIX: Use resolve_operand to support literal numbers/strings (e.g., {{0 | sync}})
+            let base_val = resolve_operand(base.trim(), context);
+            crate::modifier::apply(base_val, chain)
+        } else {
+            format_value(&resolve_operand(key, context))
+        };
 
             if in_quotes[full.start()] {
                 escape_html_attribute(&value)
@@ -1051,12 +1052,13 @@ fn render_control_flow_internal(
                 }
                 
                 // Apply modifiers if present
-                let value = if let Some((base, chain)) = key.split_once('|') {
-                    let base_val = get_nested_value(base.trim(), context);
-                    crate::modifier::apply(base_val, chain)
-                } else {
-                    format_value(&get_nested_value(key, context))
-                };
+            let value = if let Some((base, chain)) = key.split_once('|') {
+                // 🔥 FIX: Use resolve_operand to support literal numbers/strings
+                let base_val = resolve_operand(base.trim(), context);
+                crate::modifier::apply(base_val, chain)
+            } else {
+                format_value(&resolve_operand(key, context))
+            };
 
                 if in_quotes[pos] {
                     result.push_str(&escape_html_attribute(&value));
@@ -1132,7 +1134,8 @@ fn is_runtime_var(var: &str) -> bool {
         "has_next" | "has_prev" | "prev_page" | "next_page" |
         "logged_in" | "user_name" | "user_role" | "user_email" |
         "flash_messages" | "flash_variant" | "flash_icon" | "flash_title" | "flash_description" |
+        "variant" | "icon" | "title" | "description" | "duration" | // 🔥 FIX: Added missing flash variables
         "csrf_token" | "auth_identifier_field" | "auth_password_field" |
-        "data" | "meta" | "config" // 🔥 ADDED: Preserves module component {for} loops during build
+        "data" | "meta" | "config"
     )
 }

@@ -405,43 +405,13 @@ fn m_image(v: String, arg: Option<String>) -> String {
     picture
 }
 // ── Real-time / Live Updates ─────────────────────────────────────────────
-fn m_live(v: String, arg: Option<String>) -> String {
+fn m_sync(v: String, arg: Option<String>) -> String {
     let channel = arg.unwrap_or_else(|| "default".into());
-    format!(
-        r#"<span class="vlo-live" data-channel="{}">{}</span><script>
-(function(){{
-    if(!window.__VLO_SSE__) {{
-        window.__VLO_SSE__ = new EventSource("/__vlo_sse");
-        window.__VLO_SSE__.onmessage = function(e) {{
-            try {{
-                const data = JSON.parse(e.data);
-                if(data.channel === "{}") {{
-                    document.querySelectorAll(`[data-channel="{}"]`).forEach(el => {{
-                        // 🔥 SMART PAYLOAD HANDLING
-                        if (typeof data.value === 'object' && data.value !== null) {{
-                            // If it's a full API response, trigger global AJAX wrapper refresh
-                            window.dispatchEvent(new CustomEvent('vlo:mutation'));
-                        }} else {{
-                            // If it's a simple string/number, update the text directly
-                            el.innerHTML = data.value;
-                            el.classList.add("vlo-live-updated");
-                            setTimeout(() => el.classList.remove("vlo-live-updated"), 600);
-                        }}
-                    }});
-                }}
-            }} catch(err) {{ console.error("VLO SSE Error:", err); }}
-        }};
-    }}
-}})();
-</script>"#,
-        channel, v, channel, channel
-    )
+    // 🔥 Only output the span. The script is now injected globally by wrap_html.
+    format!(r#"<span class="vlo-live" data-channel="{}">{}</span>"#, channel, v)
 }
 
-
 // ── AJAX Core Script (injected ONCE by wrap_html) ─────────────────────
-// ── AJAX Core: Base queue processor (always needed if any |ajax used) ──
-// ── AJAX Core: Base queue processor (always needed if any |ajax used) ──
 pub const AJAX_CORE_BASE: &str = r##"
 (function() {
   if (window.__VLO_AJAX_READY) return;
@@ -626,9 +596,6 @@ pub const AJAX_CORE_LOADMORE: &str = r##"
 })();
 "##;
 
-// ── Kept for backward compat / ajax_js_handler route ──
-pub const AJAX_CORE_JS: &str = r##"/* replaced by modular injection */"##;
-
 fn js_lit(s: &str) -> String {
     serde_json::to_string(s)
         .unwrap_or_else(|_| "\"\"".into())
@@ -796,7 +763,7 @@ pub fn registry() -> HashMap<&'static str, ModifierFn> {
     m.insert("strip_tags", m_strip_tags);
     m.insert("excerpt", m_excerpt);
     m.insert("image", m_image);       // ← Added in Priority 2
-    m.insert("live", m_live);         // 🔥 NEW: Real-time SSE updates
+    m.insert("sync", m_sync);         // 🔥 NEW: Real-time SSE updates
     m.insert("ajax", m_ajax);
 
     // Developer tools

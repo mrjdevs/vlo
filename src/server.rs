@@ -19,7 +19,7 @@ use std::{
     fs,
     path::Path,
     process::Command,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, LazyLock},
     time::Instant,
 };
 use tokio::sync::broadcast;
@@ -440,159 +440,212 @@ async fn serve_build_page(
     build_dir: std::path::PathBuf,
     uri: axum::http::Uri,
     req: Request,
-) -> impl IntoResponse {
-    let path = uri.path();
-    let page_name = if path == "/" { "index" } else { path.trim_start_matches('/') };
+            ) -> impl IntoResponse {
+                let path = uri.path();
+                let page_name = if path == "/" { "index" } else { path.trim_start_matches('/') };
 
-    // ─── 1. MANUALLY RESOLVE AUTH ──────────────────────────
-    let mut auth = req.extensions().get::<crate::auth::AuthUser>().cloned();
-    if auth.is_none() || auth.as_ref().map_or(true, |a| a.user.is_none()) {
-        let cookie_header = req.headers().get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok());
-        let cookie_name = crate::auth::auth_config().cookie_name.clone();
-        if let Some(header) = cookie_header {
-            if let Some(token) = crate::auth::parse_cookie_header(header, &cookie_name) {
-                let user = crate::auth::get_user_from_session(&token).await;
-                if user.is_some() {
-                    auth = Some(crate::auth::AuthUser {
-                        user,
-                        csrf_token: Some(crate::auth::compute_csrf_token(&token)),
-                        session_token: Some(token),
-                    });
-                }
-            }
-        }
-    }
-
-    // ─── 2. EXTRACT FLASH EARLY ────────────────────────────
-    let flash_encoded = req.headers().get("cookie")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|h| crate::auth::parse_cookie_header(h, crate::auth::FLASH_COOKIE));
-    let mut flash_html = String::new();
-    let mut expire_cookie = false;
-    if let Some(encoded) = flash_encoded {
-        if let Some(flash) = crate::auth::decode_flash(&encoded) {
-            let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
-            let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
-            let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
-            let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
-            flash_html = format!(
-                r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div><style>@keyframes vloFlashIn{{from{{opacity:0;transform:translateX(40px)}}to{{opacity:1;transform:translateX(0)}}}}</style><script>setTimeout(function(){{document.querySelectorAll('.vlo-flash').forEach(function(el){{el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){{el.remove()}},400)}})}},4000)</script>"#, 
-                border_color, icon, title, description
-            );
-            expire_cookie = true;
-        }
-    }
-
-    // ─── 3. CHECK AUTH GUARD ───────────────────────────────
-    let manifest_path = build_dir.join("routes.json");
-    let raw_query = uri.query().unwrap_or("");
-    let next_decoded = raw_query.split('&').find_map(|pair| {
-        let mut parts = pair.splitn(2, '=');
-        let key = parts.next()?;
-        let value = parts.next().unwrap_or("");
-        if key == "next" { Some(urlencoding::decode(value).unwrap_or_default().into_owned()) } else { None }
-    });
-    let next_ref = next_decoded.as_deref();
-
-    if manifest_path.exists() {
-        if let Ok(manifest_str) = std::fs::read_to_string(&manifest_path) {
-            if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_str) {
-                if let Some(routes) = manifest.as_object() {
-                    if let Some(route_config) = routes.get(path) {
-                        let guard = crate::auth::PageGuard {
-                            auth: route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false),
-                            guest: route_config.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
-                            roles: route_config.get("roles").and_then(|v| v.as_array())
-                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
-                        };
-                        let user = auth.as_ref().and_then(|a| a.user.clone());
-                        if let Some(mut response) = crate::auth::check_page_guard(&guard, &user, path, next_ref) {
-                            if expire_cookie {
-                                if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
-                                    response.headers_mut().append(axum::http::header::SET_COOKIE, val);
-                                }
+                // ─── 1. RESOLVE AUTH ───────────────────────────────────
+                let mut auth = req.extensions().get::<crate::auth::AuthUser>().cloned();
+                if auth.is_none() || auth.as_ref().map_or(true, |a| a.user.is_none()) {
+                    let cookie_header = req.headers().get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok());
+                    let cookie_name = crate::auth::auth_config().cookie_name.clone();
+                    if let Some(header) = cookie_header {
+                        if let Some(token) = crate::auth::parse_cookie_header(header, &cookie_name) {
+                            let user = crate::auth::get_user_from_session(&token).await;
+                            if user.is_some() {
+                                auth = Some(crate::auth::AuthUser {
+                                    user,
+                                    csrf_token: Some(crate::auth::compute_csrf_token(&token)),
+                                    session_token: Some(token),
+                                });
                             }
-                            return response;
                         }
                     }
                 }
-            }
-        }
-    }
 
-    let filename = if path == "/" { "index.html".to_string() } else { format!("{}.html", page_name) };
-    let file = build_dir.join(&filename);
-    
-    match std::fs::read_to_string(&file) {
-        Ok(html) => {
-            let query: std::collections::HashMap<String, String> = uri.query().unwrap_or("").split('&')
-                .filter_map(|pair| {
+                // ─── 2. EXTRACT FLASH EARLY (keep the decoded Value for context) ───
+                let flash_encoded = req.headers().get("cookie")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|h| crate::auth::parse_cookie_header(h, crate::auth::FLASH_COOKIE));
+
+                let mut flash_value: Option<serde_json::Value> = None;
+                let mut flash_html = String::new();
+                let mut expire_cookie = false;
+
+                if let Some(encoded) = &flash_encoded {
+                    if let Some(flash) = crate::auth::decode_flash(encoded) {
+                        let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
+                        let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
+                        let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                        let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                        let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
+                        flash_html = format!(
+                            r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div><style>@keyframes vloFlashIn{{from{{opacity:0;transform:translateX(40px)}}to{{opacity:1;transform:translateX(0)}}}}</style>"#,
+                            border_color, icon, title, description
+                        );
+                        flash_value = Some(flash);
+                        expire_cookie = true;
+                    }
+                }
+
+                // ─── 3. CHECK AUTH GUARD ───────────────────────────────
+                let manifest_path = build_dir.join("routes.json");
+                let raw_query = uri.query().unwrap_or("");
+                let next_decoded = raw_query.split('&').find_map(|pair| {
                     let mut parts = pair.splitn(2, '=');
                     let key = parts.next()?;
                     let value = parts.next().unwrap_or("");
-                    Some((key.to_string(), urlencoding::decode(value).unwrap_or_else(|_| value.into()).to_string()))
-                }).collect();
-            
-            let mut context = std::collections::HashMap::new();
-            for (key, value) in &query {
-                if let Ok(n) = value.parse::<i64>() { context.insert(key.clone(), serde_json::Value::Number(n.into())); }
-                else { context.insert(key.clone(), serde_json::Value::String(value.clone())); }
-            }
-            
-            let cfg = crate::auth::auth_config();
-            context.insert("auth_identifier_field".to_string(), serde_json::Value::String(cfg.identifier_field.clone()));
-            context.insert("auth_password_field".to_string(), serde_json::Value::String(cfg.password_field.clone()));
-            
-            if let Some(auth_user) = &auth {
-                if let Some(user) = &auth_user.user {
-                    context.insert("logged_in".to_string(), serde_json::Value::Bool(true));
-                    context.insert("user_name".to_string(), serde_json::Value::String(user.name.clone()));
-                    context.insert("user_role".to_string(), serde_json::Value::String(user.role.clone()));
-                    context.insert("user_email".to_string(), serde_json::Value::String(user.email.clone()));
+                    if key == "next" { Some(urlencoding::decode(value).unwrap_or_default().into_owned()) } else { None }
+                });
+                let next_ref = next_decoded.as_deref();
+
+                if manifest_path.exists() {
+                    if let Ok(manifest_str) = std::fs::read_to_string(&manifest_path) {
+                        if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_str) {
+                            if let Some(routes) = manifest.as_object() {
+                                if let Some(route_config) = routes.get(path) {
+                                    let guard = crate::auth::PageGuard {
+                                        auth: route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false),
+                                        guest: route_config.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
+                                        roles: route_config.get("roles").and_then(|v| v.as_array())
+                                            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
+                                    };
+                                    let user = auth.as_ref().and_then(|a| a.user.clone());
+                                    if let Some(mut response) = crate::auth::check_page_guard(&guard, &user, path, next_ref) {
+                                        if expire_cookie {
+                                            if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
+                                                response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+                                            }
+                                        }
+                                        return response;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let filename = if path == "/" { "index.html".to_string() } else { format!("{}.html", page_name) };
+                let file = build_dir.join(&filename);
+
+                match std::fs::read_to_string(&file) {
+                    Ok(html) => {
+                        let query: std::collections::HashMap<String, String> = uri.query().unwrap_or("").split('&')
+                            .filter_map(|pair| {
+                                let mut parts = pair.splitn(2, '=');
+                                let key = parts.next()?;
+                                let value = parts.next().unwrap_or("");
+                                Some((key.to_string(), urlencoding::decode(value).unwrap_or_else(|_| value.into()).to_string()))
+                            }).collect();
+
+                        let mut context: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+                        for (key, value) in &query {
+                            if let Ok(n) = value.parse::<i64>() { context.insert(key.clone(), serde_json::Value::Number(n.into())); }
+                            else { context.insert(key.clone(), serde_json::Value::String(value.clone())); }
+                        }
+
+                        let cfg = crate::auth::auth_config();
+                        context.insert("auth_identifier_field".to_string(), serde_json::Value::String(cfg.identifier_field.clone()));
+                        context.insert("auth_password_field".to_string(), serde_json::Value::String(cfg.password_field.clone()));
+
+                        if let Some(auth_user) = &auth {
+                            if let Some(user) = &auth_user.user {
+                                context.insert("logged_in".to_string(), serde_json::Value::Bool(true));
+                                context.insert("user_name".to_string(), serde_json::Value::String(user.name.clone()));
+                                context.insert("user_role".to_string(), serde_json::Value::String(user.role.clone()));
+                                context.insert("user_email".to_string(), serde_json::Value::String(user.email.clone()));
+                            }
+                        }
+
+                        // ─── 3b. INJECT FLASH INTO TEMPLATE CONTEXT ────────
+                        // 🔥 FIX: makes {if flash_messages} and {{flash_*}} work at runtime
+                        if let Some(flash) = &flash_value {
+                            context.insert("flash_messages".to_string(), serde_json::json!([flash]));
+                            if let Some(obj) = flash.as_object() {
+                                for (key, value) in obj {
+                                    context.insert(format!("flash_{}", key), value.clone());
+                                }
+                                if let Some(v) = obj.get("variant") { context.insert("variant".to_string(), v.clone()); }
+                                if let Some(v) = obj.get("icon") { context.insert("icon".to_string(), v.clone()); }
+                                if let Some(v) = obj.get("title") { context.insert("title".to_string(), v.clone()); }
+                                if let Some(v) = obj.get("description") { context.insert("description".to_string(), v.clone()); }
+                                let desc_len = obj.get("description").and_then(|v| v.as_str()).map(|s| s.chars().count()).unwrap_or(0);
+                                let duration = if desc_len < 30 { "short" } else if desc_len < 80 { "medium" } else { "long" };
+                                context.insert("duration".to_string(), serde_json::Value::String(duration.to_string()));
+                            }
+                        }
+                        // ─────────────────────────────────────────────────
+
+                        if !context.contains_key("limit") { context.insert("limit".to_string(), serde_json::Value::Number(20.into())); }
+                        if !context.contains_key("page") { context.insert("page".to_string(), serde_json::Value::Number(1.into())); }
+                        if !context.contains_key("order") { context.insert("order".to_string(), serde_json::Value::String("asc".to_string())); }
+                        if let (Some(p), Some(l)) = (context.get("page").and_then(|v| v.as_i64()), context.get("limit").and_then(|v| v.as_i64())) {
+                            let offset = (p.max(1) - 1) * l.max(1);
+                            context.insert("offset".to_string(), serde_json::Value::Number(offset.into()));
+                            context.insert("prev_page".to_string(), serde_json::Value::Number((p.max(1) - 1).max(1).into()));
+                            context.insert("next_page".to_string(), serde_json::Value::Number((p + 1).into()));
+                        }
+
+                        // ─── 4. RESOLVE DATA SOURCES ───────────────────
+                        let (html_with_data, computed_vars) = crate::router::resolve_data_sources(&html, &context);
+                        for (key, value) in computed_vars { context.insert(key, value); }
+
+                        // ─── 5. DYNAMIC COMPONENT RENDERING ────────────
+                        let mut render_page = crate::state::RenderedPage {
+                            html: html_with_data,
+                            styles: Vec::new(),
+                            template_context: context.clone(),
+                            used_modules: std::collections::HashSet::new(),
+                        };
+                        for _ in 0..20 {
+                            let previous = render_page.html.clone();
+                            let current_html = render_page.html.clone();
+                            render_page.html = crate::component::render_components(&current_html, &mut render_page);
+                            if render_page.html == previous { break; }
+                        }
+
+                        // ─── 6. FINAL CONTROL FLOW ─────────────────────
+                        let mut final_html = crate::template::render_control_flow(&render_page.html, &render_page.template_context);
+
+                        // ─── 7. RUNTIME PLACEHOLDER + SCRIPT INJECTION ──
+                        let csrf_token = auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default();
+                        final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
+                        final_html = final_html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
+
+                        // 🔥 FIX (SYNC): At build time the |sync spans were hidden inside a
+                        // preserved runtime {for} loop, so wrap_html never injected the SSE
+                        // script. Now that resolve_data_sources has rendered the spans, we
+                        // inject the global SSE initializer exactly once before </body>.
+                        if final_html.contains("class=\"vlo-sync\"") || final_html.contains("data-channel=") {
+                            if !final_html.contains("__VLO_SSE__") {
+                                let sse_script = r#"<script>
+            (function(){
+            if(window.__VLO_SSE__) return;
+            window.__VLO_SSE__ = new EventSource("/__vlo_sse");
+            window.__VLO_SSE__.onmessage = function(e) {
+                try {
+                var data = JSON.parse(e.data);
+                var els = document.querySelectorAll('[data-channel="' + data.channel + '"]');
+                for (var i = 0; i < els.length; i++) {
+                    if (typeof data.value === 'object' && data.value !== null) {
+                    window.dispatchEvent(new CustomEvent('vlo:mutation'));
+                    } else {
+                    els[i].innerHTML = data.value;
+                    els[i].classList.add('vlo-sync-updated');
+                    (function(el){ setTimeout(function(){ el.classList.remove('vlo-sync-updated'); }, 600); })(els[i]);
+                    }
+                }
+                } catch(err) { console.error('VLO SSE Error:', err); }
+            };
+            window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error:', e); };
+            })();
+            </script>"#;
+                    if let Some(i) = final_html.rfind("</body>") {
+                        final_html.insert_str(i, &format!("{}\n", sse_script));
+                    }
                 }
             }
-            
-            if !context.contains_key("limit") { context.insert("limit".to_string(), serde_json::Value::Number(20.into())); }
-            if !context.contains_key("page") { context.insert("page".to_string(), serde_json::Value::Number(1.into())); }
-            if !context.contains_key("order") { context.insert("order".to_string(), serde_json::Value::String("asc".to_string())); }
-            if let (Some(p), Some(l)) = (context.get("page").and_then(|v| v.as_i64()), context.get("limit").and_then(|v| v.as_i64())) {
-                let offset = (p.max(1) - 1) * l.max(1);
-                context.insert("offset".to_string(), serde_json::Value::Number(offset.into()));
-                context.insert("prev_page".to_string(), serde_json::Value::Number((p.max(1) - 1).max(1).into()));
-                context.insert("next_page".to_string(), serde_json::Value::Number((p + 1).into()));
-            }
 
-            // ─── 4. RESOLVE DATA SOURCES ───────────────────
-            let (html_with_data, computed_vars) = crate::router::resolve_data_sources(&html, &context);
-            let mut context = context;
-            for (key, value) in computed_vars { context.insert(key, value); }
-
-            // ─── 5. 🔥 DYNAMIC COMPONENT RENDERING ─────────
-            let mut render_page = crate::state::RenderedPage {
-                html: html_with_data,
-                styles: Vec::new(),
-                template_context: context.clone(),
-                used_modules: std::collections::HashSet::new(),
-            };
-
-            for _ in 0..20 {
-                let previous = render_page.html.clone();
-                let current_html = render_page.html.clone(); // Clone to satisfy borrow checker
-                render_page.html = crate::component::render_components(&current_html, &mut render_page);
-                if render_page.html == previous { break; }
-            }
-
-
-            // ─── 6. FINAL CONTROL FLOW & RUNTIME INJECTION ──────────────
-            // The HTML is ALREADY wrapped with styles/scripts during `vlo build`.
-            // Calling wrap_html again causes double-injection. We only resolve control flow here.
-            let mut final_html = crate::template::render_control_flow(&render_page.html, &render_page.template_context);
-            
-            let csrf_token = auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default();
-            final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
-            final_html = final_html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
-            
             let mut response = (axum::http::StatusCode::OK, axum::response::Html(final_html)).into_response();
             if expire_cookie {
                 if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
@@ -906,25 +959,40 @@ pub fn js_string_literal(value: &str) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+// ─── STATIC REGEXES (Compiled once at startup) ───────────────────────
+static RE_DEL: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-delete\s*=\s*["']([^"']+)["']([^>]*?)>"#).unwrap());
+static RE_PUT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-put\s*=\s*["']([^"']+)["']([^>]*?)>"#).unwrap());
+static RE_POST: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-post\s*=\s*["']([^"']+)["']([^>]*?)>"#).unwrap());
+static RE_STRIP: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"(?is)\s+v-(?:put|delete|post|prompt|param|confirm)\s*=\s*["'][^"']*["']"#).unwrap());
+
 pub fn strip_vlo_directive_attrs(attrs: &str) -> String {
-    let re = regex::Regex::new(
-        r#"(?is)\s+v-(?:put|delete|prompt|param|confirm)\s*=\s*["'][^"']*["']"#,
-    )
-    .unwrap();
-    re.replace_all(attrs, "").into_owned()
+    RE_STRIP.replace_all(attrs, "").into_owned()
 }
 
 pub fn resolve_directives(source: &str) -> String {
     let mut result = source.to_string();
 
+    // Zero-allocation attribute value parser
+    fn attr_val<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
+        let rest = attrs[attrs.find(name)? + name.len()..].trim_start().strip_prefix('=')?.trim_start();
+        let q = rest.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+        let rest = &rest[1..];
+        rest.find(q).map(|e| &rest[..e])
+    }
+
+    // Shared JS generator for POST/PUT forms
+    fn form_submit_js(method: &str, url_js: &str) -> String {
+        format!(
+            "return(function(e){{e.preventDefault();var f=e.currentTarget;if(!f.checkValidity()){{f.reportValidity();return false}}var mp=f.enctype==='multipart/form-data';var h={{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}};if(!mp)h['Content-Type']='application/x-www-form-urlencoded';var bd=mp?new FormData(f):new URLSearchParams(new FormData(f));var un=new URLSearchParams(window.location.search).get('next');if(un&&!bd.has('next')){{bd.append('next',un)}}fetch({url},{{credentials:'same-origin',method:'{method}',headers:h,body:bd}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}if(d.redirect){{window.location.href=d.redirect;return;}}f.reset();window.dispatchEvent(new CustomEvent('vlo:mutation'));var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active')}}).catch(function(e){{console.error('[VLO {method}]',e);alert(e.message||'Request failed')}});return false}})(event)",
+            url = url_js,
+            method = method
+        )
+    }
+
     // ============================================================
     // v-delete
     // ============================================================
-    let re_del = regex::Regex::new(
-        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-delete\s*=\s*["']([^"']+)["']([^>]*?)>"#,
-    ).unwrap();
-
-    result = re_del.replace_all(&result, |caps: &regex::Captures| {
+    result = RE_DEL.replace_all(&result, |caps: &regex::Captures| {
         let tag = caps.get(1).unwrap().as_str();
         let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
@@ -932,9 +1000,7 @@ pub fn resolve_directives(source: &str) -> String {
         let url = url_raw.replace("|ajax", "");
 
         let all_attrs = format!("{} {}", attrs_before, attrs_after);
-        let confirm_re = regex::Regex::new(r#"(?is)v-confirm\s*=\s*["']([^"']*)["']"#).unwrap();
-        let confirm_js = if let Some(c) = confirm_re.captures(&all_attrs) {
-            let msg = c.get(1).map(|m| m.as_str()).unwrap_or("");
+        let confirm_js = if let Some(msg) = attr_val(&all_attrs, "v-confirm") {
             format!("confirm({})", js_string_literal(msg))
         } else { "true".to_string() };
 
@@ -955,11 +1021,7 @@ pub fn resolve_directives(source: &str) -> String {
     // ============================================================
     // v-put
     // ============================================================
-    let re_put = regex::Regex::new(
-        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-put\s*=\s*["']([^"']+)["']([^>]*?)>"#,
-    ).unwrap();
-
-    result = re_put.replace_all(&result, |caps: &regex::Captures| {
+    result = RE_PUT.replace_all(&result, |caps: &regex::Captures| {
         let tag = caps.get(1).unwrap().as_str();
         let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
@@ -972,18 +1034,13 @@ pub fn resolve_directives(source: &str) -> String {
         let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
 
         if tag.eq_ignore_ascii_case("form") {
-            let onsubmit = format!(
-                "return(function(e){{e.preventDefault();var f=e.currentTarget;if(!f.checkValidity()){{f.reportValidity();return false}}var mp=f.enctype==='multipart/form-data';var h={{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}};if(!mp)h['Content-Type']='application/x-www-form-urlencoded';fetch({url},{{credentials:'same-origin',method:'PUT',headers:h,body:mp?new FormData(f):new URLSearchParams(new FormData(f))}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}f.reset();window.dispatchEvent(new CustomEvent('vlo:mutation'));var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active')}}).catch(function(e){{console.error('[VLO PUT]',e);alert(e.message||'Request failed')}});return false}})(event)",
-                url = url_js
-            );
+            let onsubmit = form_submit_js("PUT", &url_js);
             let onsubmit_attr = escape_html_attribute(&onsubmit);
             format!("<{} {} onsubmit=\"{}\">", tag, all_clean, onsubmit_attr)
         } else {
             let all_attrs = format!("{} {}", attrs_before, attrs_after);
-            let param_re = regex::Regex::new(r#"(?is)v-param\s*=\s*["']([^"']+)["']"#).unwrap();
-            let param = param_re.captures(&all_attrs).and_then(|c| c.get(1)).map(|m| m.as_str()).unwrap_or("value");
-            let prompt_re = regex::Regex::new(r#"(?is)v-prompt\s*=\s*["']([^"']*)["']"#).unwrap();
-            let prompt = prompt_re.captures(&all_attrs).and_then(|c| c.get(1)).map(|m| m.as_str()).unwrap_or("Enter new value:");
+            let param = attr_val(&all_attrs, "v-param").unwrap_or("value");
+            let prompt = attr_val(&all_attrs, "v-prompt").unwrap_or("Enter new value:");
             let prompt_js = js_string_literal(prompt);
             let param_js = js_string_literal(param);
 
@@ -1001,11 +1058,7 @@ pub fn resolve_directives(source: &str) -> String {
     // ============================================================
     // v-post
     // ============================================================
-    let re_post = regex::Regex::new(
-        r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-post\s*=\s*["']([^"']+)["']([^>]*?)>"#,
-    ).unwrap();
-
-    result = re_post.replace_all(&result, |caps: &regex::Captures| {
+    result = RE_POST.replace_all(&result, |caps: &regex::Captures| {
         let tag = caps.get(1).unwrap().as_str();
         let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
@@ -1018,12 +1071,9 @@ pub fn resolve_directives(source: &str) -> String {
         let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
 
         if tag.eq_ignore_ascii_case("form") {
-            let onsubmit = format!(
-                "return(function(e){{e.preventDefault();var f=e.currentTarget;if(!f.checkValidity()){{f.reportValidity();return false}}var mp=f.enctype==='multipart/form-data';var h={{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}};if(!mp)h['Content-Type']='application/x-www-form-urlencoded';var bd=mp?new FormData(f):new URLSearchParams(new FormData(f));var un=new URLSearchParams(window.location.search).get('next');if(un&&!bd.has('next')){{bd.append('next',un)}}fetch({url},{{credentials:'same-origin',method:'POST',headers:h,body:bd}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}if(d.redirect){{window.location.href=d.redirect;return;}}f.reset();window.dispatchEvent(new CustomEvent('vlo:mutation'));var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active')}}).catch(function(e){{console.error('[VLO POST]',e);alert(e.message||'Request failed')}});return false}})(event)",
-                url = url_js
-            );
+            let onsubmit = form_submit_js("POST", &url_js);
             let onsubmit_attr = escape_html_attribute(&onsubmit);
-            format!("<{} {} onsubmit=\"{}\">", tag, format!("{} {}", clean_before.trim(), clean_after.trim()).trim(), onsubmit_attr)
+            format!("<{} {} onsubmit=\"{}\">", tag, all_clean, onsubmit_attr)
         } else {
             format!("<{} {}>", tag, all_clean)
         }
