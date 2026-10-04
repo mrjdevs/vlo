@@ -513,6 +513,8 @@ pub async fn execute_api_sql(
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let mut sql = sql_template.to_string();
+    
+    // 1. Replace known parameters from the payload
     for (key, value) in params {
         let placeholder = format!("{{{{{}}}}}", key);
         let replacement = match value {
@@ -524,12 +526,18 @@ pub async fn execute_api_sql(
         };
         sql = sql.replace(&placeholder, &replacement);
     }
-    
+
+    // 🔥 2. FIX: Handle partial JSON updates (e.g., v-prompt sending only {"stock": 99})
+    // Any remaining {{column}} placeholders are replaced with the column name itself.
+    // This turns `SET title = {{title}}` into `SET title = title` (preserving the DB value).
+    let re = regex::Regex::new(r"\{\{([a-zA-Z0-9_]+)\}\}").unwrap();
+    sql = re.replace_all(&sql, "$1").into_owned();
+
     crate::vlo_debug!("Executing SQL = {}", sql);
 
-    // One line replaces 30 lines of database-specific match blocks!
+    // Execute the query
     let rows_json = pool.fetch_all_json(&sql).await.map_err(|e| format!("SQL error: {}", e))?;
-
+    
     Ok(serde_json::json!({
         "success": true,
         "data": rows_json,
