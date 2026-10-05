@@ -30,292 +30,124 @@
 
         <!-- CONTENT -->
         <main class="dashboard-content">
-        
-
- <div data-source="/api/dash/get_dashboard_stats">
-    {for stat in get_dashboard_stats}
-    <div class="stats-row">
-        <div class="stat-card">
-            <div class="stat-icon">📦</div>
-            <div class="stat-content">
-                <div class="stat-value">{{stat.total_products}}</div>
-                <div class="stat-label">Total Products</div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">💰</div>
-            <div class="stat-content">
-                <div class="stat-value">${{stat.total_revenue|number:2}}</div>
-                <div class="stat-label">Total Revenue</div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">📊</div>
-            <div class="stat-content">
-                <div class="stat-value">${{stat.avg_price}}</div>
-                <div class="stat-label">Avg Price</div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">🏷️</div>
-            <div class="stat-content">
-                <div class="stat-value">{{stat.total_categories}}</div>
-                <div class="stat-label">Categories</div>
-            </div>
-        </div>
-    </div>
-    {/for}
-</div>
            <!-- ═══ STATS SUMMARY ═══ -->
-<div data-source="/api/dash/get_dashboard_stats">
-    {for stat in dashboard_stats}
-    <div class="stats-row">
-        <div class="stat-card">
-            <div class="stat-icon">📦</div>
-            <div class="stat-content">
-                <div class="stat-value">{{stat.total_products}}</div>
-                <div class="stat-label">Total Products</div>
+            <div data-source="/api/dash/get_dashboard_stats">
+                {for stat in dashboard_stats}
+                <div class="stats-row">
+                    <div class="stat-card">
+                        <div class="stat-icon">📦</div>
+                        <div class="stat-content">
+                            <div class="stat-value">{{stat.total_products}}</div>
+                            <div class="stat-label">Total Products</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-content">
+                            <div class="stat-value">${{stat.total_revenue}}</div>
+                            <div class="stat-label">Total Revenue</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-content">
+                            <div class="stat-value">${{stat.avg_price}}</div>
+                            <div class="stat-label">Avg Price</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🏷️</div>
+                        <div class="stat-content">
+                            <div class="stat-value">{{stat.total_categories}}</div>
+                            <div class="stat-label">Categories</div>
+                        </div>
+                    </div>
+                </div>
+                {/for}
             </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">💰</div>
-            <div class="stat-content">
-                <div class="stat-value">${{stat.total_revenue}}</div>
-                <div class="stat-label">Total Revenue</div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">📊</div>
-            <div class="stat-content">
-                <div class="stat-value">${{stat.avg_price}}</div>
-                <div class="stat-label">Avg Price</div>
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-icon">🏷️</div>
-            <div class="stat-content">
-                <div class="stat-value">{{stat.total_categories}}</div>
-                <div class="stat-label">Categories</div>
-            </div>
-        </div>
-    </div>
-    {/for}
-</div>
-
-            <!-- ═══ PRIMARY CHARTS (2-column grid) ═══ -->
+            <!-- ═══ PRIMARY CHARTS: TRENDS (2-column grid) ═══ -->
             <div class="charts-grid charts-primary">
-            <HorizontalBarChart
-    source="/api/dash/get_category_stats"
-    title="Revenue by Category"
-    label_column="category"
-    value_column="total_revenue"
-    limit="8"
-    color="#00f5ff"
-/>
-
-<ProgressChart
-    source="/api/dash/get_category_stats"
-    title="Category Performance"
-    label_column="category"
-    value_column="product_count"
-    limit="8"
-    color="#00ff88"
-/>
-<LollipopChart
-    source="/api/dash/get_category_stats"
-    title="Products by Category"
-    label_column="category"
-    value_column="product_count"
-    limit="8"
-    color="#ffaa00"
-/>
-<BarChart
-    source="/api/dash/get_category_stats"
-    title="Category Ranking"
-    label_column="category"
-    value_column="total_revenue"
-    limit="8"
-    color="#00f5ff"
-/>
-
-<ProgressChart
-    source="/api/dash/get_category_stats"
-    title="Category Performance"
-    label_column="category"
-    value_column="product_count"
-    limit="8"
-    color="#00ff88"
-/>
-<LollipopChart
-    source="/api/dash/get_category_stats"
-    title="Top Categories"
-    label_column="category"
-    value_column="product_count"
-    limit="8"
-    color="#ffaa00"
-/>
-<CumulativeChart
-    source="/api/dash/get_sales_stats"
-    title="Cumulative Revenue"
-    label_column="date"
-    value_column="price"
-    limit="30"
-    color="#00f5ff"
-/>
-<LineChart 
-    source="/api/dash/get_monthly_products"
-    title="Smoothed Monthly Trend"
-    label_column="month"
-    value_column="count"
-    computed="running_avg" 
-    color="#a78bfa"
-/>
-<PieChart 
-    source="/api/dash/get_category_stats"
-    title="Revenue Share-Pie"
-    label_column="category"
-    value_column="product_count"
-    computed="sum"
-/>
-<LineChart 
-    source="/api/dash/get_monthly_products"
-    title="Growth Index (Base 100)"
-    label_column="month"
-    value_column="count"
-    computed="index"
-/>
-<LineChart
-    source="/api/dash/get_sales_stats"
-    title="Revenue Trend"
-    label_column="date"
-    value_column="price"
-    limit="12"
-    computed="running_avg"
-    color="#00f5ff"
-/>
-
-<LineChart
-    source="/api/dash/get_sales_stats"
-    title="Revenue Growth Index"
-    label_column="date"
-    value_column="price"
-    limit="12"
-    computed="index"
-    color="#ffaa00"
-/>
-<LineChart
-    source="/api/dash/get_sales_stats"
-    title="Revenue Trend---"
-    label_column="created_at"
-    value_column="price"
-    limit="6"
-    computed="running_avg"
-    color="#00f5ff"
-/>
-<LineChart
-    source="/api/dash/get_sales_stats"
-    title="Revenue Trend-xxx"
-    date_column="created_at"
-    value_column="price"
-    period="month"
-    aggregation="sum"
-    limit="12"
-    computed="running_avg"
-    color="#00f5ff"
-/>
-<PieChart
-    source="/api/get_products"
-    title="Revenue by Category-00"
-    label_column="created_at|year"
-    value_column="price"
-    aggregation="count"
-    group_by="category"
-/>
-<LineChart
-  source="/api/dash/get_category_stats"
-  title="Revenue by Month"
-  label_column="created_at"
-  value_column="total_revenue"
-/>
------------------------------------------------------------------------------------------------
-<!-- Monthly trend -->
-<LineChart source="/api/get_products" title="Monthly Sales" 
-    date_column="created_at|month" value_column="price" limit="12" />
-
-<!-- Quarterly revenue -->
-<BarChart source="/api/get_products" title="Quarterly Revenue" 
-    date_column="created_at|quarter" value_column="price" limit="8" />
-
-<!-- Weekly activity -->
-<LineChart source="/api/get_products" title="Weekly Activity" 
-    date_column="created_at|week" value_column="stock" limit="52" />
-
-<!-- Yearly overview -->
-<BarChart source="/api/get_products" title="Yearly Overview" 
-    date_column="created_at|year" value_column="price" limit="10" />
-
+                
+                <!-- 1. Monthly Product Additions (Pre-aggregated Time Series) -->
                 <LineChart 
-                    source="/api/dash/get_category_stats"
-                    title="Revenue by Category.."
-                    label_column="category"
-                    value_column="total_revenue"
-                    limit="8"
+                    source="/api/dash/get_monthly_products"
+                    title="Monthly Product Additions"
+                    label_column="month"
+                    value_column="count"
+                    computed="running_avg"
+                    color="#a78bfa"
+                />
+
+                <!-- 2. Cumulative Revenue Over Time -->
+                <LineChart 
+                    source="/api/dash/get_sales_stats"
+                    title="Cumulative Revenue Growth"
+                    label_column="date"
+                    value_column="price"
+                    computed="cumulative"
                     color="#00f5ff"
                 />
 
-                <BarChart 
+            </div>
+
+            <!-- ═══ SECONDARY CHARTS: DISTRIBUTIONS (3-column grid) ═══ -->
+            <div class="charts-grid charts-secondary">
+                
+                <!-- 3. NEW: Revenue Share by Category (Pie) -->
+                <PieChart 
+                    source="/api/dash/get_category_stats"
+                    title="Revenue Share by Category"
+                    label_column="category"
+                    value_column="total_revenue"
+                    computed="share"
+                    color="#00ff88"
+                />
+
+                <!-- 4. NEW: Price Range Distribution (Pie) -->
+                <PieChart 
+                    source="/api/dash/get_price_distribution"
+                    title="Price Range Distribution"
+                    label_column="price_range"
+                    value_column="count"
+                    computed="share"
+                    color="#ff6680"
+                />
+
+                <!-- 5. NEW: Inventory Health / Stock Status (Pie) -->
+                <PieChart 
+                    source="/api/dash/get_stock_status"
+                    title="Inventory Health"
+                    label_column="status"
+                    value_column="count"
+                    computed="share"
+                    color="#ffaa00"
+                />
+
+            </div>
+
+            <!-- ═══ DETAILED CHARTS: BREAKDOWNS (Full Width) ═══ -->
+            <div class="charts-grid charts-detailed">
+                
+                <!-- 6. Products per Category (Horizontal Bar) -->
+                <HorizontalBarChart 
                     source="/api/dash/get_category_stats"
                     title="Products per Category"
                     label_column="category"
                     value_column="product_count"
-                    limit="32"
-                    color="#00ff88"
-                />
-            </div>
-
-            <!-- ═══ SECONDARY CHARTS (3-column grid) ═══ -->
-            <div class="charts-grid charts-secondary">
-                <BarChart 
-                    source="/api/dash/get_stock_status"
-                    title="Stock Status"
-                    label_column="status"
-                    value_column="count"
-                    limit="5"
-                    color="#ffaa00"
+                    color="#00f5ff"
                 />
 
-                <BarChart 
-                    source="/api/dash/get_price_distribution"
-                    title="Price Distribution"
-                    label_column="price_range"
-                    value_column="count"
-                    limit="6"
-                    color="#ff6680"
-                />
-
-                <LineChart 
-                    source="/api/dash/get_monthly_products"
-                    title="Monthly Additions"
-                    label_column="month"
-                    value_column="count"
-                    limit="12"
-                    color="#a78bfa"
-                />
-            </div>
-
-            <!-- ═══ DETAILED CHART (full width) ═══ -->
-            <div class="charts-grid charts-detailed">
-                <BarChart 
-                    source="/api/dash/get_products_chart"
-                    title="Top 10 Products by Stock"
-                    group_by="title"
+                <!-- 7. Stock Volume by Category (Lollipop) -->
+                <LollipopChart 
+                    source="/api/dash/get_products_analytics"
+                    title="Stock Volume by Category"
+                    label_column="category"
                     value_column="stock"
-                    label_column="title"
-                    limit="10"
+                    computed="percentage"
                     color="#f472b6"
                 />
-            </div>
 
+            </div>
             <!-- OVERVIEW -->
             <section class="section">
                 <div class="section-label">01 — OVERVIEW</div>

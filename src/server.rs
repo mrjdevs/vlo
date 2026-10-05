@@ -19,7 +19,7 @@ use std::{
     fs,
     path::Path,
     process::Command,
-    sync::{Arc, Mutex, LazyLock},
+    sync::{Arc, Mutex, LazyLock, OnceLock},
     time::Instant,
 };
 use tokio::sync::broadcast;
@@ -28,6 +28,48 @@ use axum::middleware::{self, Next};
 use axum::extract::Request;
 use axum::response::Response;
 use axum::http::header::{CACHE_CONTROL, HeaderValue};
+
+
+// ─── PRODUCTION CACHE: Eliminates disk I/O on every request ───
+struct BuildCache {
+    manifest: serde_json::Value,
+    pages: HashMap<String, Arc<str>>,
+}
+
+static BUILD_CACHE: OnceLock<BuildCache> = OnceLock::new();
+
+fn ensure_build_cache(build_dir: &Path) {
+    BUILD_CACHE.get_or_init(|| {
+        let manifest_path = build_dir.join("routes.json");
+        let manifest = if manifest_path.exists() {
+            std::fs::read_to_string(&manifest_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+        } else {
+            serde_json::Value::Object(serde_json::Map::new())
+        };
+
+        let mut pages = HashMap::new();
+        if let Ok(entries) = std::fs::read_dir(build_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("html") {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let name = path.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("index")
+                            .to_string();
+                        let name = if name == "index" { "/".to_string() } else { format!("/{}", name) };
+                        pages.insert(name, Arc::from(content));
+                    }
+                }
+            }
+        }
+        
+        BuildCache { manifest, pages }
+    });
+}
 
 #[derive(Subcommand)]
 pub enum Commands {
@@ -151,9 +193,117 @@ async fn session_cleanup_task() {
 }
 
 
+// ─── HELPER 1: Common Routes (No layers yet) ─────────────────────────
+fn build_common_routes() -> Router {
+    Router::new()
+        .route("/uploads/*path", get(serve_file))
+        .route("/healthz", get(healthz_handler))
+        .route("/api/files/upload", axum::routing::post(upload_file))
+        .route("/api/files/:id/download", get(download_file))
+        .route("/api/files/:id", get(get_file).delete(delete_file))
+        .route(
+            "/api",
+            get(api_handler_root)
+                .post(api_handler_root)
+                .put(api_handler_root)
+                .patch(api_handler_root)
+                .delete(api_handler_root),
+        )
+        .route(
+            "/api/:resource",
+            get(api_handler_path)
+                .post(api_handler_path)
+                .put(api_handler_path)
+                .patch(api_handler_path)
+                .delete(api_handler_path),
+        )
+        .route(
+            "/api/:resource/:id",
+            get(api_handler_id)
+                .post(api_handler_id)
+                .put(api_handler_id)
+                .patch(api_handler_id)
+                .delete(api_handler_id),
+        )
+        .route("/api/auth/login", axum::routing::post(auth::login_handler))
+        .route(
+            "/api/auth/logout",
+            axum::routing::post(auth::logout_handler).get(auth::logout_handler),
+        )
+        .route("/api/auth/me", axum::routing::get(auth::me_handler))
+        .route("/__vlo_sse", get(crate::router::sse_handler))
+        .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
+        .route("/api/broadcast", axum::routing::post(broadcast_handler))
+}
+
+// ─── HELPER 2: Apply Common Middleware Layers ────────────────────────
+fn apply_common_layers(app: Router) -> Router {
+    app.layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
+        .layer(CompressionLayer::new())
+        .layer(middleware::from_fn(cache_middleware))
+        .layer(middleware::from_fn(request_id_middleware))
+        .layer(axum::middleware::from_fn(auth::csrf_middleware))
+        .layer(axum::middleware::from_fn(auth::api_auth_middleware))
+        .layer(axum::middleware::from_fn(auth::session_middleware))
+}
+
+// ─── HELPER 3: Common Server Startup Logic ───────────────────────────
+async fn run_server(
+    mode: state::AppMode,
+    app: Router,
+    host: Option<&str>,
+    port: Option<u16>,
+    server_type: &str,
+) -> Result<(), String> {
+    state::set_app_mode(mode);
+    crate::router::init_live_broadcast();
+
+    let host_str = host
+        .map(str::to_string)
+        .or_else(|| std::env::var("VLO_HOST").ok())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    let port_num = port
+        .or_else(|| {
+            std::env::var("VLO_PORT")
+                .ok()
+                .and_then(|value| value.parse::<u16>().ok())
+        })
+        .unwrap_or(3000);
+
+    let addr = format!("{}:{}", host_str, port_num);
+
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            return Err(format!(
+                "Failed to start VLO {} server.\n   Address: {}\n   Error: {}\n   Try another port with: vlo {} --port 3001",
+                server_type, addr, error, server_type
+            ));
+        }
+    };
+
+    println!("⚡ VLO {} server: http://{}", server_type, addr);
+    
+    // Spawn background cleanup tasks
+    tokio::spawn(rate_limit_cleanup_task());
+    tokio::spawn(session_cleanup_task());
+    
+    if let Err(error) = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+    {
+        return Err(format!(
+            "VLO {} server stopped unexpectedly.\n   Error: {}",
+            server_type, error
+        ));
+    }
+
+    Ok(())
+}
+
+// ─── DEV SERVER ──────────────────────────────────────────────────────
 pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
-    state::set_app_mode(state::AppMode::Development);
-    crate::router::init_live_broadcast(); // 🔥 ADD THIS LINE
     let root = get_project_root();
     let pages_path = root.join("pages");
     let public_path = root.join("public");
@@ -167,167 +317,37 @@ pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
         let _ = watch_files(pages_path, public_path, tx_watcher, last_reload);
     });
 
-    let app = Router::new()
+    let app = build_common_routes()
         .route("/", get(home_handler))
         .route("/:path", get(page_handler))
-        .route("/uploads/*path", get(serve_file))
-        .route("/healthz", get(healthz_handler))
-        .route("/api/files/upload", axum::routing::post(upload_file))
-        .route("/api/files/:id/download", get(download_file))
-        .route("/api/files/:id", get(get_file).delete(delete_file))
-        .route("/api", get(api_handler_root).post(api_handler_root).put(api_handler_root).patch(api_handler_root).delete(api_handler_root))
-        .route("/api/:resource", get(api_handler_path).post(api_handler_path).put(api_handler_path).patch(api_handler_path).delete(api_handler_path))
-        .route("/api/:resource/:id", get(api_handler_id).post(api_handler_id).put(api_handler_id).patch(api_handler_id).delete(api_handler_id))
-        .route("/api/auth/login", axum::routing::post(auth::login_handler))
-        .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
-        .route("/api/auth/me", axum::routing::get(auth::me_handler))
-        .route("/__vlo_sse", get(crate::router::sse_handler))
-        .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
-        .route("/api/broadcast", axum::routing::post(broadcast_handler))
         .route("/__vlo_hmr", get(move || hmr_handler(tx)))
         .nest_service("/static", ServeDir::new(public_path_service))
-        
-        // 🔥 FIX: Fallback MUST be above layers to receive middleware extensions
-        .fallback(not_found_handler)
-        
-        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
-        .layer(CompressionLayer::new())
-        .layer(middleware::from_fn(cache_middleware))
-        .layer(middleware::from_fn(request_id_middleware))
-        .layer(axum::middleware::from_fn(auth::csrf_middleware))
-        .layer(axum::middleware::from_fn(auth::api_auth_middleware))
-        .layer(axum::middleware::from_fn(auth::session_middleware));
+        .fallback(not_found_handler);
 
-    let host_str = host
-        .map(str::to_string)
-        .or_else(|| std::env::var("VLO_HOST").ok())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let app = apply_common_layers(app);
 
-    let port_num = port
-        .or_else(|| {
-            std::env::var("VLO_PORT")
-                .ok()
-                .and_then(|value| value.parse::<u16>().ok())
-        })
-        .unwrap_or(3000);
-
-    let addr = format!("{}:{}", host_str, port_num);
-
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(listener) => listener,
-        Err(error) => {
-            return Err(format!(
-                "Failed to start VLO dev server.\n   Address: {}\n   Error: {}\n   Try another port with: vlo dev --port 3001",
-                addr,
-                error
-            ));
-        }
-    };
-
-    println!("⚡ VLO dev server: http://{}", addr);
-    // Spawn background cleanup task
-    tokio::spawn(rate_limit_cleanup_task());
-    tokio::spawn(session_cleanup_task()); // ← ADD THIS
-    if let Err(error) = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-    {
-        return Err(format!(
-            "VLO dev server stopped unexpectedly.\n   Error: {}",
-            error
-        ));
-    }
-
-    Ok(())
+    run_server(state::AppMode::Development, app, host, port, "dev").await
 }
 
+// ─── PRODUCTION SERVER ───────────────────────────────────────────────
 pub async fn serve(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
-    state::set_app_mode(state::AppMode::Production);
-    crate::router::init_live_broadcast(); // 🔥 ADD THIS LINE
     let root = get_project_root();
     let build_dir = root.join(".vlo").join("build");
     let static_dir = build_dir.join("static");
 
     if !build_dir.exists() {
-        return Err(
-            "Production build not found.\n   Run `vlo build` first.".to_string()
-        );
+        return Err("Production build not found.\n   Run `vlo build` first.".to_string());
     }
 
-    let app = Router::new()
-        .route("/healthz", get(healthz_handler))
-        .route("/api/files/upload", axum::routing::post(upload_file))
-        .route("/api/files/:id/download", get(download_file))
-        .route("/api/files/:id", get(get_file).delete(delete_file))
-        .route("/api", get(api_handler_root).post(api_handler_root).put(api_handler_root).patch(api_handler_root).delete(api_handler_root))
-        .route("/api/:resource", get(api_handler_path).post(api_handler_path).put(api_handler_path).patch(api_handler_path).delete(api_handler_path))
-        .route("/api/:resource/:id", get(api_handler_id).post(api_handler_id).put(api_handler_id).patch(api_handler_id).delete(api_handler_id))
-        .route("/api/auth/login", axum::routing::post(auth::login_handler))
-        .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
-        .route("/api/auth/me", axum::routing::get(auth::me_handler))
-        .route("/__vlo_sse", get(crate::router::sse_handler))
-        .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
-        .route("/api/broadcast", axum::routing::post(broadcast_handler))
-        .route("/uploads/*path", get(serve_file))
+    let app = build_common_routes()
         .nest_service("/static", ServeDir::new(static_dir))
-        
-        // 🔥 FIX: Fallback MUST be above layers to receive middleware extensions
         .fallback(move |uri: axum::http::Uri, req: Request| async move {
             serve_build_page(build_dir.clone(), uri, req).await
-        })
-        
-        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
-        .layer(CompressionLayer::new())
-        .layer(middleware::from_fn(cache_middleware))
-        .layer(middleware::from_fn(request_id_middleware))
-        .layer(axum::middleware::from_fn(auth::csrf_middleware))
-        .layer(axum::middleware::from_fn(auth::api_auth_middleware))
-        .layer(axum::middleware::from_fn(auth::session_middleware));
+        });
 
-    let host_str = host
-        .map(str::to_string)
-        .or_else(|| std::env::var("VLO_HOST").ok())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
+    let app = apply_common_layers(app);
 
-    let port_num = port
-        .or_else(|| {
-            std::env::var("VLO_PORT")
-                .ok()
-                .and_then(|value| value.parse::<u16>().ok())
-        })
-        .unwrap_or(3000);
-
-    let addr = format!("{}:{}", host_str, port_num);
-
-    let listener = match tokio::net::TcpListener::bind(&addr).await {
-        Ok(listener) => listener,
-        Err(error) => {
-            return Err(format!(
-                "Failed to start VLO production server.\n\
-                 Address: {}\n\
-                 Error: {}\n\
-                 Try another port with: vlo serve --port 3001",
-                addr, error
-            ));
-        }
-    };
-
-    println!("⚡ VLO production server: http://{}", addr);
-    // Spawn background cleanup task
-    tokio::spawn(rate_limit_cleanup_task());
-    tokio::spawn(session_cleanup_task()); // ← ADD THIS
-    
-    if let Err(error) = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-    {
-        return Err(format!(
-            "VLO production server stopped unexpectedly.\n   Error: {}",
-            error
-        ));
-    }
-
-    Ok(())
+    run_server(state::AppMode::Production, app, host, port, "production").await
 }
 
 pub async fn cgi() -> Result<(), String> {
@@ -440,226 +460,217 @@ async fn serve_build_page(
     build_dir: std::path::PathBuf,
     uri: axum::http::Uri,
     req: Request,
-            ) -> impl IntoResponse {
-                let path = uri.path();
-                let page_name = if path == "/" { "index" } else { path.trim_start_matches('/') };
+) -> impl IntoResponse {
+    // 🔥 FIX: Load manifest and pages into memory ONCE. 
+    // Subsequent requests have ZERO disk I/O for file reads.
+    ensure_build_cache(&build_dir);
+    let cache = BUILD_CACHE.get().unwrap();
 
-                // ─── 1. RESOLVE AUTH ───────────────────────────────────
-                let mut auth = req.extensions().get::<crate::auth::AuthUser>().cloned();
-                if auth.is_none() || auth.as_ref().map_or(true, |a| a.user.is_none()) {
-                    let cookie_header = req.headers().get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok());
-                    let cookie_name = crate::auth::auth_config().cookie_name.clone();
-                    if let Some(header) = cookie_header {
-                        if let Some(token) = crate::auth::parse_cookie_header(header, &cookie_name) {
-                            let user = crate::auth::get_user_from_session(&token).await;
-                            if user.is_some() {
-                                auth = Some(crate::auth::AuthUser {
-                                    user,
-                                    csrf_token: Some(crate::auth::compute_csrf_token(&token)),
-                                    session_token: Some(token),
-                                });
-                            }
-                        }
-                    }
-                }
+    let path = uri.path();
 
-                // ─── 2. EXTRACT FLASH EARLY (keep the decoded Value for context) ───
-                let flash_encoded = req.headers().get("cookie")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|h| crate::auth::parse_cookie_header(h, crate::auth::FLASH_COOKIE));
-
-                let mut flash_value: Option<serde_json::Value> = None;
-                let mut flash_html = String::new();
-                let mut expire_cookie = false;
-
-                if let Some(encoded) = &flash_encoded {
-                    if let Some(flash) = crate::auth::decode_flash(encoded) {
-                        let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
-                        let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
-                        let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                        let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                        let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
-                        flash_html = format!(
-                            r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div><style>@keyframes vloFlashIn{{from{{opacity:0;transform:translateX(40px)}}to{{opacity:1;transform:translateX(0)}}}}</style>"#,
-                            border_color, icon, title, description
-                        );
-                        flash_value = Some(flash);
-                        expire_cookie = true;
-                    }
-                }
-
-                // ─── 3. CHECK AUTH GUARD ───────────────────────────────
-                let manifest_path = build_dir.join("routes.json");
-                let raw_query = uri.query().unwrap_or("");
-                let next_decoded = raw_query.split('&').find_map(|pair| {
-                    let mut parts = pair.splitn(2, '=');
-                    let key = parts.next()?;
-                    let value = parts.next().unwrap_or("");
-                    if key == "next" { Some(urlencoding::decode(value).unwrap_or_default().into_owned()) } else { None }
-                });
-                let next_ref = next_decoded.as_deref();
-
-                if manifest_path.exists() {
-                    if let Ok(manifest_str) = std::fs::read_to_string(&manifest_path) {
-                        if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_str) {
-                            if let Some(routes) = manifest.as_object() {
-                                if let Some(route_config) = routes.get(path) {
-                                    let guard = crate::auth::PageGuard {
-                                        auth: route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false),
-                                        guest: route_config.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
-                                        roles: route_config.get("roles").and_then(|v| v.as_array())
-                                            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
-                                    };
-                                    let user = auth.as_ref().and_then(|a| a.user.clone());
-                                    if let Some(mut response) = crate::auth::check_page_guard(&guard, &user, path, next_ref) {
-                                        if expire_cookie {
-                                            if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
-                                                response.headers_mut().append(axum::http::header::SET_COOKIE, val);
-                                            }
-                                        }
-                                        return response;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                let filename = if path == "/" { "index.html".to_string() } else { format!("{}.html", page_name) };
-                let file = build_dir.join(&filename);
-
-                match std::fs::read_to_string(&file) {
-                    Ok(html) => {
-                        let query: std::collections::HashMap<String, String> = uri.query().unwrap_or("").split('&')
-                            .filter_map(|pair| {
-                                let mut parts = pair.splitn(2, '=');
-                                let key = parts.next()?;
-                                let value = parts.next().unwrap_or("");
-                                Some((key.to_string(), urlencoding::decode(value).unwrap_or_else(|_| value.into()).to_string()))
-                            }).collect();
-
-                        let mut context: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
-                        for (key, value) in &query {
-                            if let Ok(n) = value.parse::<i64>() { context.insert(key.clone(), serde_json::Value::Number(n.into())); }
-                            else { context.insert(key.clone(), serde_json::Value::String(value.clone())); }
-                        }
-
-                        let cfg = crate::auth::auth_config();
-                        context.insert("auth_identifier_field".to_string(), serde_json::Value::String(cfg.identifier_field.clone()));
-                        context.insert("auth_password_field".to_string(), serde_json::Value::String(cfg.password_field.clone()));
-
-                        if let Some(auth_user) = &auth {
-                            if let Some(user) = &auth_user.user {
-                                context.insert("logged_in".to_string(), serde_json::Value::Bool(true));
-                                context.insert("user_name".to_string(), serde_json::Value::String(user.name.clone()));
-                                context.insert("user_role".to_string(), serde_json::Value::String(user.role.clone()));
-                                context.insert("user_email".to_string(), serde_json::Value::String(user.email.clone()));
-                            }
-                        }
-
-                        // ─── 3b. INJECT FLASH INTO TEMPLATE CONTEXT ────────
-                        // 🔥 FIX: makes {if flash_messages} and {{flash_*}} work at runtime
-                        if let Some(flash) = &flash_value {
-                            context.insert("flash_messages".to_string(), serde_json::json!([flash]));
-                            if let Some(obj) = flash.as_object() {
-                                for (key, value) in obj {
-                                    context.insert(format!("flash_{}", key), value.clone());
-                                }
-                                if let Some(v) = obj.get("variant") { context.insert("variant".to_string(), v.clone()); }
-                                if let Some(v) = obj.get("icon") { context.insert("icon".to_string(), v.clone()); }
-                                if let Some(v) = obj.get("title") { context.insert("title".to_string(), v.clone()); }
-                                if let Some(v) = obj.get("description") { context.insert("description".to_string(), v.clone()); }
-                                let desc_len = obj.get("description").and_then(|v| v.as_str()).map(|s| s.chars().count()).unwrap_or(0);
-                                let duration = if desc_len < 30 { "short" } else if desc_len < 80 { "medium" } else { "long" };
-                                context.insert("duration".to_string(), serde_json::Value::String(duration.to_string()));
-                            }
-                        }
-                        // ─────────────────────────────────────────────────
-
-                        if !context.contains_key("limit") { context.insert("limit".to_string(), serde_json::Value::Number(20.into())); }
-                        if !context.contains_key("page") { context.insert("page".to_string(), serde_json::Value::Number(1.into())); }
-                        if !context.contains_key("order") { context.insert("order".to_string(), serde_json::Value::String("asc".to_string())); }
-                        if let (Some(p), Some(l)) = (context.get("page").and_then(|v| v.as_i64()), context.get("limit").and_then(|v| v.as_i64())) {
-                            let offset = (p.max(1) - 1) * l.max(1);
-                            context.insert("offset".to_string(), serde_json::Value::Number(offset.into()));
-                            context.insert("prev_page".to_string(), serde_json::Value::Number((p.max(1) - 1).max(1).into()));
-                            context.insert("next_page".to_string(), serde_json::Value::Number((p + 1).into()));
-                        }
-
-                        // ─── 4. RESOLVE DATA SOURCES ───────────────────
-                        let (html_with_data, computed_vars) = crate::router::resolve_data_sources(&html, &context);
-                        for (key, value) in computed_vars { context.insert(key, value); }
-
-                        // ─── 5. DYNAMIC COMPONENT RENDERING ────────────
-                        let mut render_page = crate::state::RenderedPage {
-                            html: html_with_data,
-                            styles: Vec::new(),
-                            template_context: context.clone(),
-                            used_modules: std::collections::HashSet::new(),
-                        };
-                        for _ in 0..20 {
-                            let previous = render_page.html.clone();
-                            let current_html = render_page.html.clone();
-                            render_page.html = crate::component::render_components(&current_html, &mut render_page);
-                            if render_page.html == previous { break; }
-                        }
-
-                        // ─── 6. FINAL CONTROL FLOW ─────────────────────
-                        let mut final_html = crate::template::render_control_flow(&render_page.html, &render_page.template_context);
-
-                        // ─── 7. RUNTIME PLACEHOLDER + SCRIPT INJECTION ──
-                        let csrf_token = auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default();
-                        final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
-                        final_html = final_html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
-
-                        // 🔥 FIX (SYNC): At build time the |sync spans were hidden inside a
-                        // preserved runtime {for} loop, so wrap_html never injected the SSE
-                        // script. Now that resolve_data_sources has rendered the spans, we
-                        // inject the global SSE initializer exactly once before </body>.
-                        if final_html.contains("class=\"vlo-sync\"") || final_html.contains("data-channel=") {
-                            if !final_html.contains("__VLO_SSE__") {
-                                let sse_script = r#"<script>
-            (function(){
-            if(window.__VLO_SSE__) return;
-            window.__VLO_SSE__ = new EventSource("/__vlo_sse");
-            window.__VLO_SSE__.onmessage = function(e) {
-                try {
-                var data = JSON.parse(e.data);
-                var els = document.querySelectorAll('[data-channel="' + data.channel + '"]');
-                for (var i = 0; i < els.length; i++) {
-                    if (typeof data.value === 'object' && data.value !== null) {
-                    window.dispatchEvent(new CustomEvent('vlo:mutation'));
-                    } else {
-                    els[i].innerHTML = data.value;
-                    els[i].classList.add('vlo-sync-updated');
-                    (function(el){ setTimeout(function(){ el.classList.remove('vlo-sync-updated'); }, 600); })(els[i]);
-                    }
-                }
-                } catch(err) { console.error('VLO SSE Error:', err); }
-            };
-            window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error:', e); };
-            })();
-            </script>"#;
-                    if let Some(i) = final_html.rfind("</body>") {
-                        final_html.insert_str(i, &format!("{}\n", sse_script));
-                    }
+    // ─── 1. RESOLVE AUTH ───────────────────────────────────
+    let mut auth = req.extensions().get::<crate::auth::AuthUser>().cloned();
+    if auth.is_none() || auth.as_ref().map_or(true, |a| a.user.is_none()) {
+        let cookie_header = req.headers().get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok());
+        let cookie_name = crate::auth::auth_config().cookie_name.clone();
+        if let Some(header) = cookie_header {
+            if let Some(token) = crate::auth::parse_cookie_header(header, &cookie_name) {
+                let user = crate::auth::get_user_from_session(&token).await;
+                if user.is_some() {
+                    auth = Some(crate::auth::AuthUser {
+                        user,
+                        csrf_token: Some(crate::auth::compute_csrf_token(&token)),
+                        session_token: Some(token),
+                    });
                 }
             }
-
-            let mut response = (axum::http::StatusCode::OK, axum::response::Html(final_html)).into_response();
-            if expire_cookie {
-                if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
-                    response.headers_mut().append(axum::http::header::SET_COOKIE, val);
-                }
-            }
-            response
         }
-        Err(_) => {
-            let not_found = build_dir.join("404.html");
-            match std::fs::read_to_string(not_found) {
-                Ok(html) => (axum::http::StatusCode::NOT_FOUND, axum::response::Html(html)).into_response(),
-                Err(_) => (axum::http::StatusCode::NOT_FOUND, axum::response::Html("404 - Page Not Found".to_string())).into_response(),
+    }
+
+    // ─── 2. EXTRACT FLASH EARLY ────────────────────────────
+    let flash_encoded = req.headers().get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|h| crate::auth::parse_cookie_header(h, crate::auth::FLASH_COOKIE));
+
+    let mut flash_value: Option<serde_json::Value> = None;
+    let mut flash_html = String::new();
+    let mut expire_cookie = false;
+
+    if let Some(encoded) = &flash_encoded {
+        if let Some(flash) = crate::auth::decode_flash(encoded) {
+            let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
+            let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
+            let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
+            flash_html = format!(
+                r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div><style>@keyframes vloFlashIn{{from{{opacity:0;transform:translateX(40px)}}to{{opacity:1;transform:translateX(0)}}}}</style>"#,
+                border_color, icon, title, description
+            );
+            flash_value = Some(flash);
+            expire_cookie = true;
+        }
+    }
+
+    // ─── 3. CHECK AUTH GUARD (Using cached manifest) ───────
+    let raw_query = uri.query().unwrap_or("");
+    let next_decoded = raw_query.split('&').find_map(|pair| {
+        let mut parts = pair.splitn(2, '=');
+        let key = parts.next()?;
+        let value = parts.next().unwrap_or("");
+        if key == "next" { Some(urlencoding::decode(value).unwrap_or_default().into_owned()) } else { None }
+    });
+    let next_ref = next_decoded.as_deref();
+
+    if let Some(routes) = cache.manifest.as_object() {
+        if let Some(route_config) = routes.get(path) {
+            let guard = crate::auth::PageGuard {
+                auth: route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false),
+                guest: route_config.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
+                roles: route_config.get("roles").and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
+            };
+            let user = auth.as_ref().and_then(|a| a.user.clone());
+            if let Some(mut response) = crate::auth::check_page_guard(&guard, &user, path, next_ref) {
+                if expire_cookie {
+                    if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
+                        response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+                    }
+                }
+                return response;
             }
+        }
+    }
+
+    // ─── 4. FETCH PAGE FROM MEMORY CACHE ───────────────────
+    let lookup_path = if path == "/" { "/".to_string() } else { path.to_string() };
+    
+    if let Some(html_arc) = cache.pages.get(&lookup_path) {
+        let html = html_arc.as_ref(); // &str (Zero-allocation lookup!)
+        
+        let query: std::collections::HashMap<String, String> = uri.query().unwrap_or("").split('&')
+            .filter_map(|pair| {
+                let mut parts = pair.splitn(2, '=');
+                let key = parts.next()?;
+                let value = parts.next().unwrap_or("");
+                Some((key.to_string(), urlencoding::decode(value).unwrap_or_else(|_| value.into()).to_string()))
+            }).collect();
+
+        let mut context: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+        for (key, value) in &query {
+            if let Ok(n) = value.parse::<i64>() { context.insert(key.clone(), serde_json::Value::Number(n.into())); }
+            else { context.insert(key.clone(), serde_json::Value::String(value.clone())); }
+        }
+
+        let cfg = crate::auth::auth_config();
+        context.insert("auth_identifier_field".to_string(), serde_json::Value::String(cfg.identifier_field.clone()));
+        context.insert("auth_password_field".to_string(), serde_json::Value::String(cfg.password_field.clone()));
+
+        if let Some(auth_user) = &auth {
+            if let Some(user) = &auth_user.user {
+                context.insert("logged_in".to_string(), serde_json::Value::Bool(true));
+                context.insert("user_name".to_string(), serde_json::Value::String(user.name.clone()));
+                context.insert("user_role".to_string(), serde_json::Value::String(user.role.clone()));
+                context.insert("user_email".to_string(), serde_json::Value::String(user.email.clone()));
+            }
+        }
+
+        if let Some(flash) = &flash_value {
+            context.insert("flash_messages".to_string(), serde_json::json!([flash]));
+            if let Some(obj) = flash.as_object() {
+                for (key, value) in obj {
+                    context.insert(format!("flash_{}", key), value.clone());
+                }
+                if let Some(v) = obj.get("variant") { context.insert("variant".to_string(), v.clone()); }
+                if let Some(v) = obj.get("icon") { context.insert("icon".to_string(), v.clone()); }
+                if let Some(v) = obj.get("title") { context.insert("title".to_string(), v.clone()); }
+                if let Some(v) = obj.get("description") { context.insert("description".to_string(), v.clone()); }
+                let desc_len = obj.get("description").and_then(|v| v.as_str()).map(|s| s.chars().count()).unwrap_or(0);
+                let duration = if desc_len < 30 { "short" } else if desc_len < 80 { "medium" } else { "long" };
+                context.insert("duration".to_string(), serde_json::Value::String(duration.to_string()));
+            }
+        }
+
+        if !context.contains_key("limit") { context.insert("limit".to_string(), serde_json::Value::Number(20.into())); }
+        if !context.contains_key("page") { context.insert("page".to_string(), serde_json::Value::Number(1.into())); }
+        if !context.contains_key("order") { context.insert("order".to_string(), serde_json::Value::String("asc".to_string())); }
+        if let (Some(p), Some(l)) = (context.get("page").and_then(|v| v.as_i64()), context.get("limit").and_then(|v| v.as_i64())) {
+            let offset = (p.max(1) - 1) * l.max(1);
+            context.insert("offset".to_string(), serde_json::Value::Number(offset.into()));
+            context.insert("prev_page".to_string(), serde_json::Value::Number((p.max(1) - 1).max(1).into()));
+            context.insert("next_page".to_string(), serde_json::Value::Number((p + 1).into()));
+        }
+
+        // ─── 5. RESOLVE DATA SOURCES ───────────────────
+        let (html_with_data, computed_vars) = crate::router::resolve_data_sources(html, &context);
+        let mut context = context;
+        for (key, value) in computed_vars { context.insert(key, value); }
+
+        // ─── 6. DYNAMIC COMPONENT RENDERING ────────────
+        let mut render_page = crate::state::RenderedPage {
+            html: html_with_data,
+            styles: Vec::new(),
+            template_context: context.clone(),
+            used_modules: std::collections::HashSet::new(),
+        };
+        for _ in 0..20 {
+            let previous = render_page.html.clone();
+            let current_html = render_page.html.clone();
+            render_page.html = crate::component::render_components(&current_html, &mut render_page);
+            if render_page.html == previous { break; }
+        }
+
+        // ─── 7. FINAL CONTROL FLOW ─────────────────────
+        let mut final_html = crate::template::render_control_flow(&render_page.html, &render_page.template_context);
+
+        // ─── 8. RUNTIME PLACEHOLDER + SCRIPT INJECTION ──
+        let csrf_token = auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default();
+        final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
+        final_html = final_html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
+
+        if final_html.contains("class=\"vlo-sync\"") || final_html.contains("data-channel=") {
+            if !final_html.contains("__VLO_SSE__") {
+                let sse_script = r#"<script>
+(function(){
+  if(window.__VLO_SSE__) return;
+  window.__VLO_SSE__ = new EventSource("/__vlo_sse");
+  window.__VLO_SSE__.onmessage = function(e) {
+    try {
+      var data = JSON.parse(e.data);
+      var els = document.querySelectorAll('[data-channel="' + data.channel + '"]');
+      for (var i = 0; i < els.length; i++) {
+        if (typeof data.value === 'object' && data.value !== null) {
+          window.dispatchEvent(new CustomEvent('vlo:mutation'));
+        } else {
+          els[i].innerHTML = data.value;
+          els[i].classList.add('vlo-sync-updated');
+          (function(el){ setTimeout(function(){ el.classList.remove('vlo-sync-updated'); }, 600); })(els[i]);
+        }
+      }
+    } catch(err) { console.error('VLO SSE Error:', err); }
+  };
+  window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error:', e); };
+})();
+</script>"#;
+                if let Some(i) = final_html.rfind("</body>") {
+                    final_html.insert_str(i, &format!("{}\n", sse_script));
+                }
+            }
+        }
+
+        let mut response = (axum::http::StatusCode::OK, axum::response::Html(final_html)).into_response();
+        if expire_cookie {
+            if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
+                response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+            }
+        }
+        response
+    } else {
+        // 404 handling (fallback to disk read only if 404.html is missing from cache)
+        let not_found = build_dir.join("404.html");
+        match std::fs::read_to_string(not_found) {
+            Ok(html) => (axum::http::StatusCode::NOT_FOUND, axum::response::Html(html)).into_response(),
+            Err(_) => (axum::http::StatusCode::NOT_FOUND, axum::response::Html("404 - Page Not Found".to_string())).into_response(),
         }
     }
 }
@@ -983,7 +994,44 @@ pub fn resolve_directives(source: &str) -> String {
     // Shared JS generator for POST/PUT forms
     fn form_submit_js(method: &str, url_js: &str) -> String {
         format!(
-            "return(function(e){{e.preventDefault();var f=e.currentTarget;if(!f.checkValidity()){{f.reportValidity();return false}}var mp=f.enctype==='multipart/form-data';var h={{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}};if(!mp)h['Content-Type']='application/x-www-form-urlencoded';var bd=mp?new FormData(f):new URLSearchParams(new FormData(f));var un=new URLSearchParams(window.location.search).get('next');if(un&&!bd.has('next')){{bd.append('next',un)}}fetch({url},{{credentials:'same-origin',method:'{method}',headers:h,body:bd}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}if(d.redirect){{window.location.href=d.redirect;return;}}f.reset();window.dispatchEvent(new CustomEvent('vlo:mutation'));var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active')}}).catch(function(e){{console.error('[VLO {method}]',e);alert(e.message||'Request failed')}});return false}})(event)",
+            "return(function(e){{
+                e.preventDefault();
+                var f=e.currentTarget;
+                if(!f.checkValidity()){{f.reportValidity();return false}}
+                var mp=f.enctype==='multipart/form-data';
+                var h={{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}};
+                if(!mp)h['Content-Type']='application/x-www-form-urlencoded';
+                var bd=mp?new FormData(f):new URLSearchParams(new FormData(f));
+                var un=new URLSearchParams(window.location.search).get('next');
+                if(un&&!bd.has('next')){{bd.append('next',un)}}
+                
+                fetch({url},{{credentials:'same-origin',method:'{method}',headers:h,body:bd}})
+                .then(async function(r){{
+                    var d;try{{d=await r.json()}}catch(x){{d={{}}}}
+                    if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}
+                    if(d.redirect){{window.location.href=d.redirect;return;}}
+                    f.reset();
+                    window.dispatchEvent(new CustomEvent('vlo:mutation'));
+                    var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active')
+                }})
+                .catch(function(e){{
+                    console.error('[VLO {method}]', e);
+                    // 🔥 FIX: Inject error directly into the DOM instantly
+                    var old=f.querySelector('.vlo-inline-error');
+                    if(old)old.remove();
+                    
+                    var err=document.createElement('div');
+                    // Reuses your 'auth-alert' class for login, falls back to inline styles for other forms
+                    err.className='auth-alert vlo-inline-error'; 
+                    err.style.cssText='display:flex;align-items:center;gap:10px;color:#ff4444;margin-bottom:15px;padding:12px;background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);border-radius:8px;font-size:0.9rem;';
+                    err.innerHTML='<span style=\"font-weight:bold;font-size:1.2rem\">!</span><p style=\"margin:0;color:#ff4444\">'+(e.message||'Request failed')+'</p>';
+                    
+                    var btn=f.querySelector('button[type=\"submit\"]');
+                    if(btn) btn.parentNode.insertBefore(err, btn);
+                    else f.appendChild(err);
+                }});
+                return false
+            }})(event)",
             url = url_js,
             method = method
         )

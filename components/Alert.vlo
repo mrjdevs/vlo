@@ -16,4 +16,5 @@
 }
 .vlo-alert.info { background: rgba(0,245,255,0.1); border-color: #00f5ff; }
 .vlo-alert.success { background: rgba(0,255,136,0.1); border-color: #00ff88; }
+.vlo-alert.warning { background: rgba(0,255,136,0.1); border-color: #df5f24; }
 </style>

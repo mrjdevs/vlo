@@ -1229,24 +1229,17 @@ pub fn render_nested_vlo_content(
         return String::new();
     }
 
-    let mut source =
-        strip_server_block(content);
+    let mut source = strip_server_block(content);
 
     for _ in 0..20 {
-        let previous = source.clone();
-
-        source = render_tag(
-            &source,
-            "BaseLayout",
-            context,
-        );
-
-        source =
-            render_components(&source, context);
-
-        if source == previous {
-            break;
+        let next_source = render_tag(&source, "BaseLayout", context);
+        let next_source = render_components(&next_source, context);
+        
+        if next_source == source {
+            break; // No changes were made, we've reached a stable state
         }
+        
+        source = next_source;
     }
 
     source

@@ -1,4 +1,52 @@
-<Input type="{{type}}" placeholder="{{placeholder}}" class="vlo-input {{class}}" {{attributes}} />
+<label class="vlo-input-group {{class}}">
+  <!-- Input first so VLO injects 'required', 'disabled', etc. into it -->
+  <input 
+    type="{{type | default:'text'}}" 
+    {if id}id="{{id}}"{/if}
+    name="{{name}}" 
+    placeholder="{{placeholder}}"
+    class="vlo-input"
+  />
+  
+  <!-- Label text rendered as a span, visually moved above the input -->
+  {if label}
+    <span class="vlo-input-label">{{label}}</span>
+  {/if}
+</label>
+
 <style>
-.vlo-input{background:#111;border:2px solid #333;color:#eee;padding:12px 16px;border-radius:8px;width:100%;font-size:1rem;transition:border 0.2s}.vlo-input:focus{outline:none;border-color:#00f5ff;box-shadow:0 0 0 3px rgba(0,245,255,.1)}
+.vlo-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+/* Visually places the label text above the input */
+.vlo-input-label {
+  order: -1;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #999;
+}
+
+.vlo-input {
+  padding: 10px 12px;
+  border: 1px solid #292929;
+  border-radius: 6px;
+  background: #111;
+  color: #eee;
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.vlo-input:focus {
+  border-color: #00f5ff;
+}
+
+.vlo-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 </style>

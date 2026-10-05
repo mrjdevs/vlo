@@ -1,25 +1,43 @@
-<div class="vlo-chart vlo-chart-bar" style="--chart-color: {{color}}">
+<div class="vlo-chart vlo-chart-bar" style="--chart-color: {{color | default:'#00f5ff'}}">
   {if title}
     <div class="vlo-chart-header">
       <h4 class="vlo-chart-title">{{title}}</h4>
       <div class="vlo-chart-summary">
-        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Total</span><span class="vlo-chart-stat-value">{{meta.total}}</span></span>
-        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Items</span><span class="vlo-chart-stat-value">{{meta.series_count}}</span></span>
+        <span class="vlo-chart-stat">
+          <span class="vlo-chart-stat-label">Total</span>
+          <span class="vlo-chart-stat-value">{{meta.total | number:2}}</span>
+        </span>
+        <span class="vlo-chart-stat">
+          <span class="vlo-chart-stat-label">Items</span>
+          <span class="vlo-chart-stat-value">{{meta.series_count}}</span>
+        </span>
       </div>
     </div>
   {/if}
 
-  <div class="vlo-chart-body">
+  <div class="vlo-chart-body vlo-chart-bar-body">
     {for point in data}
-      <div class="vlo-bar-wrapper">
-        <div class="vlo-bar-value">{{point.value}}</div>
-        <div class="vlo-bar-track"><div class="vlo-bar-fill" style="height: {{point.percentage}}%"></div></div>
+      <!-- 🔥 FIX: Added data-value so JS can read the raw number -->
+      <div class="vlo-bar-wrapper" data-value="{{point.value}}">
+        
+        <!-- Value on top of the bar -->
+        <div class="vlo-bar-value">{{point.value | number:2}}</div>
+        
+        <!-- The bar track and fill -->
+        <div class="vlo-bar-track">
+          <!-- 🔥 FIX: Start at 0% so JS can animate it to the correct calculated percentage -->
+          <div class="vlo-bar-fill" style="height: 0%"></div>
+        </div>
+        
+        <!-- Label underneath the bar -->
         <div class="vlo-bar-label">{if point.label}{{point.label}}{else}Other{/if}</div>
       </div>
     {/for}
   </div>
 
   {if !data}
-    <div class="vlo-chart-empty"><p>No data available</p></div>
+    <div class="vlo-chart-empty">
+      <p>No data available</p>
+    </div>
   {/if}
 </div>

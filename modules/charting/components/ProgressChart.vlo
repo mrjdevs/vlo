@@ -4,7 +4,7 @@
       <h4 class="vlo-chart-title">{{title}}</h4>
       <div class="vlo-chart-summary">
         <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Max</span><span class="vlo-chart-stat-value">{{meta.max_value}}</span></span>
-        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Average</span><span class="vlo-chart-stat-value">{{meta.avg_value}}</span></span>
+        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Average</span><span class="vlo-chart-stat-value">{{meta.avg_value|number:2}}</span></span>
       </div>
     </div>
   {/if}
@@ -14,10 +14,10 @@
       <div class="vlo-progress-row">
         <div class="vlo-progress-head">
           <span class="vlo-progress-label">{if point.label}{{point.label}}{else}Other{/if}</span>
-          <span class="vlo-progress-value">{{point.value}}</span>
+          <span class="vlo-progress-value">{{point.value|number:2}}</span>
         </div>
         <div class="vlo-progress-track">
-          <div class="vlo-progress-fill" style="width: {{point.percentage}}%"></div>
+          <div class="vlo-progress-fill" style="width: {{point.percentage|number:2}}%"></div>
         </div>
       </div>
     {/for}

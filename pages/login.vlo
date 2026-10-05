@@ -22,16 +22,27 @@
             {/if}
 
             <form v-post="/api/auth/login" class="auth-form">
-                <div class="auth-field">
-                    <label for="identifier">{{auth_identifier_field}}</label>
-                    <input type="text" id="identifier" name="{{auth_identifier_field}}" placeholder="Email or username" required />
-                </div>
-                <div class="auth-field">
-                    <label for="password">{{auth_password_field}}</label>
-                    <input type="password" id="password" name="{{auth_password_field}}" placeholder="••••••••" required />
-                </div>
                 
-                <!-- ═══ REMEMBER ME CHECKBOX ═══ -->
+                <Input 
+                    class="auth-field"
+                    label="{{auth_identifier_field|upper}}" 
+                    name="{{auth_identifier_field}}" 
+                    type="text" 
+                    id="identifier"
+                    placeholder="Email or username" 
+                    required 
+                />
+
+                <Input 
+                    class="auth-field"
+                    label="{{auth_password_field|upper}}" 
+                    name="{{auth_password_field}}" 
+                    type="password" 
+                    id="password"
+                    placeholder="••••••••" 
+                    required 
+                />
+                
                 <div class="auth-field auth-remember">
                     <label class="auth-checkbox-label">
                         <input type="checkbox" name="remember_me" value="true" />

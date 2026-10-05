@@ -6,6 +6,7 @@
   "get_stock_status": "SELECT CASE WHEN stock = 0 THEN 'Out of Stock' WHEN stock < 5 THEN 'Low Stock' ELSE 'In Stock' END as status, COUNT(*) as count FROM products GROUP BY status;",
   "get_monthly_products": "SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count FROM products GROUP BY month ORDER BY month DESC LIMIT 12;",
   "get_dashboard_stats": "SELECT COUNT(*) as total_products, ROUND(SUM(price), 2) as total_revenue, ROUND(AVG(price), 2) as avg_price, COUNT(DISTINCT category) as total_categories FROM products;",
+  "get_products_analytics": "SELECT category, SUM(price) as price, SUM(stock) as stock FROM products GROUP BY category;",
   "get_sales_stats": "SELECT category, strftime('%Y-%m-%d', created_at) AS date, SUM(price) AS price FROM products GROUP BY strftime('%Y-%m-%d', created_at) ORDER BY strftime('%Y-%m-%d', created_at) ASC;"
 }
 </script>
