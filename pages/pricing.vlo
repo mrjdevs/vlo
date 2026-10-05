@@ -8,14 +8,12 @@
             <a href="/about">About</a>
             <a href="/docs">Docs</a>
         </Navbar>'
-
     hero='<HeroLayout
         badge="Simple, Transparent Pricing"
         title="Free While VLO Is in Beta"
         subtitle="Build with VLO for free. The core framework stays free and open source, with paid plans planned for teams and advanced needs."
         cta="<Button text='Start Building' href='/docs' variant='primary' />"
     />'
-
     footer='<Footer />'
 >
 

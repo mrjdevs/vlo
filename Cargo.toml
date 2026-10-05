@@ -1,17 +1,21 @@
 [package]
 name = "vlo"
-version = "0.6.0"
+version = "0.8.5"
 edition = "2021"
+authors = ["MRJDEV <mrjdev@gmail.com>"]
+description = "VLO - A zero-boilerplate full-stack web framework"
+license = "MIT"
+repository = "https://github.com/mrjdevs/vlo.git"
 
 [dependencies]
 # Web framework & HTTP routing
-axum = { version = "0.7", features = ["macros", "http1", "json", "query", "tokio"] }
-tower-http = { version = "0.5", features = ["fs"] }
+axum = { version = "0.7", features = ["http1", "json", "query", "tokio", "multipart"] }
 
 # Asynchronous runtime & streaming
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "fs"] }
-async-stream = "0.3"
-futures-util = "0.3"
+futures-util = "0.3"    # Required for HMR SSE streams
+async-stream = "0.3"    # Required for HMR SSE streams
+urlencoding = "2.1"
 
 # Command line interface
 clap = { version = "4", features = ["derive"] }
@@ -19,22 +23,26 @@ clap = { version = "4", features = ["derive"] }
 # File system, watching, & utilities
 notify = "6"
 regex = "1.10"
-serde_json = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_urlencoded = "0.7"
+serde_json = "1"
 dotenvy = "0.15"
 
 # Multi-database support (SQLite, PostgreSQL, MySQL)
 sqlx = {
     version = "0.8",
     default-features = false,
-    features = [
-        "runtime-tokio",
-        "tls-rustls",
-        "sqlite",
-        "postgres",
-        "mysql",
-        "json"
-    ]
+    features = ["runtime-tokio", "tls-rustls", "sqlite", "postgres", "mysql", "json", "macros"]
 }
+
+tower-http = { version = "0.5.2", features = ["fs", "compression-gzip"] }
+chrono = { version = "0.4", features = ["clock"] }
+# Password hashing (includes OsRng for secure tokens)
+argon2 = "0.5"
+
+# Cryptographic primitives for CSRF tokens
+hmac = "0.12"
+sha2 = "0.10"
 
 [profile.release]
 opt-level = "z"
@@ -42,3 +50,7 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+[[bin]]
+name = "vlo"
+path = "src/main.rs"

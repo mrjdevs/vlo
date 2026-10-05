@@ -1,0 +1,292 @@
+use regex::Regex;
+use serde_json::Value;
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, LazyLock, Mutex,
+    },
+};
+
+// ---------------------------------------------------------------------------
+// Regexes (compiled once, shared everywhere).
+// All `{` / `}` are escaped so the regex crate does not treat them as
+// repetition operators (this was the cause of the earlier startup panic).
+// ---------------------------------------------------------------------------
+pub static STYLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>(.*?)</style>").unwrap());
+
+pub static ELEMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>").unwrap());
+
+pub static PROP_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\{\{\s*([a-zA-Z0-9_@.-]+)\s*\}\}").unwrap());
+
+pub static CLASS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)\bclass\s*=\s*("([^"]*)"|'([^']*)')"#).unwrap());
+
+pub static SLOT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?is)<slot(?:\s+name\s*=\s*["']([^"']+)["'])?\s*(?:/>|>(.*?)</slot>|>)"#,
+    )
+    .unwrap()
+});
+
+// ---------------------------------------------------------------------------
+// Compiled template cache
+// ---------------------------------------------------------------------------
+#[derive(Debug)]
+pub struct CompiledTemplate {
+    pub template: String,
+    pub css: String,
+}
+
+pub static TEMPLATE_CACHE: LazyLock<Mutex<HashMap<PathBuf, Arc<CompiledTemplate>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+// ---------------------------------------------------------------------------
+// Debug logging
+// ---------------------------------------------------------------------------
+pub static VLO_DEBUG: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("VLO_DEBUG")
+        .map(|value| env_bool_from_value(&value))
+        .unwrap_or(false)
+});
+
+pub fn env_bool_from_value(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+#[macro_export]
+macro_rules! vlo_debug {
+    ($($arg:tt)*) => {
+        if *$crate::state::VLO_DEBUG {
+            println!($($arg)*);
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Project root discovery
+// ---------------------------------------------------------------------------
+pub static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| {
+    let mut starts = Vec::new();
+    if let Ok(dir) = std::env::current_dir() {
+        starts.push(dir);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            starts.push(parent.to_path_buf());
+        }
+    }
+    starts.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+
+    for start in starts {
+        let mut dir = start;
+        loop {
+            if dir.join("pages").exists() {
+                return dir;
+            }
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+});
+
+// Returns an owned PathBuf (keeps server.rs `&root` / `&build_dir` types
+// matching, avoiding the earlier `&PathBuf` vs `&&Path` compile error).
+pub fn get_project_root() -> PathBuf {
+    PROJECT_ROOT.clone()
+}
+
+// ---------------------------------------------------------------------------
+// Upload limits
+// ---------------------------------------------------------------------------
+pub fn max_upload_bytes() -> u64 {
+    let mb = std::env::var("VLO_MAX_UPLOAD_MB")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(10); // default 10 MB
+    mb.saturating_mul(1024 * 1024)
+}
+
+// ---------------------------------------------------------------------------
+// App mode (Development / Production)
+//
+// main.rs and server.rs call `set_app_mode(...)` at startup, and
+// router.rs reads it via `app_mode().is_dev()` to decide whether to inject
+// the HMR reload script. Stored in an AtomicBool so reads are lock-free.
+// ---------------------------------------------------------------------------
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppMode {
+    Development,
+    Production,
+}
+
+impl AppMode {
+    pub fn is_dev(self) -> bool {
+        matches!(self, AppMode::Development)
+    }
+}
+
+static IS_PRODUCTION: AtomicBool = AtomicBool::new(false);
+
+pub fn set_app_mode(mode: AppMode) {
+    IS_PRODUCTION.store(matches!(mode, AppMode::Production), Ordering::Relaxed);
+}
+
+pub fn app_mode() -> AppMode {
+    if IS_PRODUCTION.load(Ordering::Relaxed) {
+        AppMode::Production
+    } else {
+        AppMode::Development
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rendered page
+//
+// `template_context` holds the variables available to the template engine
+// (query params, data-source results, etc.). `insert` forwards into it, which
+// is what router.rs relies on — so it is now genuinely used (no dead code).
+// ---------------------------------------------------------------------------
+
+
+// ... (keep all other code above this) ...
+
+pub struct RenderedPage {
+    pub html: String,
+    pub styles: Vec<String>,
+    pub template_context: HashMap<String, Value>,
+    pub used_modules: HashSet<String>, // 🔥 NEW: Track which modules are used on this page
+}
+
+impl Default for RenderedPage {
+    fn default() -> Self {
+        Self {
+            html: String::new(),
+            styles: Vec::new(),
+            template_context: HashMap::new(),
+            used_modules: HashSet::new(), // 🔥 NEW
+        }
+    }
+}
+
+impl RenderedPage {
+    pub fn insert(&mut self, key: &str, value: Value) {
+        self.template_context.insert(key.to_string(), value);
+    }
+    
+    pub fn add_style(&mut self, name: &str, css: &str) {
+        let marker = format!("/* VLO:{} */", name);
+        if self.styles.iter().any(|style| style.contains(&marker)) {
+            return;
+        }
+        self.styles.push(format!("{}\n{}", marker, css));
+    }
+    
+    // 🔥 NEW: Helper to record module usage for selective asset injection
+    pub fn add_used_module(&mut self, module_name: &str) {
+        self.used_modules.insert(module_name.to_string());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ops: Start time for health check uptime
+// ---------------------------------------------------------------------------
+static START_TIME: std::sync::OnceLock<std::time::SystemTime> = std::sync::OnceLock::new();
+
+pub fn init_start_time() {
+    START_TIME.set(std::time::SystemTime::now()).ok();
+}
+
+pub fn uptime_seconds() -> u64 {
+    START_TIME.get()
+        .and_then(|t| std::time::SystemTime::now().duration_since(*t).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+// ---------------------------------------------------------------------------
+// Ops: Request ID
+// ---------------------------------------------------------------------------
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct RequestId(pub String);
+
+pub fn generate_request_id() -> String {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("req-{:x}-{}", timestamp, std::process::id())
+}
+
+// ---------------------------------------------------------------------------
+// Build mode flag
+// ---------------------------------------------------------------------------
+pub static IS_BUILDING: AtomicBool = AtomicBool::new(false);
+
+pub fn set_building(building: bool) {
+    IS_BUILDING.store(building, Ordering::Relaxed);
+}
+
+pub fn is_building() -> bool {
+    IS_BUILDING.load(Ordering::Relaxed)
+}
+
+// ---------------------------------------------------------------------------
+// Module System State
+// ---------------------------------------------------------------------------
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleManifest {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+    #[serde(default)]
+    pub exports: ModuleExports,
+    #[serde(default)]
+    pub config: Option<Value>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ModuleExports {
+    #[serde(default)]
+    pub components: Vec<String>,
+    #[serde(default)]
+    pub api: Vec<String>,
+    #[serde(default)]
+    pub styles: Vec<String>,
+    #[serde(default)]
+    pub scripts: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoadedModule {
+    pub manifest: ModuleManifest,
+    pub path: PathBuf,
+    pub components: Vec<PathBuf>,
+    pub api_sql: HashMap<String, String>,
+    pub styles: Vec<String>,
+    pub scripts: Vec<String>,
+}
+
+static MODULE_REGISTRY: LazyLock<Mutex<Vec<LoadedModule>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+pub fn get_module_registry() -> &'static LazyLock<Mutex<Vec<LoadedModule>>> {
+    &MODULE_REGISTRY
+}

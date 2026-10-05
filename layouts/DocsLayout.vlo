@@ -9,8 +9,8 @@
 </head>
 <body>
 <BaseNav brand="VLO" />
+{{navbar}}
 {{hero}}
 {{children}}
-{{footer}}
 </body>
 </html>

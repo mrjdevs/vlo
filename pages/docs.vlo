@@ -1,2774 +1,1255 @@
-<BaseLayout
-    title="Project Guidelines"
-    navbar='
-        <Navbar brand="VLO">
-            <a href="/">Home</a>
-            <a href="/components">Components</a>
-            <a href="/pricing">Pricing</a>
-            <a href="/about">About</a>
-            <a href="/docs" class="active">Docs</a>
-        </Navbar>'
+<BaseLayout title="Project Guidelines" 
     footer='<Footer />'
 >
-
     <div class="guidelines-page">
-
-        <!-- HERO -->
         <header class="guidelines-hero">
-
-            <div class="hero-badge">
-                <span class="pulse"></span>
-                VLO PROJECT GUIDELINES
-            </div>
-
-            <h1>
-                Build with <span>VLO</span>.
-            </h1>
-
-            <p>
-                A practical guide for building, maintaining and extending
-                VLO projects while keeping the codebase consistent,
-                reusable and unmistakably VLO.
-            </p>
-
+            <div class="hero-badge"><span class="pulse"></span> VLO PROJECT GUIDELINES</div>
+            <h1>Build with <span>VLO</span>.</h1>
+            <p>A practical guide for building, maintaining and extending VLO projects while keeping the codebase consistent, reusable and unmistakably VLO.</p>
             <div class="hero-meta">
                 <span>✦ Architecture</span>
                 <span>✦ Components</span>
+                <span>✦ Templating</span>
+                <span>✦ Modules</span>
+                <span>✦ Flash Messages</span>
+                <span>✦ Pagination</span>
                 <span>✦ Branding</span>
-                <span>✦ Standards</span>
             </div>
-
         </header>
 
-
         <div class="docs-layout">
-
-            <!-- SIDEBAR -->
             <aside class="docs-sidebar">
-
-                <div class="sidebar-title">
-                    On this page
-                </div>
-
+                <div class="sidebar-title">On this page</div>
                 <nav class="docs-nav">
-
-                    <a href="#principles" class="active">
-                        <span>01</span>
-                        Core Principles
-                    </a>
-
-                    <a href="#structure">
-                        <span>02</span>
-                        Project Structure
-                    </a>
-
-                    <a href="#vlo-files">
-                        <span>03</span>
-                        .vlo Files
-                    </a>
-
-                    <a href="#components">
-                        <span>04</span>
-                        Components
-                    </a>
-
-                    <a href="#props">
-                        <span>05</span>
-                        Props
-                    </a>
-
-                    <a href="#pages">
-                        <span>06</span>
-                        Pages
-                    </a>
-
-                    <a href="#styling">
-                        <span>07</span>
-                        Styling
-                    </a>
-
-                    <a href="#branding">
-                        <span>08</span>
-                        Branding
-                    </a>
-
-                    <a href="#accessibility">
-                        <span>09</span>
-                        Accessibility
-                    </a>
-
-                    <a href="#security">
-                        <span>10</span>
-                        Security
-                    </a>
-
-                    <a href="#workflow">
-                        <span>11</span>
-                        Development Workflow
-                    </a>
-
-                    <a href="#checklist">
-                        <span>12</span>
-                        Checklist
-                    </a>
-
+                    <a href="#principles" class="active"><span>01</span> Core Principles</a>
+                    <a href="#structure"><span>02</span> Project Structure</a>
+                    <a href="#vlo-files"><span>03</span> .vlo Files</a>
+                    <a href="#components"><span>04</span> Components</a>
+                    <a href="#props"><span>05</span> Props</a>
+                    <a href="#templating"><span>06</span> Templating</a>
+                    <a href="#modifiers"><span>06a</span> Modifiers</a>
+                    <a href="#pages"><span>07</span> Pages</a>
+                    <a href="#layouts"><span>08</span> Layouts</a>
+                    <a href="#styling"><span>09</span> Styling</a>
+                    <a href="#navbar"><span>10</span> Navbar</a>
+                    <a href="#branding"><span>11</span> Branding</a>
+                    <a href="#performance"><span>12</span> Performance</a>
+                    <a href="#accessibility"><span>13</span> Accessibility</a>
+                    <a href="#security"><span>14</span> Security</a>
+                    <a href="#modules"><span>15</span> Modules & Charting</a>
+                    <a href="#api-database"><span>16</span> API & Database</a>
+                    <a href="#flash"><span>17</span> Flash Messages</a>
+                    <a href="#pagination"><span>18</span> Pagination</a>
+                    <a href="#workflow"><span>19</span> Development Workflow</a>
+                    <a href="#checklist"><span>20</span> Checklist</a>
                 </nav>
-
                 <div class="sidebar-card">
-
-                    <div class="sidebar-icon">
-                        ✦
-                    </div>
-
+                    <div class="sidebar-icon">✦</div>
                     <strong>VLO philosophy</strong>
-
-                    <p>
-                        Simple code. Reusable components.
-                        Consistent experiences.
-                    </p>
-
+                    <p>Simple code. Reusable components. Consistent experiences.</p>
                 </div>
-
             </aside>
 
-
-            <!-- CONTENT -->
             <main class="docs-content">
-
-
-                <!-- INTRO -->
                 <section class="intro-card">
-
-                    <div class="intro-icon">
-                        V
-                    </div>
-
+                    <div class="intro-icon">V</div>
                     <div>
-                        <strong>
-                            VLO is a component-first framework.
-                        </strong>
-
-                        <p>
-                            Build interfaces from small reusable
-                            components instead of repeating markup
-                            and styles throughout the project.
-                        </p>
+                        <strong>VLO is a component-first framework.</strong>
+                        <p>Build interfaces from small reusable components instead of repeating markup and styles throughout the project.</p>
                     </div>
-
                 </section>
 
-
-                <!-- 01 -->
                 <section class="doc-section" id="principles">
-
                     <div class="section-number">01</div>
-
                     <h2>Core Principles</h2>
-
-                    <p class="section-lead">
-                        Every VLO project should follow a small set
-                        of principles. These principles matter more
-                        than any individual implementation.
-                    </p>
-
-
+                    <p class="section-lead">Every VLO project should follow a small set of principles. These principles matter more than any individual implementation.</p>
                     <div class="principles-grid">
-
-                        <article>
-                            <div class="principle-icon">◈</div>
-                            <h3>Reusable</h3>
-                            <p>
-                                Build components once and reuse them
-                                everywhere they are needed.
-                            </p>
-                        </article>
-
-                        <article>
-                            <div class="principle-icon">⌘</div>
-                            <h3>Simple</h3>
-                            <p>
-                                Prefer straightforward implementations
-                                over unnecessary abstraction.
-                            </p>
-                        </article>
-
-                        <article>
-                            <div class="principle-icon">◇</div>
-                            <h3>Consistent</h3>
-                            <p>
-                                Similar problems should have similar
-                                solutions throughout the project.
-                            </p>
-                        </article>
-
-                        <article>
-                            <div class="principle-icon">✦</div>
-                            <h3>Maintainable</h3>
-                            <p>
-                                Write code that another developer can
-                                understand and modify quickly.
-                            </p>
-                        </article>
-
+                        <article><div class="principle-icon">◈</div><h3>Reusable</h3><p>Build components once and reuse them everywhere they are needed.</p></article>
+                        <article><div class="principle-icon">⌘</div><h3>Simple</h3><p>Prefer straightforward implementations over unnecessary abstraction.</p></article>
+                        <article><div class="principle-icon">◇</div><h3>Consistent</h3><p>Similar problems should have similar solutions throughout the project.</p></article>
+                        <article><div class="principle-icon">✦</div><h3>Maintainable</h3><p>Write code that another developer can understand and modify quickly.</p></article>
                     </div>
-
-
                     <div class="rule-card">
-
-                        <strong>
-                            Golden Rule
-                        </strong>
-
-                        <p>
-                            If you have written the same UI pattern
-                            more than once, consider turning it into
-                            a component.
-                        </p>
-
+                        <strong>Golden Rule</strong>
+                        <p>If you have written the same UI pattern more than once, consider turning it into a component.</p>
                     </div>
-
                 </section>
 
-
-                <!-- 02 -->
                 <section class="doc-section" id="structure">
-
                     <div class="section-number">02</div>
-
                     <h2>Project Structure</h2>
-
-                    <p class="section-lead">
-                        Keep project files organized by responsibility.
-                        Avoid putting unrelated functionality into one
-                        large file.
-                    </p>
-
-
+                    <p class="section-lead">Keep project files organized by responsibility. Avoid putting unrelated functionality into one large file.</p>
                     <div class="code-card">
-
-                        <div class="code-header">
-                            <span>Recommended structure</span>
-                            <span>VLO</span>
-                        </div>
-
+                        <div class="code-header"><span>Recommended structure</span><span>VLO</span></div>
                         <pre><code>project/
-│
 ├── pages/
-│   ├── index.vlo
-│   ├── components.vlo
-│   ├── pricing.vlo
-│   └── docs.vlo
-│
+│   ├── home.vlo
+│   ├── about.vlo
+│   ├── docs.vlo
+│   └── admin/
+│       ├── users.vlo
+│       └── dashboard.vlo
 ├── components/
-│   ├── Button.vlo
-│   ├── Badge.vlo
 │   ├── Alert.vlo
+│   ├── Badge.vlo
+│   ├── Button.vlo
 │   ├── Card.vlo
+│   ├── FileInput.vlo
 │   ├── Input.vlo
+│   ├── Link.vlo
+│   ├── Modal.vlo
+│   ├── Navbar.vlo
+│   ├── Pagination.vlo
+│   ├── Sidebar.vlo
+│   ├── SlotCard.vlo
 │   └── Toast.vlo
-│
 ├── layouts/
-│   └── BaseLayout.vlo
-│
-├── styles/
-│   ├── variables.css
-│   └── global.css
-│
-└── assets/
-    ├── images/
-    └── icons/</code></pre>
-
+│   ├── BaseLayout.vlo
+│   ├── DocsLayout.vlo
+│   ├── MainNav.vlo
+│   └── admin/
+│       └── AdminLayout.vlo
+├── modules/
+│   └── charting/
+│       ├── module.json
+│       ├── components/
+│       ├── styles/
+│       └── scripts/
+├── schema.sql
+└── .env</code></pre>
                     </div>
-
-
                     <div class="info-grid">
-
-                        <div>
-                            <strong>pages/</strong>
-                            <p>
-                                Application routes and complete pages.
-                            </p>
-                        </div>
-
-                        <div>
-                            <strong>components/</strong>
-                            <p>
-                                Reusable UI building blocks.
-                            </p>
-                        </div>
-
-                        <div>
-                            <strong>layouts/</strong>
-                            <p>
-                                Shared page structures.
-                            </p>
-                        </div>
-
-                        <div>
-                            <strong>styles/</strong>
-                            <p>
-                                Shared design tokens and global styles.
-                            </p>
-                        </div>
-
+                        <div><strong>pages/</strong><p>Application routes and complete pages. Supports subdirectories.</p></div>
+                        <div><strong>components/</strong><p>Reusable UI building blocks.</p></div>
+                        <div><strong>layouts/</strong><p>Shared page structures with automatic hierarchical resolution.</p></div>
+                        <div><strong>modules/</strong><p>Self-contained extension packages (components, styles, handlers).</p></div>
+                        <div><strong>schema.sql</strong><p>Database schema (DDL statements for all tables).</p></div>
                     </div>
-
                 </section>
 
-
-                <!-- 03 -->
                 <section class="doc-section" id="vlo-files">
-
                     <div class="section-number">03</div>
-
                     <h2>.vlo Files</h2>
-
-                    <p class="section-lead">
-                        A VLO file should have one clear responsibility.
-                        Keep markup, styling and behavior close to the
-                        component they belong to.
-                    </p>
-
-
+                    <p class="section-lead">A VLO file should have one clear responsibility. Keep markup, styling and behavior close to the component they belong to.</p>
                     <h3>Basic structure</h3>
-
                     <div class="code-card">
-
-                        <div class="code-header">
-                            <span>ExampleComponent.vlo</span>
-                            <span>.vlo</span>
-                        </div>
-
+                        <div class="code-header"><span>ExampleComponent.vlo</span><span>.vlo</span></div>
                         <pre><code>&lt;div class="example"&gt;
-
-    &lt;h2&gt;{title}&lt;/h2&gt;
-
-    &lt;p&gt;{description}&lt;/p&gt;
-
+    &lt;h2&gt;{{title}}&lt;/h2&gt;
+    &lt;p&gt;{{description}}&lt;/p&gt;
 &lt;/div&gt;
 
 &lt;style&gt;
-
-.example {
-    padding: 20px;
-}
-
+.example { padding: 20px; }
 &lt;/style&gt;</code></pre>
-
                     </div>
-
-
                     <div class="do-grid">
-
                         <div class="do-card good">
-
-                            <div class="do-title">
-                                <span>✓</span>
-                                Do
-                            </div>
-
-                            <ul>
-                                <li>Keep components focused.</li>
-                                <li>Use meaningful names.</li>
-                                <li>Keep styles scoped when possible.</li>
-                                <li>Document unusual behavior.</li>
-                            </ul>
-
+                            <div class="do-title"><span>✓</span> Do</div>
+                            <ul><li>Keep components focused.</li><li>Use meaningful names.</li><li>Keep styles scoped.</li><li>Document unusual behavior.</li></ul>
                         </div>
-
-
                         <div class="do-card avoid">
-
-                            <div class="do-title">
-                                <span>×</span>
-                                Avoid
-                            </div>
-
-                            <ul>
-                                <li>Huge monolithic components.</li>
-                                <li>Duplicated markup.</li>
-                                <li>Unused props.</li>
-                                <li>Unexplained magic values.</li>
-                            </ul>
-
+                            <div class="do-title"><span>×</span> Avoid</div>
+                            <ul><li>Huge monolithic components.</li><li>Duplicated markup.</li><li>Unused props.</li><li>Unexplained magic values.</li></ul>
                         </div>
-
                     </div>
-
                 </section>
 
-
-                <!-- 04 -->
                 <section class="doc-section" id="components">
-
                     <div class="section-number">04</div>
-
                     <h2>Components</h2>
-
-                    <p class="section-lead">
-                        Components are the foundation of VLO.
-                        A component should represent a reusable
-                        piece of interface or behavior.
-                    </p>
-
-
+                    <p class="section-lead">Components are the foundation of VLO. A component should represent a reusable piece of interface or behavior.</p>
+                    <h3>Component catalog</h3>
+                    <p class="component-note">VLO ships with a ready-to-use component library. Every component accepts props, supports scoped styles, and can be extended.</p>
+                    <div class="principles-grid">
+                        <article><div class="principle-icon">🔔</div><h3>Alert</h3><p>Inline status messages for success, error, warning and info states.</p></article>
+                        <article><div class="principle-icon">🏷️</div><h3>Badge</h3><p>Compact label pills for statuses, tags and metadata.</p></article>
+                        <article><div class="principle-icon">🔘</div><h3>Button</h3><p>Primary, secondary, ghost and danger actions with href support.</p></article>
+                        <article><div class="principle-icon">🗂️</div><h3>Card</h3><p>Titled content container with description and default slot.</p></article>
+                        <article><div class="principle-icon">📎</div><h3>FileInput</h3><p>Styled file picker for multipart uploads with custom button label.</p></article>
+                        <article><div class="principle-icon">⌨️</div><h3>Input</h3><p>Form field with label, placeholder and validation attributes.</p></article>
+                        <article><div class="principle-icon">🔗</div><h3>Link</h3><p>Consistently styled anchor with variants and active state.</p></article>
+                        <article><div class="principle-icon">🪟</div><h3>Modal</h3><p>Dialog overlay for edit forms and delete confirmations.</p></article>
+                        <article><div class="principle-icon">🧭</div><h3>Navbar</h3><p>Site navigation with variants, sizes, shadows, sticky and mobile modes.</p></article>
+                        <article><div class="principle-icon">📄</div><h3>Pagination</h3><p>Prev/Next navigation with page counter and clean URLs.</p></article>
+                        <article><div class="principle-icon">📑</div><h3>Sidebar</h3><p>Vertical navigation panel for dashboards and docs sections.</p></article>
+                        <article><div class="principle-icon">🧩</div><h3>SlotCard</h3><p>Card with named slots for header, body and footer content.</p></article>
+                        <article><div class="principle-icon">💬</div><h3>Toast</h3><p>Auto-dismissing notification for API action feedback.</p></article>
+                    </div>
                     <h3>Component naming</h3>
-
                     <div class="naming-table">
-
-                        <div class="naming-row header">
-                            <span>Type</span>
-                            <span>Recommended</span>
-                            <span>Avoid</span>
-                        </div>
-
-                        <div class="naming-row">
-                            <span>Button</span>
-                            <span>Button.vlo</span>
-                            <span>button.vlo</span>
-                        </div>
-
-                        <div class="naming-row">
-                            <span>Navigation</span>
-                            <span>Navbar.vlo</span>
-                            <span>navthing.vlo</span>
-                        </div>
-
-                        <div class="naming-row">
-                            <span>Form</span>
-                            <span>Input.vlo</span>
-                            <span>inputThing.vlo</span>
-                        </div>
-
+                        <div class="naming-row header"><span>Type</span><span>Recommended</span><span>Avoid</span></div>
+                        <div class="naming-row"><span>Button</span><span>Button.vlo</span><span>button.vlo</span></div>
+                        <div class="naming-row"><span>Navigation</span><span>Navbar.vlo</span><span>navthing.vlo</span></div>
+                        <div class="naming-row"><span>Form</span><span>Input.vlo</span><span>inputThing.vlo</span></div>
                     </div>
-
-
                     <h3>Component responsibilities</h3>
-
                     <div class="number-list">
-
-                        <div>
-                            <b>01</b>
-                            <p>
-                                A component owns its own presentation.
-                            </p>
-                        </div>
-
-                        <div>
-                            <b>02</b>
-                            <p>
-                                Props control configurable behavior.
-                            </p>
-                        </div>
-
-                        <div>
-                            <b>03</b>
-                            <p>
-                                Children should be used for flexible content.
-                            </p>
-                        </div>
-
-                        <div>
-                            <b>04</b>
-                            <p>
-                                Avoid coupling components to specific pages.
-                            </p>
-                        </div>
-
+                        <div><b>01</b><p>A component owns its own presentation.</p></div>
+                        <div><b>02</b><p>Props control configurable behavior.</p></div>
+                        <div><b>03</b><p>Children and named slots provide flexible content.</p></div>
+                        <div><b>04</b><p>Avoid coupling components to specific pages.</p></div>
                     </div>
-
                 </section>
 
-
-                <!-- 05 -->
                 <section class="doc-section" id="props">
-
                     <div class="section-number">05</div>
-
                     <h2>Props</h2>
-
-                    <p class="section-lead">
-                        Props are the primary way to customize reusable
-                        VLO components.
-                    </p>
-
-
+                    <p class="section-lead">Props are the primary way to customize reusable VLO components.</p>
                     <div class="code-card">
-
-                        <div class="code-header">
-                            <span>Props example</span>
-                            <span>VLO</span>
-                        </div>
-
-                        <pre><code>&lt;Button
-    text="Save Changes"
-    href="/save"
-    variant="primary"
-/&gt;</code></pre>
-
+                        <div class="code-header"><span>Props example</span><span>VLO</span></div>
+                        <pre><code>&lt;Button text="Save Changes" href="/save" variant="primary" /&gt;</code></pre>
                     </div>
-
-
                     <h3>Prop rules</h3>
-
                     <div class="rules-list">
-
-                        <div>
-                            <span>01</span>
-                            <p>
-                                Use clear, descriptive prop names.
-                            </p>
-                        </div>
-
-                        <div>
-                            <span>02</span>
-                            <p>
-                                Provide sensible defaults when possible.
-                            </p>
-                        </div>
-
-                        <div>
-                            <span>03</span>
-                            <p>
-                                Avoid props that only make sense for one page.
-                            </p>
-                        </div>
-
-                        <div>
-                            <span>04</span>
-                            <p>
-                                Keep variant names predictable.
-                            </p>
-                        </div>
-
+                        <div><span>01</span><p>Use clear, descriptive prop names.</p></div>
+                        <div><span>02</span><p>Provide sensible defaults when possible.</p></div>
+                        <div><span>03</span><p>Avoid props that only make sense for one page.</p></div>
+                        <div><span>04</span><p>Keep variant names predictable.</p></div>
                     </div>
-
-
                     <div class="rule-card">
-
-                        <strong>
-                            Good example
-                        </strong>
-
-                        <p>
-                            <code>variant="primary"</code>,
-                            <code>variant="secondary"</code>,
-                            <code>variant="ghost"</code>
-                        </p>
-
+                        <strong>Good example</strong>
+                        <p><code>variant="primary"</code>, <code>variant="secondary"</code>, <code>variant="ghost"</code></p>
                     </div>
-
                 </section>
 
-
-                <!-- 06 -->
-                <section class="doc-section" id="pages">
-
+                <section class="doc-section" id="templating">
                     <div class="section-number">06</div>
+                    <h2>Templating</h2>
+                    <p class="section-lead">VLO includes a server-side templating engine with interpolation, conditionals, loops, and API data binding. All rendering happens on the server before HTML reaches the browser.</p>
+                    <h3>Interpolation</h3>
+                    <p class="component-note">Use double curly braces to render variables, props, and nested object properties. Dot notation is supported for accessing nested values.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Variable interpolation</span><span>VLO</span></div>
+                        <pre><code>&lt;h1&gt;{{title}}&lt;/h1&gt;
+&lt;p&gt;{{product.description}}&lt;/p&gt;
+&lt;span&gt;${{product.price}}&lt;/span&gt;
+&lt;img src="{{product.image}}" alt="{{product.title}}" /&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>{{variable}}</strong><p>Renders a top-level context variable or prop value.</p></div>
+                        <div><strong>{{object.field}}</strong><p>Accesses nested properties using dot notation.</p></div>
+                    </div>
+                    <h3>Conditionals</h3>
+                    <p class="component-note">Use <code>{if}</code>, <code>{else}</code>, and <code>{/if}</code> blocks to conditionally render content. Supports comparison operators and truthy checks.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Conditional rendering</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- Equality check --&gt;
+{if status == "success"}
+    &lt;Toast variant="success" title="Done!" /&gt;
+{/if}
 
-                    <h2>Pages</h2>
+&lt;!-- Truthy check (renders if product.image exists) --&gt;
+{if product.image}
+    &lt;img src="{{product.image}}" /&gt;
+{else}
+    &lt;div class="placeholder"&gt;No image&lt;/div&gt;
+{/if}
 
-                    <p class="section-lead">
-                        Pages compose components. They should not
-                        duplicate component implementations.
-                    </p>
+&lt;!-- Numeric comparisons --&gt;
+{if product.price &gt; 500}
+    &lt;span class="premium"&gt;Premium&lt;/span&gt;
+{/if}
 
+{if product.stock == 0}
+    &lt;span&gt;Out of Stock&lt;/span&gt;
+{else}
+    {if product.stock &lt; 5}
+        &lt;span&gt;{{product.stock}} left&lt;/span&gt;
+    {else}
+        &lt;span&gt;{{product.stock}}&lt;/span&gt;
+    {/if}
+{/if}</code></pre>
+                    </div>
+                    <h3>Supported operators</h3>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Operator</span><span>Example</span><span>Meaning</span></div>
+                        <div class="naming-row"><span>==</span><span>{if status == "success"}</span><span>Equal</span></div>
+                        <div class="naming-row"><span>!=</span><span>{if status != "error"}</span><span>Not equal</span></div>
+                        <div class="naming-row"><span>&gt;</span><span>{if product.price &gt; 500}</span><span>Greater than</span></div>
+                        <div class="naming-row"><span>&lt;</span><span>{if product.stock &lt; 5}</span><span>Less than</span></div>
+                        <div class="naming-row"><span>truthy</span><span>{if product.image}</span><span>Value exists / non-empty</span></div>
+                    </div>
+                    <h3>Loops</h3>
+                    <p class="component-note">Use <code>{for item in collection}</code> to iterate over arrays from API responses. Supports an <code>{else}</code> block that renders when the collection is empty.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Loop rendering</span><span>VLO</span></div>
+                        <pre><code>&lt;tbody data-source="/api/products"&gt;
+    {for product in products}
+        &lt;tr&gt;
+            &lt;td&gt;#{{product.id}}&lt;/td&gt;
+            &lt;td&gt;{{product.title}}&lt;/td&gt;
+            &lt;td&gt;${{product.price}}&lt;/td&gt;
+        &lt;/tr&gt;
+    {else}
+        &lt;tr&gt;
+            &lt;td colspan="3"&gt;No products found.&lt;/td&gt;
+        &lt;/tr&gt;
+    {/for}
+&lt;/tbody&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>{for item in collection}</strong><p>Iterates over an array. The collection name matches the API resource name (e.g., <code>/api/products</code> → <code>products</code>).</p></div>
+                        <div><strong>{else}...{/for}</strong><p>Renders fallback content when the collection is empty.</p></div>
+                    </div>
+                    <h3>Data Sources</h3>
+                    <p class="component-note">Bind an HTML element to an API endpoint using the <code>data-source</code> attribute. VLO fetches the data server-side and injects it into the template context before rendering.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Data binding</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- Element receives data from /api/products --&gt;
+&lt;tbody data-source="/api/products"&gt;
+    {for product in products}
+        &lt;tr&gt;
+            &lt;td&gt;{{product.id}}&lt;/td&gt;
+            &lt;td&gt;{{product.title}}&lt;/td&gt;
+            &lt;td&gt;${{product.price}}&lt;/td&gt;
+            &lt;td&gt;{{product.stock}}&lt;/td&gt;
+        &lt;/tr&gt;
+    {else}
+        &lt;tr&gt;&lt;td colspan="4"&gt;Empty&lt;/td&gt;&lt;/tr&gt;
+    {/for}
+&lt;/tbody&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>data-source="/api/products"</strong><p>Calls the <code>get_products</code> action defined in <code>pages/api/api.vlo</code>.</p></div>
+                        <div><strong>Server-side only</strong><p>Data is fetched during rendering. No client-side fetch needed.</p></div>
+                    </div>
+                    <h3>Form Directives</h3>
+                    <p class="component-note">VLO provides declarative directives for form submission and actions. These are compiled into fetch handlers during server-side rendering. CSRF tokens are automatically attached.</p>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Directive</span><span>Usage</span><span>Compiles to</span></div>
+                        <div class="naming-row"><span>v-post</span><span>&lt;form v-post="/api/products"&gt;</span><span>fetch(..., method POST)</span></div>
+                        <div class="naming-row"><span>v-put</span><span>&lt;form v-put="/api/products/5"&gt;</span><span>fetch(..., method PUT)</span></div>
+                        <div class="naming-row"><span>v-delete</span><span>&lt;button v-delete="/api/products/5"&gt;</span><span>fetch(..., method DELETE)</span></div>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-header"><span>Directive examples</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- POST form --&gt;
+&lt;form v-post="/api/products" enctype="multipart/form-data"&gt;
+    &lt;input name="title" required /&gt;
+    &lt;input name="price" type="number" required /&gt;
+    &lt;button type="submit"&gt;Add Product&lt;/button&gt;
+&lt;/form&gt;
 
+&lt;!-- PUT form (edit) --&gt;
+&lt;form v-put="/api/products/{{product.id}}"&gt;
+    &lt;input name="title" value="{{product.title}}" /&gt;
+    &lt;button type="submit"&gt;Save Changes&lt;/button&gt;
+&lt;/form&gt;
+
+&lt;!-- DELETE button with confirmation --&gt;
+&lt;button v-delete="/api/products/{{product.id}}" v-confirm="Delete this product?"&gt;
+    Delete Product
+&lt;/button&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Auto-reload</strong><p>After POST/PUT/DELETE, the page reloads preserving the current URL (including pagination).</p></div>
+                        <div><strong>CSRF protection</strong><p>X-CSRF-Token header is automatically attached from the meta tag.</p></div>
+                        <div><strong>Toast integration</strong><p>Success/error toasts appear automatically via cookie-based flash messages.</p></div>
+                        <div><strong>Clean URLs</strong><p>No <code>?status=success</code> pollution. The page reloads at its clean URL.</p></div>
+                                                <div><strong>Login Redirects</strong><p>If a <code>v-post</code> form submits to a login endpoint, VLO automatically captures the <code>?next=</code> URL parameter and redirects the browser upon successful authentication.</p></div>
+                    </div>
+                    <h3>Real-time Updates (SSE)</h3>
+                    <p class="component-note">VLO includes a built-in Server-Sent Events (SSE) broadcast system. Use the <code>|sync</code> modifier to make any value update instantly across all connected browsers when a mutation occurs.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Syncing stock counter</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- Renders a span that listens to the "products" SSE channel --&gt;
+&lt;span&gt;Stock: {{ product.stock | sync:"products" }}&lt;/span&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Automatic Broadcasting</strong><p>Any <code>POST</code>, <code>PUT</code>, or <code>DELETE</code> API request automatically broadcasts its response payload to the SSE channel matching the resource name.</p></div>
+                        <div><strong>Smart Payloads</strong><p>If the SSE receives a full API object, it triggers a localized AJAX refresh. If it receives a simple string/number, it updates the DOM text instantly with a CSS flash animation.</p></div>
+                    </div>
+
+                    <h3>AJAX & Seamless Navigation</h3>
+                    <p class="component-note">Turn any container into an AJAX-powered wrapper using the <code>|ajax</code> modifier. Links and forms inside the wrapper intercept clicks/submits and swap the HTML without a full page reload.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>AJAX Wrapper</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- The #products-list div will intercept internal links and form submits --&gt;
+&lt;div id="products-list"&gt;
+    {{ "" | ajax:"" }} &lt;!-- Empty URL means "listen-only" wrapper --&gt;
+    
+    &lt;!-- Pagination links and search forms inside here become AJAX automatically --&gt;
+    &lt;a href="?page=2"&gt;Next Page&lt;/a&gt;
+&lt;/div&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Infinite Scroll</strong><p>Add <code>data-load-more</code> to a pagination link and <code>data-append</code> to your table body. VLO's IntersectionObserver will automatically fetch and append the next page when the user scrolls near the bottom.</p></div>
+                        <div><strong>State Preservation</strong><p>AJAX navigation preserves the browser history, updates the URL bar, and handles <code>popstate</code> (back/forward buttons) seamlessly.</p></div>
+                    </div>
+                    <h3>Rendering Flow</h3>
                     <div class="architecture-flow">
-
-                        <div>
-                            <span>01</span>
-                            <strong>Layout</strong>
-                            <small>BaseLayout</small>
-                        </div>
-
+                        <div><span>01</span><strong>Request</strong><small>/products</small></div>
                         <i>→</i>
-
-                        <div>
-                            <span>02</span>
-                            <strong>Page</strong>
-                            <small>Home.vlo</small>
-                        </div>
-
+                        <div><span>02</span><strong>data-source</strong><small>Fetch API</small></div>
                         <i>→</i>
-
-                        <div>
-                            <span>03</span>
-                            <strong>Components</strong>
-                            <small>Button / Card / Badge</small>
-                        </div>
-
+                        <div><span>03</span><strong>Template</strong><small>Loops + Ifs</small></div>
+                        <i>→</i>
+                        <div><span>04</span><strong>HTML</strong><small>Sent to browser</small></div>
                     </div>
-
-
-                    <div class="info-box">
-
-                        <strong>
-                            Keep pages readable.
-                        </strong>
-
-                        <p>
-                            If a page contains a large block of repeated
-                            UI, move that UI into a reusable component.
-                        </p>
-
+                    <div class="rule-card">
+                        <strong>Server-side only</strong>
+                        <p>All templating (<code>{if}</code>, <code>{for}</code>, <code>{{}}</code>) is resolved on the server. The browser receives fully rendered HTML. No JavaScript framework needed for data display.</p>
                     </div>
-
                 </section>
 
+                <section class="doc-section" id="modifiers">
+                    <div class="section-number">06a</div>
+                    <h2>Modifiers</h2>
+                    <p class="section-lead">Transform and format data directly in the template using the pipe <code>|</code> syntax. Modifiers are applied from left to right, making it easy to chain operations.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Modifier examples</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- Text formatting --&gt;
+&lt;p&gt;{{ product.title | upper | truncate:30 }}&lt;/p&gt;
 
-                <!-- 07 -->
-                <section class="doc-section" id="styling">
+&lt;!-- Number formatting --&gt;
+&lt;p&gt;Price: {{ product.price | number:2 }}&lt;/p&gt;
+&lt;p&gt;Total: {{ total_revenue | currency:"$" }}&lt;/p&gt;
+&lt;p&gt;Growth: {{ growth | percent:1 }}&lt;/p&gt;
 
+&lt;!-- Fallbacks and utilities --&gt;
+&lt;p&gt;{{ user.bio | default:"No bio provided." | nl2br }}&lt;/p&gt;</code></pre>
+                    </div>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Modifier</span><span>Description</span><span>Example</span></div>
+                        <div class="naming-row"><span>upper / lower</span><span>Change text case</span><span>{{ text | upper }}</span></div>
+                        <div class="naming-row"><span>number:n</span><span>Format with 'n' decimals and thousands separators</span><span>{{ val | number:2 }}</span></div>
+                        <div class="naming-row"><span>currency:sym</span><span>Format as currency with custom symbol</span><span>{{ val | currency:"€" }}</span></div>
+                        <div class="naming-row"><span>truncate:n</span><span>Truncate to 'n' characters with ellipsis</span><span>{{ text | truncate:50 }}</span></div>
+                        <div class="naming-row"><span>default:val</span><span>Fallback if empty, null, or "null"</span><span>{{ val | default:"N/A" }}</span></div>
+                        <div class="naming-row"><span>nl2br</span><span>Convert newlines to &lt;br&gt; tags</span><span>{{ text | nl2br }}</span></div>
+                        <div class="naming-row"><span>escape</span><span>HTML-encode special characters</span><span>{{ text | escape }}</span></div>
+                        <div class="naming-row"><span>sync:channel</span><span>Real-time SSE synchronization</span><span>{{ stock | sync:"products" }}</span></div>
+                        <div class="naming-row"><span>ajax:url</span><span>Client-side fetch & DOM swap</span><span>{{ "" | ajax:"" }}</span></div>
+                    </div>
+                    <div class="rule-card">
+                        <strong>Default values with pipe</strong>
+                        <p>The syntax <code>{{ prop | default:"fallback" }}</code> is the cleanest way to handle missing data without wrapping the element in an <code>{if}</code> block.</p>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="pages">
                     <div class="section-number">07</div>
-
-                    <h2>Styling</h2>
-
-                    <p class="section-lead">
-                        VLO uses a dark, modern visual language with
-                        cyan accents. Styles should reinforce that identity.
-                    </p>
-
-
-                    <h3>Design tokens</h3>
-
-                    <div class="tokens-grid">
-
-                        <div class="token">
-                            <span class="token-dot primary"></span>
-                            <div>
-                                <strong>Primary</strong>
-                                <small>#00f5ff</small>
-                            </div>
-                        </div>
-
-                        <div class="token">
-                            <span class="token-dot success"></span>
-                            <div>
-                                <strong>Success</strong>
-                                <small>#00ff88</small>
-                            </div>
-                        </div>
-
-                        <div class="token">
-                            <span class="token-dot background"></span>
-                            <div>
-                                <strong>Background</strong>
-                                <small>#080808</small>
-                            </div>
-                        </div>
-
-                        <div class="token">
-                            <span class="token-dot card"></span>
-                            <div>
-                                <strong>Card</strong>
-                                <small>#111111</small>
-                            </div>
-                        </div>
-
+                    <h2>Pages</h2>
+                    <p class="section-lead">Pages compose components. They should not duplicate component implementations.</p>
+                    <div class="architecture-flow">
+                        <div><span>01</span><strong>Layout</strong><small>Auto-resolved</small></div>
+                        <i>→</i>
+                        <div><span>02</span><strong>Page</strong><small>Home.vlo</small></div>
+                        <i>→</i>
+                        <div><span>03</span><strong>Components</strong><small>Button / Card</small></div>
                     </div>
-
-
-                    <h3>Styling rules</h3>
-
-                    <ul class="styled-list">
-                        <li>
-                            Prefer existing design variables.
-                        </li>
-
-                        <li>
-                            Avoid introducing random colors.
-                        </li>
-
-                        <li>
-                            Keep spacing consistent.
-                        </li>
-
-                        <li>
-                            Use responsive layouts by default.
-                        </li>
-
-                        <li>
-                            Avoid excessive shadows and gradients.
-                        </li>
-
-                        <li>
-                            Keep borders subtle and purposeful.
-                        </li>
-                    </ul>
-
+                    <div class="info-box">
+                        <strong>Keep pages readable.</strong>
+                        <p>If a page contains a large block of repeated UI, move that UI into a reusable component.</p>
+                    </div>
                 </section>
 
-
-                <!-- 08 -->
-                <section class="doc-section" id="branding">
-
+                <section class="doc-section" id="layouts">
                     <div class="section-number">08</div>
+                    <h2>Layouts</h2>
+                    <p class="section-lead">VLO automatically resolves layouts based on page paths, creating a hierarchical system that reduces boilerplate.</p>
+                    <h3>Resolution order</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>Example: /admin/dashboard</span><span>Hierarchy</span></div>
+                        <pre><code>1. layouts/admin/dashboardLayout.vlo  (page-specific)
+   ↓
+2. layouts/adminLayout.vlo            (parent directory)
+   ↓
+3. layouts/BaseLayout.vlo             (global fallback)</code></pre>
+                    </div>
+                    <h3>Resolution examples</h3>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Page path</span><span>Looks for</span><span>Fallback</span></div>
+                        <div class="naming-row"><span>/docs</span><span>layouts/DocsLayout.vlo</span><span>BaseLayout.vlo</span></div>
+                        <div class="naming-row"><span>/admin/users</span><span>layouts/admin/usersLayout.vlo</span><span>adminLayout → Base</span></div>
+                        <div class="naming-row"><span>/admin/dashboard</span><span>layouts/admin/dashboardLayout.vlo</span><span>adminLayout → Base</span></div>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Automatic</strong><p>No need to wrap pages in layout tags. The framework injects the correct layout.</p></div>
+                        <div><strong>Case-insensitive</strong><p>Matches DocsLayout.vlo, docslayout.vlo, or DOCSLAYOUT.vlo automatically.</p></div>
+                        <div><strong>Overridable</strong><p>Explicitly use &lt;BaseLayout&gt; in your page to bypass automatic resolution.</p></div>
+                        <div><strong>Build-aware</strong><p>Layouts are resolved and baked into static HTML during <code>vlo build</code>.</p></div>
+                    </div>
+                    <div class="rule-card">
+                        <strong>Layout structure</strong>
+                        <p>Specific layouts should use <code>&lt;slot /&gt;</code> or <code>&#123;&#123;children&#125;&#125;</code> to inject page content.</p>
+                    </div>
+                </section>
 
+                <section class="doc-section" id="styling">
+                    <div class="section-number">09</div>
+                    <h2>Styling</h2>
+                    <p class="section-lead">VLO uses a dark, modern visual language with cyan accents. Styles should reinforce that identity.</p>
+                    <h3>Design tokens</h3>
+                    <div class="tokens-grid">
+                        <div class="token"><span class="token-dot primary"></span><div><strong>Primary</strong><small>#00f5ff</small></div></div>
+                        <div class="token"><span class="token-dot success"></span><div><strong>Success</strong><small>#00ff88</small></div></div>
+                        <div class="token"><span class="token-dot background"></span><div><strong>Background</strong><small>#080808</small></div></div>
+                        <div class="token"><span class="token-dot card"></span><div><strong>Card</strong><small>#111111</small></div></div>
+                    </div>
+                    <h3>Styling rules</h3>
+                    <ul class="styled-list">
+                        <li>Prefer existing design variables.</li>
+                        <li>Avoid introducing random colors.</li>
+                        <li>Keep spacing consistent.</li>
+                        <li>Use responsive layouts by default.</li>
+                        <li>Avoid excessive shadows and gradients.</li>
+                        <li>Keep borders subtle and purposeful.</li>
+                    </ul>
+                </section>
+
+                <section class="doc-section" id="navbar">
+                    <div class="section-number">10</div>
+                    <h2>Navbar</h2>
+                    <p class="section-lead">VLO includes a responsive Navbar component with built-in variants, sizing, shadows, sticky positioning, CSS-only mobile navigation, and server-side active link resolution.</p>
+                    <div class="rule-card">
+                        <strong>Full Navbar API documentation</strong>
+                        <p>See the dedicated <a href="/components#navbar" style="color:#00f5ff">Navbar section in Components</a> for complete variant, size, shadow, color, and mobile mode reference.</p>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="branding">
+                    <div class="section-number">11</div>
                     <h2>VLO Branding</h2>
-
-                    <p class="section-lead">
-                        Every VLO page should feel like part of the
-                        same product. Branding consistency is not optional.
-                    </p>
-
-
+                    <p class="section-lead">Every VLO page should feel like part of the same product. Branding consistency is not optional.</p>
                     <div class="brand-showcase">
+                        <div class="brand-logo">VLO</div>
+                        <p>Visual Language & Objects</p>
+                    </div>
+                    <h3>Brand identity</h3>
+                    <div class="brand-grid">
+                        <div><strong>Primary color</strong><span>#00F5FF</span></div>
+                        <div><strong>Accent</strong><span>#00FF88</span></div>
+                        <div><strong>Background</strong><span>#080808</span></div>
+                        <div><strong>Surface</strong><span>#111111</span></div>
+                    </div>
+                    <h3>Brand rules</h3>
+                    <div class="brand-rules">
+                        <div><span>01</span><strong>Use VLO consistently.</strong><p>Always use the official VLO name and capitalization.</p></div>
+                        <div><span>02</span><strong>Protect the visual language.</strong><p>Avoid unrelated color systems or visual styles.</p></div>
+                        <div><span>03</span><strong>Keep interfaces clean.</strong><p>VLO should feel modern, focused and technically polished.</p></div>
+                        <div><span>04</span><strong>Don't over-brand.</strong><p>Branding should support the interface, not overpower it.</p></div>
+                    </div>
+                </section>
 
-                        <div class="brand-logo">
-                            VLO
-                        </div>
+                <section class="doc-section" id="performance">
+                    <div class="section-number">12</div>
+                    <h2>Performance</h2>
+                    <p class="section-lead">VLO includes built-in optimizations for both browser and server performance.</p>
+                    <h3>Browser caching</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>Cache-Control headers</span><span>HTTP</span></div>
+                        <pre><code># Static assets (CSS, JS, images, uploads)
+Cache-Control: public, max-age=31536000, immutable
 
-                        <p>
-                            Visual Language & Objects
-                        </p>
+# HTML pages and API responses
+Cache-Control: private, no-cache</code></pre>
+                    </div>
+                    <h3>Server optimizations</h3>
+                    <div class="number-list">
+                        <div><b>01</b><p><strong>API action caching</strong> — <code>api.vlo</code> definitions are cached in memory and reload on file change.</p></div>
+                        <div><b>02</b><p><strong>Non-blocking I/O</strong> — File uploads use background threads via <code>spawn_blocking</code>.</p></div>
+                        <div><b>03</b><p><strong>Shared runtime</strong> — Data-source queries reuse a dedicated Tokio runtime.</p></div>
+                        <div><b>04</b><p><strong>Hash-based rendering</strong> — Component loops use hash comparison to avoid infinite expansion.</p></div>
+                        <div><b>05</b><p><strong>CSS-only animations</strong> — Toast auto-dismiss uses pure CSS, zero JavaScript.</p></div>
+                        <div><b>06</b><p><strong>Global Middleware</strong> — Production <code>vlo serve</code> correctly applies GZIP compression, Cache-Control headers, and Session resolution to all SSR fallback routes.</p></div>
+                    </div>
+                </section>
 
+                <section class="doc-section" id="accessibility">
+                    <div class="section-number">13</div>
+                    <h2>Accessibility</h2>
+                    <p class="section-lead">Components should be usable by as many people as possible.</p>
+                    <div class="access-grid">
+                        <div><span>01</span><h3>Keyboard</h3><p>Interactive elements should be reachable and usable with a keyboard.</p></div>
+                        <div><span>02</span><h3>Contrast</h3><p>Text and interactive elements should have sufficient contrast.</p></div>
+                        <div><span>03</span><h3>Labels</h3><p>Form controls should have clear labels or meaningful placeholders.</p></div>
+                        <div><span>04</span><h3>Semantics</h3><p>Use appropriate HTML elements instead of relying entirely on generic containers.</p></div>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="security">
+                    <div class="section-number">14</div>
+                    <h2>Security</h2>
+                    <p class="section-lead">VLO projects should treat security as part of normal development rather than an afterthought.</p>
+                    <h3>CSRF Protection</h3>
+                    <p class="component-note">VLO automatically protects all state-changing requests (POST, PUT, PATCH, DELETE) with HMAC-SHA256 CSRF tokens. No manual implementation needed.</p>
+                    <div class="architecture-flow">
+                        <div><span>01</span><strong>Session</strong><small>Login creates session</small></div>
+                        <i>→</i>
+                        <div><span>02</span><strong>Token</strong><small>HMAC-SHA256 derived</small></div>
+                        <i>→</i>
+                        <div><span>03</span><strong>Meta tag</strong><small>Injected in &lt;head&gt;</small></div>
+                        <i>→</i>
+                        <div><span>04</span><strong>Header</strong><small>X-CSRF-Token sent</small></div>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-header"><span>Auto-injected by VLO</span><span>HTML</span></div>
+                        <pre><code>&lt;meta name="csrf-token" content="a1b2c3d4e5f6..."&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Stateless</strong><p>Tokens are derived from the session using HMAC. No server-side token storage.</p></div>
+                        <div><strong>Exempt routes</strong><p><code>/api/auth/*</code> and <code>/api/files/upload</code> are exempt from CSRF checks.</p></div>
+                        <div><strong>Timing-safe</strong><p>Token comparison uses constant-time algorithm to prevent timing attacks.</p></div>
+                        <div><strong>Zero config</strong><p><code>v-post</code>, <code>v-put</code>, <code>v-delete</code> automatically attach the token.</p></div>
+                    </div>
+                    <h3>Session Management</h3>
+                    <p class="component-note">Sessions are stored in the database with expiration timestamps. The session cookie is <code>HttpOnly</code> and <code>SameSite=Lax</code>.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Session cookie</span><span>HTTP</span></div>
+                        <pre><code>Set-Cookie: vlo_session=abc123...; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400</code></pre>
+                    </div>
+                    <h3>Page Guards</h3>
+                    <p class="component-note">Protect individual pages with <code>auth</code> and <code>roles</code> attributes on the layout tag.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/admin/users.vlo</span><span>VLO</span></div>
+                        <pre><code>&lt;BaseLayout title="Users" auth="true" roles="Admin"&gt;
+    &lt;!-- Only authenticated Admin users can view this page --&gt;
+&lt;/BaseLayout&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>auth="true"</strong><p>Redirects unauthenticated users to <code>/login?next=/current-page</code>.</p></div>
+                        <div><strong>roles="Admin"</strong><p>Returns 403 Forbidden for users without the matching role.</p></div>
+                        <div><strong>guest="true"</strong><p>Redirects authenticated users away (useful for login/register pages).</p></div>
+                    </div>
+                    <h3>API Authentication</h3>
+                    <p class="component-note">All <code>/api/*</code> routes (except auth and file endpoints) require a valid session. Unauthenticated requests receive <code>401 Unauthorized</code>.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>.env — Public API routes</span><span>ENV</span></div>
+                        <pre><code># Comma-separated list of API prefixes that don't require auth
+AUTH_API_PUBLIC_ROUTES=/api/public,/api/health</code></pre>
+                    </div>
+                    <h3>Security rules</h3>
+                    <div class="security-list">
+                        <div><span>!</span><div><strong>Never expose secrets.</strong><p>API keys, passwords and private credentials must not be committed into project files.</p></div></div>
+                        <div><span>!</span><div><strong>Validate user input.</strong><p>Never assume data coming from users is safe or correctly formatted.</p></div></div>
+                        <div><span>!</span><div><strong>Keep dependencies controlled.</strong><p>Only add dependencies when they solve a real project requirement.</p></div></div>
+                        <div><span>!</span><div><strong>Don't bypass security checks.</strong><p>Development convenience should never become a production security risk.</p></div></div>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="modules">
+                    <div class="section-number">15</div>
+                    <h2>Modules & Charting</h2>
+                    <p class="section-lead">VLO supports a modular extension system. Modules are self-contained packages of components, styles, scripts, and declarative data handlers that can be dropped into the <code>modules/</code> directory.</p>
+                    
+                    <h3>Using Built-in Modules</h3>
+                    <p class="component-note">VLO ships with a powerful <code>charting</code> module. Components automatically fetch, transform, and render data based on props, requiring zero custom Rust code.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Charting examples</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- Bar Chart: Grouped and aggregated automatically --&gt;
+&lt;BarChart 
+    source="/api/dash/get_category_stats"
+    title="Revenue by Category"
+    label_column="category"
+    value_column="total_revenue"
+    limit="8"
+    color="#00f5ff"
+/&gt;
+
+&lt;!-- Pie Chart: Automatically calculates shares and SVG paths --&gt;
+&lt;PieChart 
+    source="/api/dash/get_category_stats"
+    title="Revenue Share"
+    label_column="category"
+    value_column="total_revenue"
+    computed="share"
+/&gt;
+
+&lt;!-- Line Chart: With running average computation --&gt;
+&lt;LineChart 
+    source="/api/dash/get_monthly_products"
+    title="Smoothed Monthly Trend"
+    label_column="month"
+    value_column="count"
+    computed="running_avg"
+    color="#a78bfa"
+/&gt;</code></pre>
                     </div>
 
+                    <h3>Advanced Chart Props</h3>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Prop</span><span>Description</span><span>Example</span></div>
+                        <div class="naming-row"><span>date_column</span><span>Extract date periods (year, month, week, quarter, day)</span><span>date_column="created_at|month"</span></div>
+                        <div class="naming-row"><span>computed</span><span>Override the displayed value with a computed metric</span><span>computed="percent_of_total"</span></div>
+                        <div class="naming-row"><span>group_by</span><span>Group raw data by a specific column before rendering</span><span>group_by="category"</span></div>
+                    </div>
 
-                    <h3>Brand identity</h3>
+                    <h3>Module Structure</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>modules/charting/</span><span>Directory</span></div>
+                        <pre><code>modules/
+└── charting/
+    ├── module.json          # Manifest, exports, and handler rules
+    ├── components/          # .vlo component files (BarChart, PieChart, etc.)
+    ├── styles/              # Module-specific CSS (auto-injected)
+    └── scripts/             # Module-specific JS (auto-injected)</code></pre>
+                    </div>
+                    <div class="rule-card">
+                        <strong>Declarative Handler Pipeline</strong>
+                        <p>Modules use a JSON pipeline in <code>module.json</code> to <code>map</code>, <code>group</code>, <code>sort</code>, and <code>limit</code> data. This allows the community to build and share complex, reusable data components without touching the framework core.</p>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="api-database">
+                    <div class="section-number">16</div>
+                    <h2>API & Database</h2>
+                    <p class="section-lead">VLO provides a centralized API definition system backed by SQL. Write standard SQL queries in a single file and they become REST endpoints automatically.</p>
+                    <h3>API Definitions</h3>
+                    <p class="component-note">All API actions are defined in <code>pages/api/api.vlo</code> (or namespaced subdirectories) inside a <code>&lt;script server&gt;</code> block as JSON.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/api/api.vlo</span><span>JSON</span></div>
+                        <pre><code>&lt;script server&gt;
+{
+  "get_products": "SELECT * FROM products ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}}",
+  "get_products_count": "SELECT COUNT(*) as total FROM products",
+  "post_products": "INSERT INTO products (title, price) VALUES ({{title}}, {{price}})",
+  "put_products": "UPDATE products SET title = {{title}} WHERE id = {{id}}",
+  "delete_products": "DELETE FROM products WHERE id = {{id}}"
+}
+&lt;/script&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Prefix convention</strong><p><code>get_</code>, <code>post_</code>, <code>put_</code>, <code>patch_</code>, <code>delete_</code> map to HTTP methods.</p></div>
+                        <div><strong>Parameter interpolation</strong><p><code>{{param}}</code> is replaced with query/body values, safely escaped.</p></div>
+                        <div><strong>Auto-pagination</strong><p><code>page</code>, <code>limit</code>, and <code>offset</code> are injected automatically.</p></div>
+                        <div><strong>Memory cache</strong><p>Definitions are cached and reload only when the file changes.</p></div>
+                    </div>
+
+                    <h3>Namespaced APIs</h3>
+                    <p class="component-note">For larger projects, organize API definitions into subdirectories. A file at <code>pages/api/dash/api.vlo</code> can be accessed via <code>/api/dash/get_stats</code>.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/api/dash/api.vlo</span><span>JSON</span></div>
+                        <pre><code>&lt;script server&gt;
+{
+  "get_category_stats": "SELECT category, SUM(price) as total_revenue FROM products GROUP BY category",
+  "get_monthly_products": "SELECT strftime('%Y-%m', created_at) as month, COUNT(*) as count FROM products GROUP BY month"
+}
+&lt;/script&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Automatic Discovery</strong><p>VLO scans all <code>pages/api/*/api.vlo</code> files on startup and caches them in memory.</p></div>
+                        <div><strong>Clean URLs</strong><p>The namespace becomes part of the route: <code>/api/dash/get_category_stats</code>.</p></div>
+                    </div>
+
+                    <h3>Database Support</h3>
+                    <p class="component-note">VLO supports SQLite, PostgreSQL, and MySQL. Configure via environment variables.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>.env</span><span>ENV</span></div>
+                        <pre><code># SQLite (default)
+DATABASE_URL=sqlite://vlo_app.db
+DB_DRIVER=sqlite
+
+# PostgreSQL
+DATABASE_URL=postgres://user:pass@localhost/vlo_app
+DB_DRIVER=postgres
+DB_SCHEMA=schema.postgres.sql
+
+# MySQL
+DATABASE_URL=mysql://user:pass@localhost/vlo_app
+DB_DRIVER=mysql
+DB_SCHEMA=schema.mysql.sql</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>DB_SCHEMA</strong><p>Optional. Specifies which schema file to load. Defaults to <code>schema.sql</code>.</p></div>
+                        <div><strong>Auto-migration</strong><p>Schema is executed on startup. Create tables with <code>CREATE TABLE IF NOT EXISTS</code>.</p></div>
+                        <div><strong>Parameter syntax</strong><p>SQLite/MySQL use <code>?</code>, PostgreSQL uses <code>$1, $2</code>. Handled automatically.</p></div>
+                    </div>
+                    <h3>API Response Format</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>GET /api/products?page=2&limit=10</span><span>JSON</span></div>
+                        <pre><code>{
+  "success": true,
+  "data": [
+    { "id": 15, "title": "Widget", "price": 29.99 },
+    { "id": 14, "title": "Gadget", "price": 49.99 }
+  ],
+  "affected_rows": 10,
+  "pagination": {
+    "total": 220,
+    "page": 2,
+    "limit": 10,
+    "total_pages": 22,
+    "has_next": true,
+    "has_prev": true
+  }
+}</code></pre>
+                    </div>
+                    <div class="rule-card">
+                        <strong>Auto-COUNT</strong>
+                        <p>For any <code>get_*</code> action with <code>LIMIT</code>/<code>OFFSET</code>, VLO automatically strips them, wraps the query in <code>SELECT COUNT(*) FROM (...)</code>, and attaches the <code>pagination</code> object to the response.</p>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="flash">
+                    <div class="section-number">17</div>
+                    <h2>Flash Messages</h2>
+                    <p class="section-lead">Flash messages provide one-time feedback after form submissions and API actions. They use cookie-based storage — no database table required, no URL pollution, and they auto-dismiss.</p>
+                    <h3>How it works</h3>
+                    <div class="architecture-flow">
+                        <div><span>01</span><strong>Action</strong><small>POST /api/products</small></div>
+                        <i>→</i>
+                        <div><span>02</span><strong>Cookie</strong><small>Server sets vlo_flash</small></div>
+                        <i>→</i>
+                        <div><span>03</span><strong>Reload</strong><small>Page reloads cleanly</small></div>
+                        <i>→</i>
+                        <div><span>04</span><strong>Toast</strong><small>Renders &amp; expires</small></div>
+                    </div>
+                    <h3>The Toast Component</h3>
+                    <p class="component-note">Place <code>&lt;Toast /&gt;</code> anywhere in your page. If a flash message exists, it renders automatically. If not, it outputs nothing.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Basic usage</span><span>VLO</span></div>
+                        <pre><code>{if flash_messages}
+    &lt;Toast /&gt;
+{/if}</code></pre>
+                    </div>
+                    <h3>Three Rendering Modes</h3>
+                    <div class="principles-grid">
+                        <article>
+                            <div class="principle-icon">A</div>
+                            <h3>Silence</h3>
+                            <p>No <code>&lt;Toast&gt;</code> on the page. Nothing renders. Zero overhead.</p>
+                        </article>
+                        <article>
+                            <div class="principle-icon">B</div>
+                            <h3>Auto</h3>
+                            <p><code>&lt;Toast /&gt;</code> with no props. Renders flash data as-is.</p>
+                        </article>
+                        <article>
+                            <div class="principle-icon">C</div>
+                            <h3>Custom</h3>
+                            <p>Map flash fields to any prop. Swap, override, or hardcode values.</p>
+                        </article>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-header"><span>Custom mapping</span><span>VLO</span></div>
+                        <pre><code>{if flash_messages}
+    &lt;!-- Swap title and description --&gt;
+    &lt;Toast title="{{flash_description}}" description="{{flash_title}}" /&gt;
+
+    &lt;!-- Override variant and icon --&gt;
+    &lt;Toast variant="error" icon="🚨" title="Critical!" description="{{flash_description}}" /&gt;
+{/if}</code></pre>
+                    </div>
+                    <h3>Toast Props</h3>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Prop</span><span>Values</span><span>Default</span></div>
+                        <div class="naming-row"><span>variant</span><span>success / error / info</span><span>success</span></div>
+                        <div class="naming-row"><span>duration</span><span>short / medium / long / 2s–6s</span><span>auto</span></div>
+                        <div class="naming-row"><span>icon</span><span>Any emoji or string</span><span>From flash</span></div>
+                        <div class="naming-row"><span>title</span><span>Any string</span><span>From flash</span></div>
+                        <div class="naming-row"><span>description</span><span>Any string</span><span>From flash</span></div>
+                    </div>
+                    <h3>Duration Scale</h3>
+                    <div class="info-grid">
+                        <div><strong>short</strong><p>2 seconds. Quick confirmations.</p></div>
+                        <div><strong>medium</strong><p>4 seconds. Default for most messages.</p></div>
+                        <div><strong>long</strong><p>6 seconds. Detailed error messages.</p></div>
+                        <div><strong>auto</strong><p>Calculated from description length: &lt;30 chars → short, 30–80 → medium, 80+ → long.</p></div>
+                    </div>
+
+                    <h3>Variant Colors</h3>
 
                     <div class="brand-grid">
-
-                        <div>
-                            <strong>Primary color</strong>
-                            <span>#00F5FF</span>
-                        </div>
-
-                        <div>
-                            <strong>Accent</strong>
-                            <span>#00FF88</span>
-                        </div>
-
-                        <div>
-                            <strong>Background</strong>
-                            <span>#080808</span>
-                        </div>
-
-                        <div>
-                            <strong>Surface</strong>
-                            <span>#111111</span>
-                        </div>
-
+                        <div class="variant-color success"><strong>success</strong><span>#00ff88</span></div>
+                        <div class="variant-color error"><strong>error</strong><span>#ff4444</span></div>
+                        <div class="variant-color info"><strong>info</strong><span>#00f5ff</span></div>
+                        <div class="variant-color warning"><strong>warning</strong><span>#ffaa00</span></div>
                     </div>
 
-
-                    <h3>Brand rules</h3>
-
-                    <div class="brand-rules">
-
-                        <div>
-                            <span>01</span>
-                            <strong>Use VLO consistently.</strong>
-                            <p>
-                                Always use the official VLO name and
-                                capitalization.
-                            </p>
-                        </div>
-
-                        <div>
-                            <span>02</span>
-                            <strong>Protect the visual language.</strong>
-                            <p>
-                                Avoid unrelated color systems or
-                                visual styles.
-                            </p>
-                        </div>
-
-                        <div>
-                            <span>03</span>
-                            <strong>Keep interfaces clean.</strong>
-                            <p>
-                                VLO should feel modern, focused and
-                                technically polished.
-                            </p>
-                        </div>
-
-                        <div>
-                            <span>04</span>
-                            <strong>Don't over-brand.</strong>
-                            <p>
-                                Branding should support the interface,
-                                not overpower it.
-                            </p>
-                        </div>
-
+                    <h3>Flash Context Variables</h3>
+                    <p class="component-note">When a flash exists, these variables are available in the template context:</p>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Variable</span><span>Type</span><span>Example</span></div>
+                        <div class="naming-row"><span>flash_messages</span><span>Array</span><span>[{...}]</span></div>
+                        <div class="naming-row"><span>flash_variant</span><span>String</span><span>"success"</span></div>
+                        <div class="naming-row"><span>flash_icon</span><span>String</span><span>"✅"</span></div>
+                        <div class="naming-row"><span>flash_title</span><span>String</span><span>"Operation Successful"</span></div>
+                        <div class="naming-row"><span>flash_description</span><span>String</span><span>"created completed."</span></div>
                     </div>
-
+                    <div class="rule-card">
+                        <strong>Cookie lifecycle</strong>
+                        <p>Flash cookie has <code>Max-Age=60</code> (1 minute). It is expired (<code>Max-Age=0</code>) after the first page render that contains a <code>&lt;Toast&gt;</code>. Refreshing the page will not re-display the toast.</p>
+                    </div>
                 </section>
 
-
-                <!-- 09 -->
-                <section class="doc-section" id="accessibility">
-
-                    <div class="section-number">09</div>
-
-                    <h2>Accessibility</h2>
-
-                    <p class="section-lead">
-                        Components should be usable by as many people
-                        as possible.
-                    </p>
-
-
-                    <div class="access-grid">
-
-                        <div>
-                            <span>01</span>
-                            <h3>Keyboard</h3>
-                            <p>
-                                Interactive elements should be reachable
-                                and usable with a keyboard.
-                            </p>
-                        </div>
-
-                        <div>
-                            <span>02</span>
-                            <h3>Contrast</h3>
-                            <p>
-                                Text and interactive elements should have
-                                sufficient contrast.
-                            </p>
-                        </div>
-
-                        <div>
-                            <span>03</span>
-                            <h3>Labels</h3>
-                            <p>
-                                Form controls should have clear labels
-                                or meaningful placeholders.
-                            </p>
-                        </div>
-
-                        <div>
-                            <span>04</span>
-                            <h3>Semantics</h3>
-                            <p>
-                                Use appropriate HTML elements instead of
-                                relying entirely on generic containers.
-                            </p>
-                        </div>
-
+                <section class="doc-section" id="pagination">
+                    <div class="section-number">18</div>
+                    <h2>Pagination</h2>
+                    <p class="section-lead">VLO provides automatic pagination for any <code>get_*</code> API action that includes <code>LIMIT</code> and <code>OFFSET</code>. No manual COUNT queries, no math, no boilerplate.</p>
+                    <h3>How it works</h3>
+                    <div class="architecture-flow">
+                        <div><span>01</span><strong>Query</strong><small>SELECT ... LIMIT</small></div>
+                        <i>→</i>
+                        <div><span>02</span><strong>Auto-COUNT</strong><small>Strips LIMIT, wraps in COUNT</small></div>
+                        <i>→</i>
+                        <div><span>03</span><strong>Pagination</strong><small>Object attached</small></div>
+                        <i>→</i>
+                        <div><span>04</span><strong>Context</strong><small>Injected globally</small></div>
                     </div>
+                    <h3>Writing Paginated Queries</h3>
+                    <p class="component-note">Just write standard SQL with <code>LIMIT {{limit}} OFFSET {{offset}}</code>. VLO handles everything else.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/api/api.vlo</span><span>JSON</span></div>
+                        <pre><code>{
+  "get_users": "SELECT id, name, email, role FROM users ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}}"
+}</code></pre>
+                    </div>
+                    <div class="rule-card">
+                        <strong>No subquery hacks</strong>
+                        <p>You do not need <code>COUNT(*) OVER()</code> or <code>(SELECT COUNT(*) FROM ...)</code>. VLO automatically strips <code>LIMIT</code>/<code>OFFSET</code> from your query, wraps it in <code>SELECT COUNT(*) FROM (...) AS _vlo_count_subquery</code>, and runs it separately.</p>
+                    </div>
+                    <h3>Pagination Context Variables</h3>
+                    <p class="component-note">These variables are automatically injected into the template context for any page that uses a paginated data-source.</p>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Variable</span><span>Type</span><span>Description</span></div>
+                        <div class="naming-row"><span>page</span><span>Number</span><span>Current page number (starts at 1)</span></div>
+                        <div class="naming-row"><span>limit</span><span>Number</span><span>Items per page</span></div>
+                        <div class="naming-row"><span>offset</span><span>Number</span><span>Calculated offset for SQL</span></div>
+                        <div class="naming-row"><span>total</span><span>Number</span><span>Total records in the table</span></div>
+                        <div class="naming-row"><span>total_pages</span><span>Number</span><span>Total number of pages</span></div>
+                        <div class="naming-row"><span>prev_page</span><span>Number</span><span>Previous page number</span></div>
+                        <div class="naming-row"><span>next_page</span><span>Number</span><span>Next page number</span></div>
+                        <div class="naming-row"><span>has_next</span><span>Boolean</span><span>Whether a next page exists</span></div>
+                        <div class="naming-row"><span>has_prev</span><span>Boolean</span><span>Whether a previous page exists</span></div>
+                    </div>
+                    <h3>The Pagination Component</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>Usage</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- Place after your data table --&gt;
+&lt;Pagination /&gt;</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-header"><span>Rendered output</span><span>HTML</span></div>
+                        <pre><code>&lt;nav class="vlo-pagination"&gt;
+    &lt;a href="?page=2&limit=20" class="pagination-btn"&gt;← Prev&lt;/a&gt;
+    &lt;div class="pagination-info"&gt;
+        &lt;span class="pagination-current"&gt;3&lt;/span&gt;
+        &lt;span class="pagination-separator"&gt;/&lt;/span&gt;
+        &lt;span class="pagination-total"&gt;11&lt;/span&gt;
+    &lt;/div&gt;
+    &lt;a href="?page=4&limit=20" class="pagination-btn"&gt;Next →&lt;/a&gt;
+&lt;/nav&gt;</code></pre>
+                    </div>
+                    <h3>Complete CRUD Page with Pagination & Flash</h3>
+                    <p class="component-note">A complete, production-ready pattern combining data-source, pagination, flash messages, and directives.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/users.vlo</span><span>VLO</span></div>
+                        <pre><code>&lt;BaseLayout title="Users" auth="true" roles="Admin"&gt;
 
+    &lt;!-- Flash toast (auto-renders if flash exists) --&gt;
+    {if flash_messages}
+        &lt;Toast /&gt;
+    {/if}
+
+    &lt;Card title="Users" description="All registered users."&gt;
+        &lt;table class="products-table"&gt;
+            &lt;thead&gt;
+                &lt;tr&gt;
+                    &lt;th&gt;ID&lt;/th&gt;&lt;th&gt;Name&lt;/th&gt;&lt;th&gt;Email&lt;/th&gt;&lt;th&gt;Role&lt;/th&gt;&lt;th&gt;Actions&lt;/th&gt;
+                &lt;/tr&gt;
+            &lt;/thead&gt;
+            &lt;tbody data-source="/api/users"&gt;
+                {for user in users}
+                &lt;tr&gt;
+                    &lt;td&gt;#{{user.id}}&lt;/td&gt;
+                    &lt;td&gt;{{user.name}}&lt;/td&gt;
+                    &lt;td&gt;{{user.email}}&lt;/td&gt;
+                    &lt;td&gt;&lt;Badge variant="success" text="{{user.role}}" /&gt;&lt;/td&gt;
+                    &lt;td&gt;
+                        &lt;button v-put="/api/users/{{user.id}}" v-param="role" v-prompt="Enter new role:"&gt;Edit Role&lt;/button&gt;
+                        &lt;button v-delete="/api/users/{{user.id}}" v-confirm="Delete this user?"&gt;Delete&lt;/button&gt;
+                    &lt;/td&gt;
+                &lt;/tr&gt;
+                {else}
+                &lt;tr&gt;&lt;td colspan="5"&gt;No Users Found&lt;/td&gt;&lt;/tr&gt;
+                {/for}
+            &lt;/tbody&gt;
+        &lt;/table&gt;
+    &lt;/Card&gt;
+
+    &lt;!-- Pagination (uses injected total_pages, has_next, etc.) --&gt;
+    &lt;Pagination /&gt;
+
+&lt;/BaseLayout&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Zero-config pagination</strong><p>The <code>&lt;Pagination /&gt;</code> component reads <code>total_pages</code>, <code>page</code>, <code>prev_page</code>, <code>next_page</code> from the global context automatically.</p></div>
+                        <div><strong>Clean URLs</strong><p>Clicking Next/Prev reloads the page with <code>?page=3&limit=20</code>. Flash toasts appear without URL pollution.</p></div>
+                        <div><strong>Works with filters</strong><p>Future <code>?search=</code> or <code>?sort=</code> params will be preserved alongside pagination.</p></div>
+                    </div>
+                    <div class="rule-card">
+                        <strong>Default values</strong>
+                        <p>If no <code>page</code> or <code>limit</code> is in the URL, VLO defaults to <code>page=1</code> and <code>limit=20</code>. Limit is capped at 100 to prevent accidental full-table fetches.</p>
+                    </div>
                 </section>
 
-
-                <!-- 10 -->
-                <section class="doc-section" id="security">
-
-                    <div class="section-number">10</div>
-
-                    <h2>Security</h2>
-
-                    <p class="section-lead">
-                        VLO projects should treat security as part of
-                        normal development rather than an afterthought.
-                    </p>
-
-
-                    <div class="security-list">
-
-                        <div>
-                            <span>!</span>
-                            <div>
-                                <strong>Never expose secrets.</strong>
-                                <p>
-                                    API keys, passwords and private
-                                    credentials must not be committed
-                                    into project files.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div>
-                            <span>!</span>
-                            <div>
-                                <strong>Validate user input.</strong>
-                                <p>
-                                    Never assume data coming from users
-                                    is safe or correctly formatted.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div>
-                            <span>!</span>
-                            <div>
-                                <strong>Keep dependencies controlled.</strong>
-                                <p>
-                                    Only add dependencies when they solve
-                                    a real project requirement.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div>
-                            <span>!</span>
-                            <div>
-                                <strong>Don't bypass security checks.</strong>
-                                <p>
-                                    Development convenience should never
-                                    become a production security risk.
-                                </p>
-                            </div>
-                        </div>
-
-                    </div>
-
-                </section>
-
-
-                <!-- 11 -->
                 <section class="doc-section" id="workflow">
-
-                    <div class="section-number">11</div>
-
+                    <div class="section-number">19</div>
                     <h2>Development Workflow</h2>
-
-                    <p class="section-lead">
-                        Keep changes small, understandable and easy
-                        to review.
-                    </p>
-
-
+                    <p class="section-lead">Keep changes small, understandable and easy to review.</p>
                     <div class="workflow">
-
-                        <div class="workflow-step">
-                            <span>01</span>
-                            <div>
-                                <strong>Plan</strong>
-                                <p>
-                                    Understand what needs to change
-                                    before writing code.
-                                </p>
-                            </div>
-                        </div>
-
+                        <div class="workflow-step"><span>01</span><div><strong>Plan</strong><p>Understand what needs to change before writing code.</p></div></div>
                         <div class="workflow-line"></div>
-
-                        <div class="workflow-step">
-                            <span>02</span>
-                            <div>
-                                <strong>Build</strong>
-                                <p>
-                                    Reuse existing VLO components before
-                                    creating new ones.
-                                </p>
-                            </div>
-                        </div>
-
+                        <div class="workflow-step"><span>02</span><div><strong>Build</strong><p>Reuse existing VLO components before creating new ones.</p></div></div>
                         <div class="workflow-line"></div>
-
-                        <div class="workflow-step">
-                            <span>03</span>
-                            <div>
-                                <strong>Test</strong>
-                                <p>
-                                    Check desktop, mobile and interactive
-                                    states.
-                                </p>
-                            </div>
-                        </div>
-
+                        <div class="workflow-step"><span>03</span><div><strong>Test</strong><p>Check desktop, mobile and interactive states.</p></div></div>
                         <div class="workflow-line"></div>
-
-                        <div class="workflow-step">
-                            <span>04</span>
-                            <div>
-                                <strong>Review</strong>
-                                <p>
-                                    Remove duplication and unnecessary
-                                    complexity.
-                                </p>
-                            </div>
-                        </div>
-
+                        <div class="workflow-step"><span>04</span><div><strong>Review</strong><p>Remove duplication and unnecessary complexity.</p></div></div>
                         <div class="workflow-line"></div>
-
-                        <div class="workflow-step">
-                            <span>05</span>
-                            <div>
-                                <strong>Document</strong>
-                                <p>
-                                    Update documentation when public
-                                    behavior changes.
-                                </p>
-                            </div>
-                        </div>
-
+                        <div class="workflow-step"><span>05</span><div><strong>Document</strong><p>Update documentation when public behavior changes.</p></div></div>
                     </div>
+                    <h3>CLI commands</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>Development</span><span>Terminal</span></div>
+                        <pre><code># Start dev server (default port 3000)
+vlo dev
 
+# Start dev server on custom port
+vlo dev --port 2006
+
+# Build for production
+vlo build
+
+# Serve production build
+vlo serve --port 8080</code></pre>
+                    </div>
                 </section>
 
-
-                <!-- 12 -->
                 <section class="doc-section" id="checklist">
-
-                    <div class="section-number">12</div>
-
+                    <div class="section-number">20</div>
                     <h2>Pre-Release Checklist</h2>
-
-                    <p class="section-lead">
-                        Before considering a feature complete, verify
-                        the following.
-                    </p>
-
-
+                    <p class="section-lead">Before considering a feature complete, verify the following.</p>
                     <div class="checklist">
-
-                        <label>
-                            <span>✓</span>
-                            Component is reusable where appropriate
-                        </label>
-
-                        <label>
-                            <span>✓</span>
-                            Props have clear names and defaults
-                        </label>
-
-                        <label>
-                            <span>✓</span>
-                            No unnecessary duplicated markup
-                        </label>
-
-                        <label>
-                            <span>✓</span>
-                            Styling follows VLO design language
-                        </label>
-
-                        <label>
-                            <span>✓</span>
-                            Mobile layout has been considered
-                        </label>
-
-                        <label>
-                            <span>✓</span>
-                            Interactive elements are accessible
-                        </label>
-
-                        <label>
-                            <span>✓</span>
-                            No secrets or sensitive configuration committed
-                        </label>
-
-                        <label>
-                            <span>✓</span>
-                            Documentation reflects the current behavior
-                        </label>
-
+                        <label><span>✓</span> Component is reusable where appropriate</label>
+                        <label><span>✓</span> Props have clear names and defaults</label>
+                        <label><span>✓</span> No unnecessary duplicated markup</label>
+                        <label><span>✓</span> Styling follows VLO design language</label>
+                        <label><span>✓</span> Mobile layout has been considered</label>
+                        <label><span>✓</span> Interactive elements are accessible</label>
+                        <label><span>✓</span> Flash messages tested for success and error states</label>
+                        <label><span>✓</span> Pagination tested with edge cases (page 1, last page)</label>
+                        <label><span>✓</span> Page guards set for protected routes</label>
+                        <label><span>✓</span> No secrets or sensitive configuration committed</label>
+                        <label><span>✓</span> Documentation reflects the current behavior</label>
+                        <label><span>✓</span> Layout hierarchy tested in dev and build modes</label>
+                        <label><span>✓</span> Static assets use cache-busting filenames</label>
                     </div>
-
                 </section>
 
-
-                <!-- FINAL -->
                 <section class="final-card">
-
-                    <div class="final-mark">
-                        VLO
-                    </div>
-
-                    <h2>
-                        Build once. Reuse everywhere.
-                    </h2>
-
-                    <p>
-                        VLO is more than a collection of components.
-                        It is a shared language for building consistent,
-                        maintainable interfaces.
-                    </p>
-
+                    <div class="final-mark">VLO</div>
+                    <h2>Build once. Reuse everywhere.</h2>
+                    <p>VLO is more than a collection of components. It is a shared language for building consistent, maintainable interfaces.</p>
                     <div class="final-links">
-                        <a href="/components">
-                            Explore Components →
-                        </a>
-
-                        <a href="/">
-                            Back to VLO →
-                        </a>
+                        <a href="/components">Explore Components →</a>
+                        <a href="/">Back to VLO →</a>
                     </div>
-
                 </section>
-
             </main>
-
         </div>
-
     </div>
-
-
-    <button id="backTop" class="back-top">
-        ↑
-    </button>
-
+    <button id="backTop" class="back-top">↑</button>
 </BaseLayout>
 
-
 <style>
+/* =========================================
+   ROOT & HERO
+========================================= */
+.guidelines-page { min-height: 100vh; background: radial-gradient(circle at 50% -10%, rgba(0,245,255,.08), transparent 34%); }
+.guidelines-hero { max-width: 1120px; margin: auto; padding: 85px 24px 65px; }
+.hero-badge { display: inline-flex; align-items: center; gap: 9px; padding: 7px 13px; border: 1px solid rgba(0,245,255,.25); border-radius: 999px; background: rgba(0,245,255,.05); color: #00f5ff; font-size: .72rem; font-weight: 700; letter-spacing: .08em; }
+.pulse { width: 7px; height: 7px; border-radius: 50%; background: #00f5ff; box-shadow: 0 0 12px #00f5ff; }
+.guidelines-hero h1 { margin: 24px 0 18px; font-size: clamp(3.2rem, 8vw, 5.7rem); line-height: .95; letter-spacing: -.065em; color: #fff; }
+.guidelines-hero h1 span { color: #00f5ff; text-shadow: 0 0 30px rgba(0,245,255,.25); }
+.guidelines-hero > p { max-width: 720px; margin: 0; color: #8d8d8d; font-size: 1.12rem; line-height: 1.75; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 30px; color: #666; font-size: .8rem; }
 
 /* =========================================
-   ROOT
+   LAYOUT & SIDEBAR
 ========================================= */
+.docs-layout { max-width: 1220px; margin: auto; padding: 0 24px 100px; display: grid; grid-template-columns: 225px minmax(0,1fr); gap: 65px; }
+.docs-sidebar { position: sticky; top: 90px; height: max-content; }
+.sidebar-title { margin-bottom: 15px; color: #fff; font-size: .85rem; font-weight: 700; }
+.docs-nav { display: flex; flex-direction: column; gap: 2px; }
+.docs-nav a { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border-radius: 7px; color: #777; text-decoration: none; font-size: .78rem; transition: color .2s ease, background .2s ease; }
+.docs-nav a span { width: 20px; color: #444; font-family: monospace; font-size: .65rem; }
+.docs-nav a:hover { color: #fff; background: rgba(255,255,255,.035); }
+.docs-nav a.active { color: #00f5ff; background: rgba(0,245,255,.07); }
+.docs-nav a.active span { color: #00f5ff; }
+.sidebar-card { margin-top: 35px; padding: 17px; border: 1px solid var(--border,#292929); border-radius: 12px; background: rgba(255,255,255,.02); }
+.sidebar-icon { margin-bottom: 9px; color: #00f5ff; font-size: 1.3rem; }
+.sidebar-card strong { color: #ddd; font-size: .8rem; }
+.sidebar-card p { margin: 7px 0 0; color: #686868; font-size: .72rem; line-height: 1.55; }
 
-.guidelines-page {
-    min-height: 100vh;
-
-    background:
-        radial-gradient(
-            circle at 50% -10%,
-            rgba(0,245,255,.08),
-            transparent 34%
-        );
-}
-
+.variant-color{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-radius:8px;color:black;font-weight:700}
+.variant-color.error{color:#fff}
+.variant-color.success{background:#00ff88}
+.variant-color.error{background:#ff4444}
+.variant-color.info{background:#00f5ff}
+.variant-color.warning{background:#ffaa00}
+.variant-color span{font-family:monospace;font-size:.8rem;color:black}
+/* =========================================
+   CONTENT & SECTIONS
+========================================= */
+.docs-content { min-width: 0; }
+.intro-card { display: flex; gap: 18px; padding: 20px; margin-bottom: 80px; border: 1px solid rgba(0,245,255,.18); border-radius: 13px; background: rgba(0,245,255,.035); }
+.intro-icon { flex-shrink: 0; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 10px; background: #00f5ff; color: #000; font-weight: 900; }
+.intro-card strong { color: #fff; font-size: .9rem; }
+.intro-card p { margin: 6px 0 0; color: #777; font-size: .8rem; line-height: 1.55; }
+.doc-section { margin-bottom: 110px; scroll-margin-top: 90px; }
+.section-number { margin-bottom: 8px; color: #00f5ff; font-family: monospace; font-size: .7rem; letter-spacing: .08em; }
+.doc-section h2 { margin: 0 0 13px; color: #fff; font-size: 2.15rem; letter-spacing: -.035em; }
+.section-lead { max-width: 720px; margin: 0 0 30px; color: #858585; font-size: .95rem; line-height: 1.75; }
+.doc-section h3 { margin: 35px 0 14px; color: #ccc; font-size: .95rem; }
 
 /* =========================================
-   HERO
+   GRIDS & CARDS
 ========================================= */
-
-.guidelines-hero {
-    max-width: 1120px;
-    margin: auto;
-    padding: 85px 24px 65px;
-}
-
-.hero-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-
-    padding: 7px 13px;
-
-    border: 1px solid rgba(0,245,255,.25);
-    border-radius: 999px;
-
-    background: rgba(0,245,255,.05);
-
-    color: #00f5ff;
-
-    font-size: .72rem;
-    font-weight: 700;
-    letter-spacing: .08em;
-}
-
-.pulse {
-    width: 7px;
-    height: 7px;
-
-    border-radius: 50%;
-
-    background: #00f5ff;
-
-    box-shadow:
-        0 0 12px #00f5ff;
-}
-
-.guidelines-hero h1 {
-    margin: 24px 0 18px;
-
-    font-size: clamp(
-        3.2rem,
-        8vw,
-        5.7rem
-    );
-
-    line-height: .95;
-
-    letter-spacing: -.065em;
-
-    color: #fff;
-}
-
-.guidelines-hero h1 span {
-    color: #00f5ff;
-
-    text-shadow:
-        0 0 30px rgba(0,245,255,.25);
-}
-
-.guidelines-hero > p {
-    max-width: 720px;
-
-    margin: 0;
-
-    color: #8d8d8d;
-
-    font-size: 1.12rem;
-
-    line-height: 1.75;
-}
-
-.hero-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 22px;
-
-    margin-top: 30px;
-
-    color: #666;
-
-    font-size: .8rem;
-}
-
+.principles-grid, .do-grid, .info-grid, .brand-rules, .access-grid, .tokens-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.principles-grid article, .do-card, .info-grid > div, .brand-rules > div, .access-grid > div, .token { padding: 21px; border: 1px solid var(--border,#292929); border-radius: 11px; background: rgba(255,255,255,.018); }
+.principle-icon { margin-bottom: 13px; color: #00f5ff; font-size: 1.2rem; }
+.principles-grid h3, .info-grid strong, .access-grid h3, .token strong { margin: 0 0 7px; color: #eee; font-size: .9rem; }
+.principles-grid p, .info-grid p, .access-grid p, .token small { margin: 0; color: #707070; font-size: .76rem; line-height: 1.6; }
+.rule-card { margin-top: 20px; padding: 19px; border-left: 2px solid #00f5ff; background: rgba(0,245,255,.035); }
+.rule-card strong { color: #00f5ff; font-size: .8rem; }
+.rule-card p { margin: 6px 0 0; color: #888; font-size: .8rem; line-height: 1.6; }
 
 /* =========================================
-   LAYOUT
+   CODE & TABLES
 ========================================= */
-
-.docs-layout {
-    max-width: 1220px;
-
-    margin: auto;
-
-    padding:
-        0 24px
-        100px;
-
-    display: grid;
-
-    grid-template-columns:
-        225px
-        minmax(0,1fr);
-
-    gap: 65px;
-}
-
+.code-card { overflow: hidden; border: 1px solid var(--border,#292929); border-radius: 11px; background: #090909; margin-bottom: 15px; }
+.code-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #292929; color: #707070; font-size: .7rem; }
+.code-header span:last-child { color: #00f5ff; }
+.code-card pre { margin: 0; padding: 20px; overflow-x: auto; }
+.code-card code { color: #b9f8ff; font-family: "SFMono-Regular", Consolas, monospace; font-size: .78rem; line-height: 1.7; }
+.naming-table { overflow: hidden; border: 1px solid #292929; border-radius: 10px; margin-bottom: 15px; }
+.naming-row { display: grid; grid-template-columns: 1fr 1.3fr 1.3fr; border-bottom: 1px solid #292929; }
+.naming-row:last-child { border-bottom: 0; }
+.naming-row span { padding: 12px 14px; color: #777; font-family: monospace; font-size: .72rem; }
+.naming-row.header span { color: #555; background: rgba(255,255,255,.025); font-family: inherit; font-size: .65rem; text-transform: uppercase; }
+.naming-row span:nth-child(2) { color: #00ff88; }
+.naming-row span:nth-child(3) { color: #ff6680; }
 
 /* =========================================
-   SIDEBAR
+   LISTS & FLOWS
 ========================================= */
-
-.docs-sidebar {
-    position: sticky;
-    top: 90px;
-
-    height: max-content;
-}
-
-.sidebar-title {
-    margin-bottom: 15px;
-
-    color: #fff;
-
-    font-size: .85rem;
-    font-weight: 700;
-}
-
-.docs-nav {
-    display: flex;
-    flex-direction: column;
-
-    gap: 2px;
-}
-
-.docs-nav a {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-
-    padding: 8px 10px;
-
-    border-radius: 7px;
-
-    color: #777;
-
-    text-decoration: none;
-
-    font-size: .78rem;
-
-    transition:
-        color .2s ease,
-        background .2s ease;
-}
-
-.docs-nav a span {
-    width: 20px;
-
-    color: #444;
-
-    font-family: monospace;
-
-    font-size: .65rem;
-}
-
-.docs-nav a:hover {
-    color: #fff;
-
-    background:
-        rgba(255,255,255,.035);
-}
-
-.docs-nav a.active {
-    color: #00f5ff;
-
-    background:
-        rgba(0,245,255,.07);
-}
-
-.docs-nav a.active span {
-    color: #00f5ff;
-}
-
-.sidebar-card {
-    margin-top: 35px;
-
-    padding: 17px;
-
-    border:
-        1px solid
-        var(--border,#292929);
-
-    border-radius: 12px;
-
-    background:
-        rgba(255,255,255,.02);
-}
-
-.sidebar-icon {
-    margin-bottom: 9px;
-
-    color: #00f5ff;
-
-    font-size: 1.3rem;
-}
-
-.sidebar-card strong {
-    color: #ddd;
-
-    font-size: .8rem;
-}
-
-.sidebar-card p {
-    margin: 7px 0 0;
-
-    color: #686868;
-
-    font-size: .72rem;
-
-    line-height: 1.55;
-}
-
+.number-list, .rules-list, .security-list, .workflow, .checklist { display: flex; flex-direction: column; gap: 8px; }
+.number-list div, .rules-list div, .checklist label { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid #292929; border-radius: 8px; background: rgba(255,255,255,.015); }
+.number-list b, .rules-list span { color: #00f5ff; font-family: monospace; font-size: .7rem; }
+.number-list p, .rules-list p, .checklist label { margin: 0; color: #888; font-size: .78rem; }
+.architecture-flow { display: flex; align-items: center; gap: 12px; overflow-x: auto; padding: 10px 0; }
+.architecture-flow > div { min-width: 145px; padding: 17px; border: 1px solid #292929; border-radius: 10px; background: rgba(255,255,255,.018); }
+.architecture-flow span { display: block; margin-bottom: 8px; color: #00f5ff; font-family: monospace; font-size: .65rem; }
+.architecture-flow strong { display: block; color: #eee; font-size: .8rem; }
+.architecture-flow small { display: block; margin-top: 4px; color: #666; font-size: .65rem; }
+.architecture-flow i { color: #444; font-style: normal; }
 
 /* =========================================
-   CONTENT
+   BRAND & STYLING
 ========================================= */
-
-.docs-content {
-    min-width: 0;
-}
-
-.intro-card {
-    display: flex;
-    gap: 18px;
-
-    padding: 20px;
-
-    margin-bottom: 80px;
-
-    border:
-        1px solid
-        rgba(0,245,255,.18);
-
-    border-radius: 13px;
-
-    background:
-        rgba(0,245,255,.035);
-}
-
-.intro-icon {
-    flex-shrink: 0;
-
-    width: 42px;
-    height: 42px;
-
-    display: grid;
-    place-items: center;
-
-    border-radius: 10px;
-
-    background: #00f5ff;
-
-    color: #000;
-
-    font-weight: 900;
-}
-
-.intro-card strong {
-    color: #fff;
-
-    font-size: .9rem;
-}
-
-.intro-card p {
-    margin: 6px 0 0;
-
-    color: #777;
-
-    font-size: .8rem;
-
-    line-height: 1.55;
-}
-
+.brand-showcase { padding: 50px 20px; text-align: center; border: 1px solid rgba(0,245,255,.15); border-radius: 13px; background: radial-gradient(circle, rgba(0,245,255,.06), transparent 65%); }
+.brand-logo { color: #00f5ff; font-size: 4rem; font-weight: 900; letter-spacing: -.08em; text-shadow: 0 0 35px rgba(0,245,255,.25); }
+.brand-showcase p { margin: 7px 0 0; color: #666; font-size: .75rem; }
+.brand-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-top: 15px; }
+.brand-grid div { padding: 15px; border: 1px solid #292929; border-radius: 9px; }
+.brand-grid strong, .brand-grid span { display: block; }
+.brand-grid strong { color: #777; font-size: .7rem; }
+.brand-grid span { margin-top: 7px; color: #00f5ff; font-family: monospace; font-size: .72rem; }
+.token { display: flex; align-items: center; gap: 12px; }
+.token-dot { width: 28px; height: 28px; border-radius: 7px; }
+.token-dot.primary { background: #00f5ff; }
+.token-dot.success { background: #00ff88; }
+.token-dot.background { background: #080808; border: 1px solid #333; }
+.token-dot.card { background: #111; border: 1px solid #333; }
+.styled-list { margin: 0; padding: 0; list-style: none; }
+.styled-list li { position: relative; padding: 11px 0 11px 22px; border-bottom: 1px solid #222; color: #777; font-size: .78rem; }
+.styled-list li::before { content: "✦"; position: absolute; left: 0; color: #00f5ff; }
 
 /* =========================================
-   SECTIONS
+   SECURITY & WORKFLOW
 ========================================= */
-
-.doc-section {
-    margin-bottom: 110px;
-
-    scroll-margin-top: 90px;
-}
-
-.section-number {
-    margin-bottom: 8px;
-
-    color: #00f5ff;
-
-    font-family: monospace;
-
-    font-size: .7rem;
-
-    letter-spacing: .08em;
-}
-
-.doc-section h2 {
-    margin: 0 0 13px;
-
-    color: #fff;
-
-    font-size: 2.15rem;
-
-    letter-spacing: -.035em;
-}
-
-.section-lead {
-    max-width: 720px;
-
-    margin: 0 0 30px;
-
-    color: #858585;
-
-    font-size: .95rem;
-
-    line-height: 1.75;
-}
-
-.doc-section h3 {
-    margin: 35px 0 14px;
-
-    color: #ccc;
-
-    font-size: .95rem;
-}
-
+.security-list > div { border: 1px solid rgba(255,92,122,.15); background: rgba(255,92,122,.025); }
+.security-list > div > span { width: 25px; height: 25px; display: grid; place-items: center; flex-shrink: 0; border-radius: 7px; background: rgba(255,92,122,.08); color: #ff6680; font-weight: 700; }
+.security-list strong { color: #ddd; font-size: .78rem; }
+.security-list p { margin: 5px 0 0; color: #707070; font-size: .72rem; line-height: 1.55; }
+.workflow-step { display: flex; gap: 16px; padding: 5px 0; }
+.workflow-step > span { width: 34px; height: 34px; display: grid; place-items: center; flex-shrink: 0; border: 1px solid rgba(0,245,255,.2); border-radius: 8px; color: #00f5ff; font-family: monospace; font-size: .65rem; }
+.workflow-step strong { color: #ddd; font-size: .8rem; }
+.workflow-step p { margin: 4px 0 0; color: #707070; font-size: .72rem; line-height: 1.5; }
+.workflow-line { width: 1px; height: 18px; margin-left: 17px; background: #292929; }
+.checklist label span { color: #00ff88; font-weight: 700; }
 
 /* =========================================
-   PRINCIPLES
+   FINAL & BACK TOP
 ========================================= */
-
-.principles-grid {
-    display: grid;
-
-    grid-template-columns:
-        repeat(2,minmax(0,1fr));
-
-    gap: 12px;
-}
-
-.principles-grid article {
-    padding: 21px;
-
-    border:
-        1px solid
-        var(--border,#292929);
-
-    border-radius: 11px;
-
-    background:
-        rgba(255,255,255,.018);
-}
-
-.principle-icon {
-    margin-bottom: 13px;
-
-    color: #00f5ff;
-
-    font-size: 1.2rem;
-}
-
-.principles-grid h3 {
-    margin: 0 0 7px;
-
-    color: #eee;
-
-    font-size: .9rem;
-}
-
-.principles-grid p {
-    margin: 0;
-
-    color: #707070;
-
-    font-size: .76rem;
-
-    line-height: 1.6;
-}
-
+.final-card { padding: 70px 30px; text-align: center; border: 1px solid rgba(0,245,255,.16); border-radius: 15px; background: radial-gradient(circle at center, rgba(0,245,255,.06), transparent 65%); }
+.final-mark { margin-bottom: 20px; color: #00f5ff; font-size: 2rem; font-weight: 900; letter-spacing: -.07em; }
+.final-card h2 { margin: 0 0 12px; color: #fff; font-size: 1.7rem; letter-spacing: -.03em; }
+.final-card > p { max-width: 570px; margin: 0 auto; color: #707070; font-size: .8rem; line-height: 1.7; }
+.final-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
+.final-links a { padding: 9px 14px; border: 1px solid #333; border-radius: 7px; color: #aaa; text-decoration: none; font-size: .72rem; transition: .2s; }
+.final-links a:hover { border-color: #00f5ff; color: #00f5ff; }
+.back-top { position: fixed; right: 24px; bottom: 24px; width: 42px; height: 42px; border: 1px solid #333; border-radius: 9px; background: #111; color: #00f5ff; cursor: pointer; opacity: 0; pointer-events: none; transition: .25s; }
+.back-top.visible { opacity: 1; pointer-events: auto; }
 
 /* =========================================
-   RULE
+   NAVBAR DOCS SPECIFIC
 ========================================= */
-
-.rule-card {
-    margin-top: 20px;
-
-    padding: 19px;
-
-    border-left:
-        2px solid
-        #00f5ff;
-
-    background:
-        rgba(0,245,255,.035);
-}
-
-.rule-card strong {
-    color: #00f5ff;
-
-    font-size: .8rem;
-}
-
-.rule-card p {
-    margin: 6px 0 0;
-
-    color: #888;
-
-    font-size: .8rem;
-
-    line-height: 1.6;
-}
-
-
-/* =========================================
-   CODE
-========================================= */
-
-.code-card {
-    overflow: hidden;
-
-    border:
-        1px solid
-        var(--border,#292929);
-
-    border-radius: 11px;
-
-    background: #090909;
-}
-
-.code-header {
-    display: flex;
-
-    align-items: center;
-    justify-content: space-between;
-
-    padding: 10px 14px;
-
-    border-bottom:
-        1px solid
-        #292929;
-
-    color: #707070;
-
-    font-size: .7rem;
-}
-
-.code-header span:last-child {
-    color: #00f5ff;
-}
-
-.code-card pre {
-    margin: 0;
-
-    padding: 20px;
-
-    overflow-x: auto;
-}
-
-.code-card code {
-    color: #b9f8ff;
-
-    font-family:
-        "SFMono-Regular",
-        Consolas,
-        monospace;
-
-    font-size: .78rem;
-
-    line-height: 1.7;
-}
-
-
-/* =========================================
-   INFO GRID
-========================================= */
-
-.info-grid {
-    display: grid;
-
-    grid-template-columns:
-        repeat(2,1fr);
-
-    gap: 10px;
-
-    margin-top: 15px;
-}
-
-.info-grid > div {
-    padding: 16px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 9px;
-}
-
-.info-grid strong {
-    color: #00f5ff;
-
-    font-family: monospace;
-
-    font-size: .78rem;
-}
-
-.info-grid p {
-    margin: 6px 0 0;
-
-    color: #707070;
-
-    font-size: .72rem;
-}
-
-
-/* =========================================
-   DO / AVOID
-========================================= */
-
-.do-grid {
-    display: grid;
-
-    grid-template-columns:
-        repeat(2,1fr);
-
-    gap: 12px;
-
-    margin-top: 20px;
-}
-
-.do-card {
-    padding: 18px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 10px;
-}
-
-.do-title {
-    margin-bottom: 12px;
-
-    color: #eee;
-
-    font-size: .8rem;
-    font-weight: 700;
-}
-
-.do-title span {
-    margin-right: 6px;
-
-    color: #00ff88;
-}
-
-.avoid .do-title span {
-    color: #ff5c7a;
-}
-
-.do-card ul {
-    margin: 0;
-
-    padding-left: 18px;
-}
-
-.do-card li {
-    margin: 7px 0;
-
-    color: #707070;
-
-    font-size: .73rem;
-}
-
-
-/* =========================================
-   NAMING
-========================================= */
-
-.naming-table {
-    overflow: hidden;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 10px;
-}
-
-.naming-row {
-    display: grid;
-
-    grid-template-columns:
-        1fr
-        1.3fr
-        1.3fr;
-
-    border-bottom:
-        1px solid
-        #292929;
-}
-
-.naming-row:last-child {
-    border-bottom: 0;
-}
-
-.naming-row span {
-    padding: 12px 14px;
-
-    color: #777;
-
-    font-family: monospace;
-
-    font-size: .72rem;
-}
-
-.naming-row.header span {
-    color: #555;
-
-    background:
-        rgba(255,255,255,.025);
-
-    font-family: inherit;
-
-    font-size: .65rem;
-
-    text-transform: uppercase;
-}
-
-.naming-row span:nth-child(2) {
-    color: #00ff88;
-}
-
-.naming-row span:nth-child(3) {
-    color: #ff6680;
-}
-
-
-/* =========================================
-   NUMBER LIST
-========================================= */
-
-.number-list {
-    display: flex;
-    flex-direction: column;
-
-    gap: 1px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 10px;
-
-    overflow: hidden;
-}
-
-.number-list div {
-    display: flex;
-    gap: 15px;
-
-    padding: 15px;
-
-    background:
-        rgba(255,255,255,.015);
-}
-
-.number-list b {
-    color: #00f5ff;
-
-    font-family: monospace;
-
-    font-size: .7rem;
-}
-
-.number-list p {
-    margin: 0;
-
-    color: #888;
-
-    font-size: .78rem;
-}
-
-
-/* =========================================
-   RULES
-========================================= */
-
-.rules-list {
-    display: flex;
-    flex-direction: column;
-
-    gap: 8px;
-}
-
-.rules-list div {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-
-    padding: 12px 14px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 8px;
-}
-
-.rules-list span {
-    color: #00f5ff;
-
-    font-family: monospace;
-
-    font-size: .68rem;
-}
-
-.rules-list p {
-    margin: 0;
-
-    color: #888;
-
-    font-size: .75rem;
-}
-
-
-/* =========================================
-   ARCHITECTURE
-========================================= */
-
-.architecture-flow {
-    display: flex;
-    align-items: center;
-
-    gap: 12px;
-
-    overflow-x: auto;
-
-    padding: 10px 0;
-}
-
-.architecture-flow > div {
-    min-width: 145px;
-
-    padding: 17px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 10px;
-
-    background:
-        rgba(255,255,255,.018);
-}
-
-.architecture-flow span {
-    display: block;
-
-    margin-bottom: 8px;
-
-    color: #00f5ff;
-
-    font-family: monospace;
-
-    font-size: .65rem;
-}
-
-.architecture-flow strong {
-    display: block;
-
-    color: #eee;
-
-    font-size: .8rem;
-}
-
-.architecture-flow small {
-    display: block;
-
-    margin-top: 4px;
-
-    color: #666;
-
-    font-size: .65rem;
-}
-
-.architecture-flow i {
-    color: #444;
-
-    font-style: normal;
-}
-
-
-/* =========================================
-   INFO BOX
-========================================= */
-
-.info-box {
-    margin-top: 20px;
-
-    padding: 19px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 10px;
-}
-
-.info-box strong {
-    color: #00f5ff;
-
-    font-size: .8rem;
-}
-
-.info-box p {
-    margin: 7px 0 0;
-
-    color: #777;
-
-    font-size: .75rem;
-
-    line-height: 1.6;
-}
-
-
-/* =========================================
-   BRAND
-========================================= */
-
-.brand-showcase {
-    padding: 50px 20px;
-
-    text-align: center;
-
-    border:
-        1px solid
-        rgba(0,245,255,.15);
-
-    border-radius: 13px;
-
-    background:
-        radial-gradient(
-            circle,
-            rgba(0,245,255,.06),
-            transparent 65%
-        );
-}
-
-.brand-logo {
-    color: #00f5ff;
-
-    font-size: 4rem;
-
-    font-weight: 900;
-
-    letter-spacing: -.08em;
-
-    text-shadow:
-        0 0 35px
-        rgba(0,245,255,.25);
-}
-
-.brand-showcase p {
-    margin: 7px 0 0;
-
-    color: #666;
-
-    font-size: .75rem;
-}
-
-.brand-grid {
-    display: grid;
-
-    grid-template-columns:
-        repeat(4,1fr);
-
-    gap: 10px;
-
-    margin-top: 15px;
-}
-
-.brand-grid div {
-    padding: 15px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 9px;
-}
-
-.brand-grid strong,
-.brand-grid span {
-    display: block;
-}
-
-.brand-grid strong {
-    color: #777;
-
-    font-size: .7rem;
-}
-
-.brand-grid span {
-    margin-top: 7px;
-
-    color: #00f5ff;
-
-    font-family: monospace;
-
-    font-size: .72rem;
-}
-
-.brand-rules {
-    display: grid;
-
-    grid-template-columns:
-        repeat(2,1fr);
-
-    gap: 10px;
-}
-
-.brand-rules > div {
-    padding: 18px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 10px;
-}
-
-.brand-rules span {
-    color: #00f5ff;
-
-    font-family: monospace;
-
-    font-size: .65rem;
-}
-
-.brand-rules strong {
-    display: block;
-
-    margin-top: 10px;
-
-    color: #ddd;
-
-    font-size: .8rem;
-}
-
-.brand-rules p {
-    margin: 6px 0 0;
-
-    color: #707070;
-
-    font-size: .72rem;
-
-    line-height: 1.55;
-}
-
-
-/* =========================================
-   TOKENS
-========================================= */
-
-.tokens-grid {
-    display: grid;
-
-    grid-template-columns:
-        repeat(2,1fr);
-
-    gap: 10px;
-}
-
-.token {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-
-    padding: 15px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 9px;
-}
-
-.token-dot {
-    width: 28px;
-    height: 28px;
-
-    border-radius: 7px;
-}
-
-.token-dot.primary {
-    background: #00f5ff;
-}
-
-.token-dot.success {
-    background: #00ff88;
-}
-
-.token-dot.background {
-    background: #080808;
-
-    border: 1px solid #333;
-}
-
-.token-dot.card {
-    background: #111;
-
-    border: 1px solid #333;
-}
-
-.token strong,
-.token small {
-    display: block;
-}
-
-.token strong {
-    color: #ddd;
-
-    font-size: .75rem;
-}
-
-.token small {
-    margin-top: 3px;
-
-    color: #666;
-
-    font-family: monospace;
-
-    font-size: .65rem;
-}
-
-
-/* =========================================
-   STYLED LIST
-========================================= */
-
-.styled-list {
-    margin: 0;
-
-    padding: 0;
-
-    list-style: none;
-}
-
-.styled-list li {
-    position: relative;
-
-    padding: 11px 0 11px 22px;
-
-    border-bottom:
-        1px solid
-        #222;
-
-    color: #777;
-
-    font-size: .78rem;
-}
-
-.styled-list li::before {
-    content: "✦";
-
-    position: absolute;
-    left: 0;
-
-    color: #00f5ff;
-}
-
-
-/* =========================================
-   ACCESSIBILITY
-========================================= */
-
-.access-grid {
-    display: grid;
-
-    grid-template-columns:
-        repeat(2,1fr);
-
-    gap: 10px;
-}
-
-.access-grid > div {
-    padding: 19px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 10px;
-}
-
-.access-grid span {
-    color: #00f5ff;
-
-    font-family: monospace;
-
-    font-size: .65rem;
-}
-
-.access-grid h3 {
-    margin: 10px 0 6px;
-
-    color: #ddd;
-}
-
-.access-grid p {
-    margin: 0;
-
-    color: #707070;
-
-    font-size: .72rem;
-
-    line-height: 1.55;
-}
-
-
-/* =========================================
-   SECURITY
-========================================= */
-
-.security-list {
-    display: flex;
-    flex-direction: column;
-
-    gap: 9px;
-}
-
-.security-list > div {
-    display: flex;
-    gap: 14px;
-
-    padding: 16px;
-
-    border:
-        1px solid
-        rgba(255,92,122,.15);
-
-    border-radius: 10px;
-
-    background:
-        rgba(255,92,122,.025);
-}
-
-.security-list > div > span {
-    width: 25px;
-    height: 25px;
-
-    display: grid;
-    place-items: center;
-
-    flex-shrink: 0;
-
-    border-radius: 7px;
-
-    background:
-        rgba(255,92,122,.08);
-
-    color: #ff6680;
-
-    font-weight: 700;
-}
-
-.security-list strong {
-    color: #ddd;
-
-    font-size: .78rem;
-}
-
-.security-list p {
-    margin: 5px 0 0;
-
-    color: #707070;
-
-    font-size: .72rem;
-
-    line-height: 1.55;
-}
-
-
-/* =========================================
-   WORKFLOW
-========================================= */
-
-.workflow {
-    display: flex;
-    flex-direction: column;
-}
-
-.workflow-step {
-    display: flex;
-    gap: 16px;
-
-    padding: 5px 0;
-}
-
-.workflow-step > span {
-    width: 34px;
-    height: 34px;
-
-    display: grid;
-    place-items: center;
-
-    flex-shrink: 0;
-
-    border:
-        1px solid
-        rgba(0,245,255,.2);
-
-    border-radius: 8px;
-
-    color: #00f5ff;
-
-    font-family: monospace;
-
-    font-size: .65rem;
-}
-
-.workflow-step strong {
-    color: #ddd;
-
-    font-size: .8rem;
-}
-
-.workflow-step p {
-    margin: 4px 0 0;
-
-    color: #707070;
-
-    font-size: .72rem;
-
-    line-height: 1.5;
-}
-
-.workflow-line {
-    width: 1px;
-    height: 18px;
-
-    margin-left: 17px;
-
-    background: #292929;
-}
-
-
-/* =========================================
-   CHECKLIST
-========================================= */
-
-.checklist {
-    display: flex;
-    flex-direction: column;
-
-    gap: 7px;
-}
-
-.checklist label {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-
-    padding: 13px 15px;
-
-    border:
-        1px solid
-        #292929;
-
-    border-radius: 8px;
-
-    color: #777;
-
-    font-size: .75rem;
-}
-
-.checklist label span {
-    color: #00ff88;
-
-    font-weight: 700;
-}
-
-
-/* =========================================
-   FINAL
-========================================= */
-
-.final-card {
-    padding: 70px 30px;
-
-    text-align: center;
-
-    border:
-        1px solid
-        rgba(0,245,255,.16);
-
-    border-radius: 15px;
-
-    background:
-        radial-gradient(
-            circle at center,
-            rgba(0,245,255,.06),
-            transparent 65%
-        );
-}
-
-.final-mark {
-    margin-bottom: 20px;
-
-    color: #00f5ff;
-
-    font-size: 2rem;
-
-    font-weight: 900;
-
-    letter-spacing: -.07em;
-}
-
-.final-card h2 {
-    margin: 0 0 12px;
-
-    color: #fff;
-
-    font-size: 1.7rem;
-
-    letter-spacing: -.03em;
-}
-
-.final-card > p {
-    max-width: 570px;
-
-    margin: 0 auto;
-
-    color: #707070;
-
-    font-size: .8rem;
-
-    line-height: 1.7;
-}
-
-.final-links {
-    display: flex;
-    justify-content: center;
-
-    flex-wrap: wrap;
-
-    gap: 10px;
-
-    margin-top: 25px;
-}
-
-.final-links a {
-    padding: 9px 14px;
-
-    border:
-        1px solid
-        #333;
-
-    border-radius: 7px;
-
-    color: #aaa;
-
-    text-decoration: none;
-
-    font-size: .72rem;
-
-    transition: .2s;
-}
-
-.final-links a:hover {
-    border-color: #00f5ff;
-
-    color: #00f5ff;
-}
-
-
-/* =========================================
-   BACK TOP
-========================================= */
-
-.back-top {
-    position: fixed;
-
-    right: 24px;
-    bottom: 24px;
-
-    width: 42px;
-    height: 42px;
-
-    border:
-        1px solid
-        #333;
-
-    border-radius: 9px;
-
-    background: #111;
-
-    color: #00f5ff;
-
-    cursor: pointer;
-
-    opacity: 0;
-
-    pointer-events: none;
-
-    transition: .25s;
-}
-
-.back-top.visible {
-    opacity: 1;
-
-    pointer-events: auto;
-}
-
+.component-note { margin: -5px 0 20px; color: #777; font-size: .78rem; line-height: 1.6; }
 
 /* =========================================
    RESPONSIVE
 ========================================= */
-
 @media (max-width: 900px) {
-
-    .docs-layout {
-        grid-template-columns: 1fr;
-
-        gap: 30px;
-    }
-
-    .docs-sidebar {
-        position: static;
-    }
-
-    .docs-nav {
-        display: grid;
-
-        grid-template-columns:
-            repeat(3,1fr);
-    }
-
-    .sidebar-card {
-        display: none;
-    }
-
-    .brand-grid {
-        grid-template-columns:
-            repeat(2,1fr);
-    }
-
+    .docs-layout { grid-template-columns: 1fr; gap: 30px; }
+    .docs-sidebar { position: static; }
+    .docs-nav { display: grid; grid-template-columns: repeat(3,1fr); }
+    .sidebar-card { display: none; }
+    .brand-grid { grid-template-columns: repeat(2,1fr); }
 }
-
-
 @media (max-width: 650px) {
-
-    .guidelines-hero {
-        padding:
-            55px 18px
-            45px;
-    }
-
-    .guidelines-hero h1 {
-        font-size: 3.2rem;
-    }
-
-    .docs-layout {
-        padding:
-            0 15px
-            70px;
-    }
-
-    .docs-nav {
-        grid-template-columns:
-            repeat(2,1fr);
-    }
-
-    .principles-grid,
-    .do-grid,
-    .info-grid,
-    .brand-rules,
-    .access-grid,
-    .tokens-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .brand-grid {
-        grid-template-columns:
-            repeat(2,1fr);
-    }
-
-    .architecture-flow {
-        align-items: stretch;
-
-        flex-direction: column;
-    }
-
-    .architecture-flow i {
-        text-align: center;
-
-        transform: rotate(90deg);
-    }
-
-    .naming-row {
-        grid-template-columns:
-            1fr 1fr 1fr;
-    }
-
-    .naming-row span {
-        padding: 10px 8px;
-
-        font-size: .62rem;
-    }
-
+    .guidelines-hero { padding: 55px 18px 45px; }
+    .guidelines-hero h1 { font-size: 3.2rem; }
+    .docs-layout { padding: 0 15px 70px; }
+    .docs-nav { grid-template-columns: repeat(2,1fr); }
+    .principles-grid, .do-grid, .info-grid, .brand-rules, .access-grid, .tokens-grid { grid-template-columns: 1fr; }
+    .brand-grid { grid-template-columns: repeat(2,1fr); }
+    .architecture-flow { align-items: stretch; flex-direction: column; }
+    .architecture-flow i { text-align: center; transform: rotate(90deg); }
+    .naming-row { grid-template-columns: 1fr 1fr 1fr; }
+    .naming-row span { padding: 10px 8px; font-size: .62rem; }
 }
-
 </style>
 
-
 <script>
-
-/* =========================================
-   ACTIVE DOCUMENTATION SECTION
-========================================= */
-
-const docSections =
-    document.querySelectorAll(".doc-section");
-
-const docLinks =
-    document.querySelectorAll(".docs-nav a");
-
-
-const docObserver =
-    new IntersectionObserver(
-        entries => {
-
-            entries.forEach(entry => {
-
-                if (!entry.isIntersecting) return;
-
-                docLinks.forEach(link => {
-                    link.classList.remove("active");
-                });
-
-                const active =
-                    document.querySelector(
-                        `.docs-nav a[href="#${entry.target.id}"]`
-                    );
-
-                active?.classList.add("active");
-
-            });
-
-        },
-        {
-            rootMargin:
-                "-20% 0px -65% 0px"
-        }
-    );
-
-
-docSections.forEach(section => {
-    docObserver.observe(section);
-});
-
-
-/* =========================================
-   BACK TO TOP
-========================================= */
-
-const backTop =
-    document.getElementById("backTop");
-
-
-window.addEventListener(
-    "scroll",
-    () => {
-
-        if (window.scrollY > 500) {
-            backTop.classList.add("visible");
-        } else {
-            backTop.classList.remove("visible");
-        }
-
-    }
-);
-
-
-backTop?.addEventListener(
-    "click",
-    () => {
-
-        window.scrollTo({
-            top: 0,
-            behavior: "smooth"
-        });
-
-    }
-);
-
-
-/* =========================================
-   SMOOTH DOCUMENT NAVIGATION
-========================================= */
-
-document
-    .querySelectorAll(".docs-nav a")
-    .forEach(link => {
-
-        link.addEventListener(
-            "click",
-            event => {
-
-                const target =
-                    document.querySelector(
-                        link.getAttribute("href")
-                    );
-
-                if (!target) return;
-
-                event.preventDefault();
-
-                target.scrollIntoView({
-                    behavior: "smooth",
-                    block: "start"
-                });
-
-                history.replaceState(
-                    null,
-                    "",
-                    link.getAttribute("href")
-                );
-
-            }
-        );
-
+const docSections = document.querySelectorAll(".doc-section");
+const docLinks = document.querySelectorAll(".docs-nav a");
+const docObserver = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        docLinks.forEach(link => link.classList.remove("active"));
+        const active = document.querySelector(`.docs-nav a[href="#${entry.target.id}"]`);
+        active?.classList.add("active");
     });
+}, { rootMargin: "-20% 0px -65% 0px" });
+docSections.forEach(section => docObserver.observe(section));
 
+const backTop = document.getElementById("backTop");
+window.addEventListener("scroll", () => {
+    if (window.scrollY > 500) backTop.classList.add("visible");
+    else backTop.classList.remove("visible");
+});
+backTop?.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
+
+document.querySelectorAll(".docs-nav a").forEach(link => {
+    link.addEventListener("click", event => {
+        const target = document.querySelector(link.getAttribute("href"));
+        if (!target) return;
+        event.preventDefault();
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        history.replaceState(null, "", link.getAttribute("href"));
+    });
+});
 </script>

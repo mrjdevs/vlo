@@ -1,0 +1,19 @@
+<script server>
+{
+    "get_items": "SELECT id, name, value FROM test_items ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}}",
+    "get_items_paginated": "SELECT id, name, value FROM test_items ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}}",
+    "get_category_stats": "SELECT category, COUNT(*) as count FROM test_items GROUP BY category",
+    "post_items": "INSERT INTO test_items (name, value) VALUES ({{name}}, {{value}})",
+    "put_items": "UPDATE test_items SET name = {{name}} WHERE id = {{id}}",
+    "delete_items": "DELETE FROM test_items WHERE id = {{id}}",
+    "get_echo": "SELECT 1 as echo",
+    "post_echo": "SELECT 1 as echo",
+    "put_echo": "SELECT 1 as echo",
+    "delete_echo": "SELECT 1 as echo",
+    "get_live_value": "SELECT value FROM test_items ORDER BY id DESC LIMIT 1",
+    "post_trigger_flash_success": "SELECT 1",
+    "post_trigger_flash_error": "SELECT 1",
+    "post_trigger_flash_warning": "SELECT 1",
+    "post_redirect_test": "SELECT 1"
+}
+</script>

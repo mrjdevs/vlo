@@ -1,0 +1,1246 @@
+use crate::{
+    api::strip_server_block,
+    state::{
+        CompiledTemplate, RenderedPage, CLASS_RE, ELEMENT_RE, SLOT_RE,
+        STYLE_RE, TEMPLATE_CACHE,
+    },
+    template::{
+        clean_empty_tags, escape_html_attribute, render_control_flow,
+        render_interpolations,
+    },
+};
+use serde_json::Value;
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, LazyLock, RwLock},
+};
+
+// ─── PATH CACHE: Avoids repeated filesystem probes per tag ───────────
+static PATH_CACHE: LazyLock<RwLock<HashMap<String, Option<PathBuf>>>> =
+    LazyLock::new(Default::default);
+
+/// Cached public entry point. Resolves once per component name, then reuses.
+pub fn component_path(name: &str) -> Option<PathBuf> {
+    // Fast path: already resolved (Some or None)
+    if let Some(hit) = PATH_CACHE.read().unwrap().get(name) {
+        return hit.clone();
+    }
+    // Slow path: resolve from disk and cache the result
+    let found = resolve_component_path_internal(name);
+    PATH_CACHE
+        .write()
+        .unwrap()
+        .insert(name.to_string(), found.clone());
+    found
+}
+
+/// Clears the cache. Called by the file watcher on HMR reloads.
+pub fn clear_component_path_cache() {
+    PATH_CACHE.write().unwrap().clear();
+}
+
+/// Internal resolver. Performs the actual filesystem lookups.
+fn resolve_component_path_internal(name: &str) -> Option<PathBuf> {
+    let root = crate::state::get_project_root();
+    let layouts = root.join("layouts");
+
+    // 1. layouts/{name}.vlo
+    let direct = layouts.join(format!("{}.vlo", name));
+    if direct.exists() {
+        return Some(direct);
+    }
+
+    // 2. layouts/*/{name}.vlo
+    if let Ok(entries) = fs::read_dir(&layouts) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let candidate = path.join(format!("{}.vlo", name));
+                if candidate.exists() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+
+    // 3. components/{name}.vlo
+    let component = root.join("components").join(format!("{}.vlo", name));
+    if component.exists() {
+        return Some(component);
+    }
+
+    // 4. modules/*/components/{name}.vlo
+    if let Some(module_component) = crate::modules::find_module_component(name) {
+        return Some(module_component);
+    }
+
+    None
+}
+
+pub fn read_component_template(path: &Path) -> Option<Arc<CompiledTemplate>> {
+    if let Ok(cache) = TEMPLATE_CACHE.lock() {
+        if let Some(cached) = cache.get(path) {
+            return Some(Arc::clone(cached));
+        }
+    }
+
+    let source = fs::read_to_string(path).ok()?;
+    let mut css = String::new();
+
+    for captures in STYLE_RE.captures_iter(&source) {
+        if let Some(style) = captures.get(1) {
+            css.push_str(style.as_str());
+            css.push('\n');
+        }
+    }
+
+    let template = STYLE_RE.replace_all(&source, "").into_owned();
+    let compiled = Arc::new(CompiledTemplate { template, css });
+
+    if let Ok(mut cache) = TEMPLATE_CACHE.lock() {
+        cache.insert(path.to_path_buf(), Arc::clone(&compiled));
+    }
+
+    Some(compiled)
+}
+
+pub fn render_tag(
+    source: &str,
+    tag: &str,
+    context: &mut RenderedPage,
+) -> String {
+    if let Some((start, end, props, children)) = find_tag(source, tag) {
+        return format!(
+            "{}{}{}",
+            &source[..start],
+            render_component_file(tag, &props, &children, context),
+            &source[end..]
+        );
+    }
+
+    source.to_string()
+}
+
+// src/component.rs - Replace render_components
+pub fn render_components(source: &str, context: &mut RenderedPage) -> String {
+    let b = source.as_bytes();
+    let mut output = String::with_capacity(source.len());
+    let mut last = 0usize;
+    let mut i = 0usize;
+
+    while i < b.len() {
+        let Some(rel) = source[i..].find('<') else { break };
+        let pos = i + rel;
+        i = pos + 1;
+        
+        if i >= b.len() || !b[i].is_ascii_uppercase() { continue; }
+
+        let mut end = i;
+        while end < b.len() && (b[end].is_ascii_alphanumeric() || b[end] == b'_' || b[end] == b'-') {
+            end += 1;
+        }
+        
+        let tag = &source[i..end];
+        
+        // Validate tag boundary
+        if end < b.len() {
+            let next_ch = b[end];
+            if !(next_ch == b'>' || next_ch == b'/' || next_ch.is_ascii_whitespace()) {
+                continue;
+            }
+        }
+
+        if let Some((_, tag_end, props, children)) = find_tag(&source[pos..], tag) {
+            output.push_str(&source[last..pos]);
+            output.push_str(&render_component_file(tag, &props, &children, context));
+            last = pos + tag_end;
+            i = last;
+        }
+    }
+    output.push_str(&source[last..]);
+    output
+}
+
+pub fn find_tag(
+    source: &str,
+    name: &str,
+) -> Option<(usize, usize, String, String)> {
+    let open = format!("<{}", name);
+    let start = source.find(&open)?;
+    let mut index = start + open.len();
+
+    if index < source.len() {
+        let next = source[index..].chars().next()?;
+
+        if !(next.is_whitespace() || next == '/' || next == '>') {
+            return None;
+        }
+    }
+
+    let props_start = index;
+    let open_end = find_tag_opening_end(source, index)?;
+    let props = source[props_start..open_end].to_string();
+
+    let self_closing =
+        props.trim_end().ends_with('/') || is_void_tag(name);
+
+    index = open_end + 1;
+
+    if self_closing {
+        return Some((start, index, props, String::new()));
+    }
+
+    let close = format!("</{}>", name);
+    let children_start = index;
+    let mut depth: usize = 1;
+
+    while index < source.len() {
+        let remaining = &source[index..];
+
+        if remaining.starts_with(&closing_tag(&close)) {
+            depth = depth.saturating_sub(1);
+
+            if depth == 0 {
+                return Some((
+                    start,
+                    index + close.len(),
+                    props,
+                    source[children_start..index].to_string(),
+                ));
+            }
+
+            index += close.len();
+            continue;
+        }
+
+        if remaining.starts_with(&open) {
+            let after_name = index + open.len();
+
+            let valid = source[after_name..]
+                .chars()
+                .next()
+                .map(|ch| {
+                    ch.is_whitespace()
+                        || ch == '>'
+                        || ch == '/'
+                })
+                .unwrap_or(false);
+
+            if valid {
+                let opening_end =
+                    find_tag_opening_end(source, after_name)?;
+
+                let nested_props =
+                    source[after_name..opening_end].trim();
+
+                if !nested_props.ends_with('/')
+                    && !is_void_tag(name)
+                {
+                    depth += 1;
+                }
+
+                index = opening_end + 1;
+                continue;
+            }
+        }
+
+        index += remaining
+            .chars()
+            .next()
+            .map(|ch| ch.len_utf8())
+            .unwrap_or(1);
+    }
+
+    Some((
+        start,
+        index,
+        props,
+        source[children_start..].to_string(),
+    ))
+}
+
+fn closing_tag(tag: &str) -> &str {
+    tag
+}
+
+pub fn render_component_file(
+    name: &str,
+    props_str: &str,
+    children: &str,
+    context: &mut RenderedPage,
+) -> String {
+    let path = match component_path(name) {
+        Some(path) => path,
+        None => return format!("<!-- Missing component: {} -->", name),
+    };
+    
+    let compiled = match read_component_template(&path) {
+        Some(template) => template,
+        None => return format!("<!-- Missing template: {} -->", name),
+    };
+    
+    let props = parse_props_v7(props_str);
+    let is_module_component = path.to_string_lossy().contains("modules");
+
+    // 1. Track module usage and CSS even during build so styles are injected
+    if is_module_component {
+        if let Some(module_path) = path.parent().and_then(|p| p.parent()) {
+            if let Some(module_name) = module_path.file_name().and_then(|n| n.to_str()) {
+                context.add_used_module(module_name);
+            }
+        }
+    }
+
+    if !compiled.css.trim().is_empty() {
+        context.add_style(name, compiled.css.trim());
+    }
+
+    // 🔥 CRITICAL FIX: Preserve data-driven module components during build
+    // so they remain in the HTML for 'serve' to evaluate with live DB data.
+    if is_module_component && crate::state::is_building() && props.contains_key("source") {
+        let mut out = format!("<{}", name);
+        let trimmed_props = props_str.trim();
+        if !trimmed_props.is_empty() {
+            out.push(' ');
+            out.push_str(trimmed_props);
+        }
+        
+        if children.is_empty() {
+            if !trimmed_props.ends_with('/') && !is_void_tag(name) {
+                out.push_str(" /");
+            }
+            out.push('>');
+        } else {
+            let clean_props = trimmed_props.trim_end_matches('/').trim();
+            out = format!("<{}", name);
+            if !clean_props.is_empty() {
+                out.push(' ');
+                out.push_str(clean_props);
+            }
+            out.push('>');
+            out.push_str(children);
+            out.push_str(&format!("</{}>", name));
+        }
+        return out;
+    }
+
+    let template = &compiled.template;
+    let (raw_named_slots, raw_default_slot) = parse_slot_content(children);
+    
+    let mut named_slots = HashMap::new();
+    for (slot_name, slot_content) in raw_named_slots {
+        let rendered = render_nested_vlo_content(&slot_content, context);
+        named_slots.insert(slot_name, rendered);
+    }
+    
+    let default_slot = render_nested_vlo_content(&raw_default_slot, context);
+    let default_slot = apply_active_nav_class(&default_slot, context);
+    
+    let mut render_ctx = context.template_context.clone();
+    
+    // ─── MODULE COMPONENT HANDLING (RUNTIME) ─────────────────────────────
+    if is_module_component {
+        println!("🔥🔥🔥 [VLO] FOUND MODULE COMPONENT: {}", name); // FORCE PRINT
+        if let Some(module_path) = path.parent().and_then(|p| p.parent()) {
+            if let Some(module_name) = module_path.file_name().and_then(|n| n.to_str()) {
+                context.add_used_module(module_name);
+            }
+
+            let raw_data = if let Some(source) = props.get("source").and_then(|v| v.as_str()) {
+                let action = source.trim_start_matches("/api/").trim_matches('/');
+                println!("📡 [VLO] Fetching API for {}: action='{}'", name, action); // FORCE PRINT
+                
+                let api_response = crate::router::fetch_api_data_sync(action, &render_ctx);
+                println!("📡 [VLO] API Response for {}: {:?}", name, api_response); // FORCE PRINT
+
+                api_response
+                    .get("data")
+                    .cloned()
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default()
+            } else {
+                println!("⚠️ [VLO] No 'source' prop found for {}. Props: {:?}", name, props.keys().collect::<Vec<_>>()); // FORCE PRINT
+                Vec::new()
+            };
+            
+            println!("🔄 [VLO] Executing module handler for {} with {} rows", name, raw_data.len()); // FORCE PRINT
+            match crate::module_handler::execute_module_handler(module_path, &props, raw_data) {
+                Ok(response) => {
+                    println!("✅ [VLO] Handler produced {} transformed rows for {}", response.data.len(), name); // FORCE PRINT
+                    
+                    let data_json = serde_json::json!(response.data);
+                    let meta_json = serde_json::json!(response.meta);
+                    let config_json = serde_json::json!(response.config);
+                    
+                    render_ctx.insert("data".to_string(), data_json.clone());
+                    render_ctx.insert("meta".to_string(), meta_json.clone());
+                    render_ctx.insert("config".to_string(), config_json.clone());
+                    
+                    context.insert("data", data_json);
+                    context.insert("meta", meta_json);
+                    context.insert("config", config_json);
+                }
+                Err(e) => {
+                    println!("❌ [VLO] Module handler error for {}: {}", name, e); // FORCE PRINT
+                }
+            }
+        }
+    }
+    // ───────────────────────────────────────────────────────────
+    
+    render_ctx.extend(props.clone());
+    render_ctx.insert("children".to_string(), Value::String(default_slot.clone()));
+    
+    let rendered = render_component_template(template, &render_ctx);
+    let rendered = render_slots(&rendered, &named_slots, &default_slot);
+    
+    let incoming_class = props.get("class").and_then(|value| {
+        if let Value::String(value) = value {
+            Some(value.clone())
+        } else {
+            None
+        }
+    });
+    
+    let attributes = build_component_attributes(template, &props);
+    if attributes.is_empty() && incoming_class.is_none() {
+        return rendered;
+    }
+    
+    let skip_check = STYLE_RE.replace_all(&rendered, "");
+    if let Some(first_tag) = ELEMENT_RE.captures(&skip_check)
+        .and_then(|captures| captures.get(1))
+        .map(|value| value.as_str().to_string()) 
+    {
+        if first_tag.eq_ignore_ascii_case("style") || first_tag.eq_ignore_ascii_case("script") {
+            return rendered;
+        }
+    }
+    
+    if let Some(captures) = ELEMENT_RE.captures(&rendered) {
+        let full_match = captures.get(0).unwrap();
+        let tag_name = captures.get(1).unwrap().as_str();
+        let existing_attributes = captures.get(2).map(|value| value.as_str()).unwrap_or("").to_string();
+        
+        let (existing_attributes, class_attr) = if let Some(extra) = incoming_class.as_deref().map(|class| class.trim()).filter(|class| !class.is_empty()) {
+            if let Some(class_match) = CLASS_RE.captures(&existing_attributes) {
+                let existing_value = class_match.get(2).or_else(|| class_match.get(3)).map(|value| value.as_str()).unwrap_or("").trim();
+                let merged = if existing_value.is_empty() {
+                    format!("class=\"{}\"", extra)
+                } else {
+                    format!("class=\"{} {}\"", existing_value, extra)
+                };
+                let stripped = CLASS_RE.replace(&existing_attributes, "").trim().to_string();
+                (stripped, Some(merged))
+            } else {
+                (existing_attributes, Some(format!("class=\"{}\"", extra)))
+            }
+        } else {
+            (existing_attributes, None)
+        };
+        
+        let attributes = match class_attr {
+            Some(class) if attributes.is_empty() => class,
+            Some(class) => format!("{} {}", class, attributes),
+            None => attributes,
+        };
+        
+        if attributes.is_empty() {
+            return rendered;
+        }
+        
+        let replacement = if existing_attributes.trim().is_empty() {
+            format!("<{} {}>", tag_name, attributes)
+        } else {
+            format!("<{} {} {}>", tag_name, existing_attributes.trim(), attributes)
+        };
+        
+        return format!("{}{}{}", &rendered[..full_match.start()], replacement, &rendered[full_match.end()..]);
+    }
+    
+    rendered
+}
+
+pub fn render_slots(
+    template: &str,
+    named_slots: &HashMap<String, String>,
+    default_slot: &str,
+) -> String {
+    let result = SLOT_RE
+        .replace_all(
+            template,
+            |captures: &regex::Captures| {
+                let name = captures
+                    .get(1)
+                    .map(|value| value.as_str().trim())
+                    .unwrap_or("");
+
+                let fallback = captures
+                    .get(2)
+                    .map(|value| value.as_str())
+                    .unwrap_or("");
+
+                if name.is_empty() {
+                    if default_slot.trim().is_empty() {
+                        fallback.to_string()
+                    } else {
+                        default_slot.to_string()
+                    }
+                } else if let Some(content) =
+                    named_slots.get(name)
+                {
+                    content.clone()
+                } else {
+                    fallback.to_string()
+                }
+            },
+        )
+        .into_owned();
+
+    SLOT_RE.replace_all(&result, "").into_owned()
+}
+
+pub fn parse_slot_content(
+    children: &str,
+) -> (HashMap<String, String>, String) {
+    let mut named_slots = HashMap::new();
+    let mut default_content = String::new();
+    let mut cursor = 0usize;
+    let mut default_start = 0usize;
+
+    while cursor < children.len() {
+        let remaining = &children[cursor..];
+
+        let open_start = match remaining.find('<') {
+            Some(offset) => cursor + offset,
+            None => break,
+        };
+
+        let tag_info =
+            match parse_element_at(children, open_start) {
+                Some(info) => info,
+                None => {
+                    cursor = open_start + 1;
+                    continue;
+                }
+            };
+
+        let (
+            _tag_name,
+            _opening_end,
+            element_end,
+            props,
+            content,
+        ) = tag_info;
+
+        if let Some(slot_name) = get_slot_name(&props) {
+            if open_start > default_start {
+                default_content.push_str(
+                    &children[default_start..open_start],
+                );
+            }
+
+            named_slots
+                .entry(slot_name)
+                .or_insert_with(String::new)
+                .push_str(content);
+
+            cursor = element_end;
+            default_start = cursor;
+            continue;
+        }
+
+        cursor = element_end;
+    }
+
+    if default_start < children.len() {
+        default_content.push_str(&children[default_start..]);
+    }
+
+    (named_slots, default_content)
+}
+
+pub fn get_slot_name(props: &str) -> Option<String> {
+    parse_props_v7(props)
+        .get("slot")
+        .and_then(|value| {
+            if let Value::String(value) = value {
+                Some(value.clone())
+            } else {
+                None
+            }
+        })
+}
+
+pub fn is_void_tag(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+pub fn parse_element_at(
+    source: &str,
+    start: usize,
+) -> Option<(String, usize, usize, String, &str)> {
+    if !source[start..].starts_with('<') {
+        return None;
+    }
+
+    let mut cursor = start + 1;
+
+    if cursor >= source.len() {
+        return None;
+    }
+
+    let first = source[cursor..].chars().next()?;
+
+    if first == '/' || first == '!' || first == '?' {
+        return None;
+    }
+
+    let tag_start = cursor;
+
+    while cursor < source.len() {
+        let ch = source[cursor..].chars().next()?;
+
+        if ch.is_ascii_alphanumeric()
+            || ch == '-'
+            || ch == '_'
+            || ch == ':'
+        {
+            cursor += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    if cursor == tag_start {
+        return None;
+    }
+
+    let tag_name =
+        source[tag_start..cursor].to_string();
+
+    let opening_end =
+        find_tag_opening_end(source, cursor)?;
+
+    let props =
+        source[cursor..opening_end].to_string();
+
+    let self_closing =
+        props.trim_end().ends_with('/')
+            || is_void_tag(&tag_name);
+
+    if self_closing {
+        return Some((
+            tag_name,
+            opening_end + 1,
+            opening_end + 1,
+            props,
+            "",
+        ));
+    }
+
+    let content_start = opening_end + 1;
+
+    let element_end =
+        find_matching_tag_end(
+            source,
+            content_start,
+            &tag_name,
+        )?;
+
+    let close_start = element_end.checked_sub(
+        format!("</{}>", tag_name).len(),
+    )?;
+
+    if close_start < content_start {
+        return None;
+    }
+
+    let content =
+        &source[content_start..close_start];
+
+    Some((
+        tag_name,
+        opening_end + 1,
+        element_end,
+        props,
+        content,
+    ))
+}
+
+pub fn find_tag_opening_end(
+    source: &str,
+    start: usize,
+) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    let mut cursor = start;
+
+    while cursor < source.len() {
+        let ch = source[cursor..].chars().next()?;
+
+        match quote {
+            Some(active) => {
+                if ch == active {
+                    quote = None;
+                }
+            }
+            None => {
+                if ch == '"' || ch == '\'' {
+                    quote = Some(ch);
+                } else if ch == '>' {
+                    return Some(cursor);
+                }
+            }
+        }
+
+        cursor += ch.len_utf8();
+    }
+
+    None
+}
+
+pub fn find_matching_tag_end(
+    source: &str,
+    start: usize,
+    tag_name: &str,
+) -> Option<usize> {
+    let opening = format!("<{}", tag_name);
+    let closing = format!("</{}>", tag_name);
+    let mut depth: usize = 1;
+    let mut cursor = start;
+
+    while cursor < source.len() {
+        let remaining = &source[cursor..];
+
+        if remaining.starts_with(&closing) {
+            depth = depth.saturating_sub(1);
+
+            if depth == 0 {
+                return Some(cursor + closing.len());
+            }
+
+            cursor += closing.len();
+            continue;
+        }
+
+        if remaining.starts_with(&opening) {
+            let after_name =
+                cursor + opening.len();
+
+            let valid = source[after_name..]
+                .chars()
+                .next()
+                .map(|ch| {
+                    ch.is_whitespace()
+                        || ch == '>'
+                        || ch == '/'
+                })
+                .unwrap_or(false);
+
+            if valid {
+                let opening_end =
+                    find_tag_opening_end(
+                        source,
+                        after_name,
+                    )?;
+
+                let props =
+                    source[after_name..opening_end]
+                        .trim();
+
+                if !props.ends_with('/')
+                    && !is_void_tag(tag_name)
+                {
+                    depth += 1;
+                }
+
+                cursor = opening_end + 1;
+                continue;
+            }
+        }
+
+        cursor += remaining
+            .chars()
+            .next()
+            .map(|ch| ch.len_utf8())
+            .unwrap_or(1);
+    }
+
+    None
+}
+
+pub fn parse_props_v7(
+    raw: &str,
+) -> HashMap<String, Value> {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut map = HashMap::new();
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        while index < chars.len()
+            && chars[index].is_whitespace()
+        {
+            index += 1;
+        }
+
+        if index >= chars.len() || chars[index] == '/' {
+            break;
+        }
+
+        let mut key = String::new();
+
+        while index < chars.len()
+            && chars[index] != '='
+            && !chars[index].is_whitespace()
+            && chars[index] != '/'
+        {
+            key.push(chars[index]);
+            index += 1;
+        }
+
+        if key.is_empty() {
+            index += 1;
+            continue;
+        }
+
+        while index < chars.len()
+            && chars[index].is_whitespace()
+        {
+            index += 1;
+        }
+
+        if index >= chars.len()
+            || chars[index] != '='
+        {
+            map.insert(key, Value::Bool(true));
+            continue;
+        }
+
+        index += 1;
+
+        while index < chars.len()
+            && chars[index].is_whitespace()
+        {
+            index += 1;
+        }
+
+        if index >= chars.len() {
+            map.insert(key, Value::Bool(true));
+            break;
+        }
+
+        let quote = chars[index];
+
+        if quote != '"' && quote != '\'' {
+            let mut value = String::new();
+
+            while index < chars.len()
+                && !chars[index].is_whitespace()
+                && chars[index] != '/'
+            {
+                value.push(chars[index]);
+                index += 1;
+            }
+
+            // Try to parse as JSON, fall back to string
+            let parsed_value = serde_json::from_str::<Value>(&value)
+                .unwrap_or_else(|_| Value::String(value));
+            map.insert(key, parsed_value);
+            continue;
+        }
+
+        index += 1;
+
+        let value =
+            parse_quoted_prop_value(
+                &chars,
+                &mut index,
+                quote,
+            );
+
+        // Try to parse as JSON, fall back to string
+        let parsed_value = serde_json::from_str::<Value>(&value)
+            .unwrap_or_else(|_| Value::String(value));
+        map.insert(key, parsed_value);
+    }
+
+    map
+}
+
+fn parse_quoted_prop_value(
+    chars: &[char],
+    index: &mut usize,
+    outer_quote: char,
+) -> String {
+    let mut value = String::new();
+    let mut nested_depth: usize = 0;
+
+    while *index < chars.len() {
+        let current = chars[*index];
+
+        if current == '<' {
+            if let Some((end, kind)) =
+                scan_nested_tag(chars, *index)
+            {
+                value.extend(
+                    chars[*index..=end].iter().copied()
+                );
+
+                match kind {
+                    1 => nested_depth += 1,
+                    -1 => {
+                        if nested_depth > 0 {
+                            nested_depth -= 1;
+                        }
+                    }
+                    _ => {}
+                }
+
+                *index = end + 1;
+                continue;
+            }
+        }
+
+        if current == outer_quote
+            && nested_depth == 0
+        {
+            *index += 1;
+            break;
+        }
+
+        value.push(current);
+        *index += 1;
+    }
+
+    value
+}
+
+fn scan_nested_tag(
+    chars: &[char],
+    start: usize,
+) -> Option<(usize, i8)> {
+    if chars.get(start) != Some(&'<') {
+        return None;
+    }
+
+    let mut index = start + 1;
+
+    if index >= chars.len() {
+        return None;
+    }
+
+    let closing = chars[index] == '/';
+
+    if closing {
+        index += 1;
+    }
+
+    if index >= chars.len() {
+        return None;
+    }
+
+    let first = chars[index];
+
+    if first == '!'
+        || first == '?'
+        || first.is_whitespace()
+    {
+        return None;
+    }
+
+    while index < chars.len() {
+        let current = chars[index];
+
+        if current == '"' || current == '\'' {
+            let quote = current;
+            index += 1;
+
+            while index < chars.len() {
+                if chars[index] == quote {
+                    index += 1;
+                    break;
+                }
+
+                index += 1;
+            }
+
+            continue;
+        }
+
+        if current == '>' {
+            let mut previous = index;
+
+            while previous > start
+                && chars[previous - 1].is_whitespace()
+            {
+                previous -= 1;
+            }
+
+            let self_closing =
+                !closing
+                    && previous > start
+                    && chars[previous - 1] == '/';
+
+            let kind = if closing {
+                -1
+            } else if self_closing {
+                0
+            } else {
+                1
+            };
+
+            return Some((index, kind));
+        }
+
+        index += 1;
+    }
+
+    None
+}
+
+fn apply_active_nav_class(html: &str, context: &RenderedPage) -> String {
+    let Some(Value::String(current_path)) = context.template_context.get("@path") else {
+        return html.to_string();
+    };
+
+    static NAV_LINK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)<a\s+([^>]*?)>"#).unwrap()
+    });
+    static NAV_HREF_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)href\s*=\s*["']([^"']+)["']"#).unwrap()
+    });
+    static NAV_CLASS_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r#"(?i)class\s*=\s*["']([^"']*)["']"#).unwrap()
+    });
+
+    NAV_LINK_RE
+        .replace_all(html, |caps: &regex::Captures| {
+            let full_match = caps.get(0).unwrap().as_str();
+            let attrs = caps.get(1).unwrap().as_str();
+
+            let Some(href_cap) = NAV_HREF_RE.captures(attrs) else {
+                return full_match.to_string();
+            };
+            let href = href_cap.get(1).unwrap().as_str();
+
+            let is_match = href == current_path
+                || (current_path != "/" && current_path.starts_with(&format!("{}/", href)));
+
+            if !is_match {
+                return full_match.to_string();
+            }
+
+            if let Some(class_cap) = NAV_CLASS_RE.captures(attrs) {
+                let existing = class_cap.get(1).unwrap().as_str();
+                if existing.split_whitespace().any(|c| c == "active") {
+                    return full_match.to_string();
+                }
+                let new_class = format!("{} active", existing.trim());
+                let quote = if class_cap.get(0).unwrap().as_str().contains('\'') { '\'' } else { '"' };
+                let new_attrs = NAV_CLASS_RE.replace(attrs, &format!("class={quote}{}{quote}", new_class));
+                format!("<a {}>", new_attrs)
+            } else {
+                format!("<a {} class=\"active\">", attrs.trim())
+            }
+        })
+        .into_owned()
+}
+
+pub fn render_component_template(
+    template: &str,
+    props: &HashMap<String, Value>,
+) -> String {
+    let rendered =
+        render_control_flow(template, props);
+
+    let rendered =
+        render_interpolations(&rendered, props);
+
+    let cleaned =
+        clean_empty_tags(&rendered);
+
+    normalize_class_attributes(&cleaned)
+}
+
+pub fn normalize_class_attributes(
+    html: &str,
+) -> String {
+    CLASS_RE
+        .replace_all(
+            html,
+            |captures: &regex::Captures| {
+                let value = captures
+                    .get(2)
+                    .or_else(|| captures.get(3))
+                    .map(|value| value.as_str())
+                    .unwrap_or("");
+
+                let normalized = value
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                let quote = if captures
+                    .get(1)
+                    .map(|value| value.as_str())
+                    .unwrap_or("")
+                    .starts_with('"')
+                {
+                    '"'
+                } else {
+                    '\''
+                };
+
+                format!(
+                    "class={quote}{normalized}{quote}"
+                )
+            },
+        )
+        .into_owned()
+}
+
+pub fn build_component_attributes(
+    template: &str,
+    props: &HashMap<String, Value>,
+) -> String {
+    let mut used = HashSet::new();
+
+    for captures in
+        crate::state::PROP_RE.captures_iter(template)
+    {
+        used.insert(captures[1].to_string());
+    }
+
+    let mut attributes = Vec::new();
+
+    let button_default =
+        template.to_ascii_lowercase().contains("<button");
+
+    if button_default
+        && !props.contains_key("type")
+        && !used.contains("type")
+    {
+        attributes.push(
+            "type=\"button\"".to_string(),
+        );
+    }
+
+    for (key, value) in props {
+        if key == "children"
+            || key == "attributes"
+            || key == "class"
+        {
+            continue;
+        }
+
+        if used.contains(key) {
+            continue;
+        }
+
+        if is_boolean_attribute(key) {
+            if let Value::Bool(value) = value {
+                if *value {
+                    attributes.push(key.clone());
+                }
+            } else if let Value::String(value) = value {
+                if value.eq_ignore_ascii_case("true")
+                    || value == key
+                {
+                    attributes.push(key.clone());
+                }
+            }
+
+            continue;
+        }
+
+        if let Value::String(value) = value {
+            if value.trim().is_empty() {
+                continue;
+            }
+
+            attributes.push(format!(
+                "{}=\"{}\"",
+                key,
+                escape_html_attribute(value)
+            ));
+        }
+    }
+
+    attributes.sort();
+    attributes.join(" ")
+}
+
+pub fn is_boolean_attribute(
+    name: &str,
+) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "allowfullscreen"
+            | "async"
+            | "autofocus"
+            | "autoplay"
+            | "checked"
+            | "controls"
+            | "default"
+            | "defer"
+            | "disabled"
+            | "formnovalidate"
+            | "hidden"
+            | "inert"
+            | "ismap"
+            | "itemscope"
+            | "loop"
+            | "multiple"
+            | "muted"
+            | "nomodule"
+            | "novalidate"
+            | "open"
+            | "playsinline"
+            | "readonly"
+            | "required"
+            | "reversed"
+            | "selected"
+    )
+}
+
+pub fn render_nested_vlo_content(
+    content: &str,
+    context: &mut RenderedPage,
+) -> String {
+    if content.trim().is_empty() {
+        return String::new();
+    }
+
+    let mut source = strip_server_block(content);
+
+    for _ in 0..20 {
+        let next_source = render_tag(&source, "BaseLayout", context);
+        let next_source = render_components(&next_source, context);
+        
+        if next_source == source {
+            break; // No changes were made, we've reached a stable state
+        }
+        
+        source = next_source;
+    }
+
+    source
+}

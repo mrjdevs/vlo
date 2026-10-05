@@ -1,0 +1,567 @@
+<BaseLayout title="Test Page">
+<div class="test-page">
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- HEADER                                                      -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <div class="test-header">
+    <div class="test-eyebrow">VLO / QA</div>
+    <h1>Feature Test Suite</h1>
+    <p>Every VLO feature verified against the live <code>products</code> database. No fixtures, no mocks.</p>
+    <div class="test-badges">
+      <Badge variant="success" text="Live DB" />
+      <Badge variant="info" text="SSR" />
+      <Badge variant="warning" text="{{total}} rows" />
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- Everything below runs inside a data-source so we get        -->
+  <!-- `products` + pagination vars + query params in context      -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <div data-source="/api/products">
+
+    <!-- ── 1. INTERPOLATION & CONTEXT ─────────────────────────── -->
+    <Card title="1 · Interpolation & Context" description="Variables injected from the data source and query string.">
+      <div class="grid-3">
+        <div class="kv"><span>total</span><b>{{total}}</b></div>
+        <div class="kv"><span>page</span><b>{{page}}</b></div>
+        <div class="kv"><span>total_pages</span><b>{{total_pages}}</b></div>
+        <div class="kv"><span>limit</span><b>{{limit}}</b></div>
+        <div class="kv"><span>has_next</span><b>{if has_next}true{else}false{/if}</b></div>
+        <div class="kv"><span>search</span><b>{{search | default:"(none)"}}</b></div>
+        <div class="kv"><span>first product</span><b>{{products.0.title | default:"—"}}</b></div>
+        <div class="kv"><span>nested price</span><b>{{products.0.price | default:"—"}}</b></div>
+      </div>
+    </Card>
+
+    <!-- ── 2. CONDITIONALS ────────────────────────────────────── -->
+    <Card title="2 · Conditionals" description="if / else if / else, comparisons, logical operators, and parentheses.">
+      <div class="grid-2">
+        <div class="kv"><span>total &gt; 0</span><b>{if total > 0}✅ PASS{else}❌ FAIL{/if}</b></div>
+        <div class="kv"><span>page == 1</span><b>{if page == 1}✅ page is 1{else}page is {{page}}{/if}</b></div>
+        <div class="kv"><span>limit != 999</span><b>{if limit != 999}✅ PASS{else}❌ FAIL{/if}</b></div>
+        <div class="kv"><span>chained</span><b>{if total > 100}100+{else if total > 10}11–100{else}0–10{/if}</b></div>
+        <div class="kv"><span>truthy search</span><b>{if search}has search{else}no search{/if}</b></div>
+        <div class="kv"><span>OR operator</span><b>{if search || sort}has filter{else}no filter{/if}</b></div>
+        <div class="kv"><span>AND operator</span><b>{if total > 0 && page == 1}✅ both true{else}❌ not both{/if}</b></div>
+        <div class="kv"><span>NOT operator</span><b>{if !search}✅ no search{else}has search{/if}</b></div>
+        <div class="kv"><span>parentheses</span><b>{if (search || sort) && total > 0}✅ complex{else}❌ not complex{/if}</b></div>
+        <div class="kv"><span>&lt;= operator</span><b>{if page <= 1}✅ page is 1 or less{else}page is {{page}}{/if}</b></div>
+        <div class="kv"><span>&gt;= operator</span><b>{if total_pages >= 1}✅ at least 1 page{else}❌ no pages{/if}</b></div>
+      </div>
+    </Card>
+
+    <!-- ── 3. MODIFIER LAB: TEXT ──────────────────────────────── -->
+    <Card title="3 · Modifier Lab: Text" description="Text transformation modifiers.">
+      <table class="mini-table">
+        <thead><tr><th>Modifier</th><th>Input</th><th>Output</th></tr></thead>
+        <tbody>
+          <tr><td>upper</td><td>{{products.0.title | default:"vlo"}}</td><td><b>{{products.0.title | upper | default:"VLO"}}</b></td></tr>
+          <tr><td>lower</td><td>{{products.0.title | default:"VLO"}}</td><td><b>{{products.0.title | lower | default:"vlo"}}</b></td></tr>
+          <tr><td>proper</td><td>{{products.0.title | default:"vlo frame"}}</td><td><b>{{products.0.title | proper | default:"Vlo Frame"}}</b></td></tr>
+          <tr><td>capitalize</td><td>{{products.0.title | default:"vlo frame"}}</td><td><b>{{products.0.title | capitalize | default:"Vlo frame"}}</b></td></tr>
+          <tr><td>lcfirst</td><td>{{products.0.title | default:"VLO"}}</td><td><b>{{products.0.title | lcfirst | default:"vLO"}}</b></td></tr>
+          <tr><td>trim</td><td>"  hello  "</td><td><b>{{"  hello  " | trim}}</b></td></tr>
+          <tr><td>ltrim</td><td>"  hello"</td><td><b>{{"  hello" | ltrim}}</b></td></tr>
+          <tr><td>rtrim</td><td>"hello  "</td><td><b>{{"hello  " | rtrim}}</b></td></tr>
+          <tr><td>slug</td><td>{{products.0.title | default:"Vlo Frame"}}</td><td><b>{{products.0.title | slug | default:"vlo-frame"}}</b></td></tr>
+          <tr><td>reverse</td><td>vlo</td><td><b>{{products.0.title | reverse | default:"olv"}}</b></td></tr>
+          <tr><td>truncate:15</td><td>{{products.0.description | default:"a long description"}}</td><td><b>{{products.0.description | truncate:15 | default:"a long descri…"}}</b></td></tr>
+          <tr><td>truncate_words:3</td><td>{{products.0.description | default:"a long description here"}}</td><td><b>{{products.0.description | truncate_words:3 | default:"a long description..."}}</b></td></tr>
+          <tr><td>replace</td><td>"hello world"</td><td><b>{{"hello world" | replace:"world,vlo"}}</b></td></tr>
+          <tr><td>pad:10</td><td>"hi"</td><td><b>{{"hi" | pad:10}}</b></td></tr>
+          <tr><td>words</td><td>{{products.0.title | default:"hello world"}}</td><td><b>{{products.0.title | words | default:"2"}} words</b></td></tr>
+          <tr><td>len</td><td>{{products.0.title | default:"hello"}}</td><td><b>{{products.0.title | len | default:"5"}} chars</b></td></tr>
+          <tr><td>string</td><td>{{products.0.price | default:"42"}}</td><td><b>{{products.0.price | string | default:"42"}}</b></td></tr>
+          <tr><td>escape</td><td>&lt;b&gt;bold&lt;/b&gt;</td><td><b>{{"<b>bold</b>" | escape}}</b></td></tr>
+          <tr><td>nl2br</td><td>"line1\nline2"</td><td><b>{{"line1\nline2" | nl2br}}</b></td></tr>
+          <tr><td>upper_words:2</td><td>{{products.0.title | default:"hello world vlo"}}</td><td><b>{{products.0.title | upper_words:2 | default:"HELLO WORLD vlo"}}</b></td></tr>
+        </tbody>
+      </table>
+    </Card>
+
+    <!-- ── 4. MODIFIER LAB: NUMBER & DATE ─────────────────────── -->
+    <Card title="4 · Modifier Lab: Number & Date" description="Number formatting and date extraction modifiers.">
+      <table class="mini-table">
+        <thead><tr><th>Modifier</th><th>Input</th><th>Output</th></tr></thead>
+        <tbody>
+          <tr><td>number:2</td><td>{{products.0.price | default:"1234.5"}}</td><td><b>{{products.0.price | number:2 | default:"1,234.50"}}</b></td></tr>
+          <tr><td>double:2</td><td>{{products.0.price | default:"42.9"}}</td><td><b>{{products.0.price | double:2 | default:"42.90"}}</b></td></tr>
+          <tr><td>int</td><td>{{products.0.price | default:"42.9"}}</td><td><b>{{products.0.price | int | default:"42"}}</b></td></tr>
+          <tr><td>currency</td><td>{{products.0.price | default:"99"}}</td><td><b>{{products.0.price | currency:"$" | default:"$99.00"}}</b></td></tr>
+          <tr><td>percent:1</td><td>0.85</td><td><b>{{0.85 | percent:1}}</b></td></tr>
+          <tr><td>format:"%Y-%m-%d"</td><td>{{products.0.created_at | default:"2026-01-01"}}</td><td><b>{{products.0.created_at | format:"%Y-%m-%d" | default:"2026-01-01"}}</b></td></tr>
+          <tr><td>year</td><td>{{products.0.created_at | default:"2026-01-01"}}</td><td><b>{{products.0.created_at | year | default:"2026"}}</b></td></tr>
+          <tr><td>month</td><td>{{products.0.created_at | default:"2026-03-01"}}</td><td><b>{{products.0.created_at | month | default:"2026-03"}}</b></td></tr>
+          <tr><td>month_name</td><td>{{products.0.created_at | default:"2026-03-01"}}</td><td><b>{{products.0.created_at | month_name | default:"March"}}</b></td></tr>
+          <tr><td>month_short</td><td>{{products.0.created_at | default:"2026-03-01"}}</td><td><b>{{products.0.created_at | month_short | default:"Mar"}}</b></td></tr>
+          <tr><td>quarter</td><td>{{products.0.created_at | default:"2026-03-01"}}</td><td><b>{{products.0.created_at | quarter | default:"2026-Q1"}}</b></td></tr>
+          <tr><td>week</td><td>{{products.0.created_at | default:"2026-03-01"}}</td><td><b>{{products.0.created_at | week | default:"2026-W09"}}</b></td></tr>
+          <tr><td>day</td><td>{{products.0.created_at | default:"2026-03-15"}}</td><td><b>{{products.0.created_at | day | default:"2026-03-15"}}</b></td></tr>
+          <tr><td>date</td><td>{{products.0.created_at | default:"2026-03-15"}}</td><td><b>{{products.0.created_at | date | default:"2026-03-15"}}</b></td></tr>
+          <tr><td>day_name</td><td>{{products.0.created_at | default:"2026-03-15"}}</td><td><b>{{products.0.created_at | day_name | default:"Sunday"}}</b></td></tr>
+          <tr><td>day_short</td><td>{{products.0.created_at | default:"2026-03-15"}}</td><td><b>{{products.0.created_at | day_short | default:"Sun"}}</b></td></tr>
+          <tr><td>hour</td><td>{{products.0.created_at | default:"2026-03-15 14:30:00"}}</td><td><b>{{products.0.created_at | hour | default:"14"}}</b></td></tr>
+          <tr><td>minute</td><td>{{products.0.created_at | default:"2026-03-15 14:30:00"}}</td><td><b>{{products.0.created_at | minute | default:"14:30"}}</b></td></tr>
+          <tr><td>time</td><td>{{products.0.created_at | default:"2026-03-15 14:30:00"}}</td><td><b>{{products.0.created_at | time | default:"14:30:00"}}</b></td></tr>
+          <tr><td>datetime</td><td>{{products.0.created_at | default:"2026-03-15 14:30:00"}}</td><td><b>{{products.0.created_at | datetime | default:"2026-03-15 14:30:00"}}</b></td></tr>
+          <tr><td>timeago</td><td>{{products.0.created_at | default:"2026-03-15 14:30:00"}}</td><td><b>{{products.0.created_at | timeago | default:"—"}}</b></td></tr>
+        </tbody>
+      </table>
+    </Card>
+
+    <!-- ── 5. MODIFIER LAB: SECURITY & JSON ───────────────────── -->
+    <Card title="5 · Modifier Lab: Security & JSON" description="Masking, hashing, JSON parsing, and URL query modifiers.">
+      <table class="mini-table">
+        <thead><tr><th>Modifier</th><th>Input</th><th>Output</th></tr></thead>
+        <tbody>
+          <tr><td>default</td><td>(empty)</td><td><b>{{does_not_exist | default:"FALLBACK OK"}}</b></td></tr>
+          <tr><td>mask:"email"</td><td>user@example.com</td><td><b>{{"user@example.com" | mask:"email"}}</b></td></tr>
+          <tr><td>mask:"ssn"</td><td>123-45-6789</td><td><b>{{"123-45-6789" | mask:"ssn"}}</b></td></tr>
+          <tr><td>mask (default)</td><td>secret123</td><td><b>{{"secret123" | mask}}</b></td></tr>
+          <tr><td>hash:"sha256"</td><td>hello</td><td><b>{{"hello" | hash:"sha256" | truncate:16}}</b></td></tr>
+          <tr><td>json</td><td>{{products.0.title | default:"test"}}</td><td><b>{{products.0.title | json | default:"\"test\"" | truncate:30}}</b></td></tr>
+          <tr><td>json_path</td><td>{"name":"VLO","version":"0.8.5"}</td><td><b>{{"{"name":"VLO","version":"0.8.5"}" | json_path:"name"}}</b></td></tr>
+          <tr><td>query</td><td>?page=2&sort=title</td><td><b>{{"?page=2&sort=title" | query:"sort"}}</b></td></tr>
+          <tr><td>strip_tags</td><td>&lt;b&gt;bold&lt;/b&gt; text</td><td><b>{{"<b>bold</b> text" | strip_tags}}</b></td></tr>
+          <tr><td>excerpt:50</td><td>{{products.0.description | default:"a long description"}}</td><td><b>{{products.0.description | excerpt:50 | default:"a long description"}}</b></td></tr>
+          <tr><td>type</td><td>{{products.0.price | default:"42"}}</td><td><b>{{products.0.price | type | default:"number"}}</b></td></tr>
+          <tr><td>is:"number"</td><td>{{products.0.price | default:"42"}}</td><td><b>{{products.0.price | is:"number" | default:"true"}}</b></td></tr>
+          <tr><td>debug</td><td>{{products.0.title | default:"test"}}</td><td><b>{{products.0.title | debug:"TEST" | default:"test"}}</b></td></tr>
+          <tr><td>log</td><td>{{products.0.title | default:"test"}}</td><td><b>{{products.0.title | log:"TEST" | default:"test"}}</b></td></tr>
+        </tbody>
+      </table>
+    </Card>
+
+    <!-- ── 6. LOOPS & LOOP VARIABLES ──────────────────────────── -->
+    <Card title="6 · Loops & Loop Variables" description="@index, @number, @first, @last inside {for}.">
+      <div class="loop-list">
+        {for product in products}
+          <div class="loop-item {if @first}is-first{/if} {if @last}is-last{/if}">
+            <span class="loop-num">#{{@number}}</span>
+            <span class="loop-title">{{product.title}}</span>
+            {if @first}<Badge variant="info" text="first" />{/if}
+            {if @last}<Badge variant="warning" text="last" />{/if}
+          </div>
+        {else}
+          <div class="empty-note">No products — the {else} branch rendered.</div>
+        {/for}
+      </div>
+    </Card>
+
+    <!-- ── 7. DATA TABLE TOOLBAR ──────────────────────────────── -->
+    <Card title="7 · DataTableToolbar" description="Search, sort, order, and limit controls.">
+      <DataTableToolbar _columns="title,description" />
+    </Card>
+
+    <!-- ── 8. DATA SOURCE · SEARCH · SORT · PAGINATION ────────── -->
+    <Card title="8 · Data Source · Search · Sort · Pagination" description="Live query against /api/products with toolbar controls.">
+      <div class="table-wrap">
+        <table class="products-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Image</th>
+              <th>Product</th>
+              <th>Description</th>
+              <th>Price</th>
+              <th>Stock</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody data-append>
+            {for product in products}
+              <tr>
+                <td>#{{product.id}}</td>
+                <td>
+                  {if product.image}
+                    {{product.image | image:"w=88,h=88,webp,blur,sizes=88px"}}
+                  {else}
+                    <div class="product-image-placeholder">📦</div>
+                  {/if}
+                </td>
+                <td>
+                  <div class="product-title {if product.price > 500}product-premium{/if}">{{product.title}}</div>
+                </td>
+                <td><div class="product-description">{{product.description}}</div></td>
+                <td>
+                  <span class="product-price {if product.price > 500}product-expensive{/if}">${{product.price}}</span>
+                </td>
+                <td>
+                  {if product.stock == 0}
+                    <span class="stock-empty">Out of Stock</span>
+                  {else if product.stock < 5}
+                    <span class="stock-low">{{product.stock | sync:"products"}} left</span>
+                  {else}
+                    <span class="stock-good">{{product.stock | sync:"products"}}</span>
+                  {/if}
+                </td>
+                <td><span>{{product.created_at | date}}</span></td>
+                <td>
+                  <div class="product-actions">
+                    <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('edit-{{product.id}}').classList.add('active')" title="Edit">✎</button>
+                    <button type="button" class="vlo-btn vlo-btn-danger" onclick="document.getElementById('del-{{product.id}}').classList.add('active')" title="Delete">✕</button>
+                  </div>
+                </td>
+              </tr>
+            {else}
+              <tr><td colspan="8" class="empty-note">No products found.</td></tr>
+            {/for}
+          </tbody>
+        </table>
+      </div>
+      <Pagination />
+    </Card>
+
+    <!-- ── 9. DIRECTIVES: v-post ──────────────────────────────── -->
+    <Card title="9 · Directive: v-post" description="Submits a new row via POST with native HTML5 validation.">
+      <form v-post="/api/products" class="modal-form" enctype="multipart/form-data">
+        <div class="form-grid">
+          <div class="form-field"><label>Title</label><input type="text" name="title" placeholder="New product" required /></div>
+          <div class="form-field"><label>Description</label><input type="text" name="description" placeholder="Description" /></div>
+          <div class="form-field"><label>Price</label><input type="number" name="price" step="0.01" min="0" required /></div>
+          <div class="form-field"><label>Stock</label><input type="number" name="stock" min="0" required /></div>
+        </div>
+        <div class="form-field"><label>Image</label><FileInput name="image" accept="image/*" button="Choose Image" /></div>
+        <button type="submit" class="vlo-btn vlo-btn-primary">Create Product</button>
+      </form>
+    </Card>
+
+    <!-- ── 10. DIRECTIVES: v-put, v-delete, v-confirm ─────────── -->
+    <Card title="10 · Directives: v-put, v-delete, v-confirm" description="Edit, delete, and confirmation dialogs.">
+      <div class="grid-2">
+        <div class="kv">
+          <span>v-put (edit first product)</span>
+          <form v-put="/api/products/{{products.0.id}}" enctype="application/x-www-form-urlencoded">
+            <input type="text" name="title" value="{{products.0.title}}" required />
+            <button type="submit" class="vlo-btn vlo-btn-primary">Update</button>
+          </form>
+        </div>
+        <div class="kv">
+          <span>v-delete with v-confirm</span>
+          <button v-delete="/api/products/{{products.0.id}}" v-confirm="Delete this product?" class="vlo-btn vlo-btn-danger">Delete with Confirm</button>
+        </div>
+        <div class="kv">
+          <span>v-param + v-prompt</span>
+          <button v-put="/api/products/{{products.0.id}}" v-param="stock" v-prompt="Enter new stock value:" class="vlo-btn vlo-btn-secondary">Update Stock via Prompt</button>
+        </div>
+      </div>
+    </Card>
+
+    <!-- ── 11. COMPONENT SHOWCASE ─────────────────────────────── -->
+    <Card title="11 · Component Showcase" description="All existing UI components rendered with props and slots.">
+      <div class="showcase">
+        <div class="showcase-row">
+          <span class="showcase-label">Alert</span>
+          <Alert variant="success" title="Success" description="This alert rendered from the Alert component." />
+          <Alert variant="error" title="Error" description="This is an error alert." />
+          <Alert variant="warning" title="Warning" description="This is a warning alert." />
+          <Alert variant="info" title="Info" description="This is an info alert." />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Badge</span>
+          <Badge variant="success" text="success" />
+          <Badge variant="info" text="info" />
+          <Badge variant="warning" text="warning" />
+          <Badge variant="error" text="error" />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Button</span>
+          <Button text="Primary" variant="primary" />
+          <Button text="Secondary" variant="secondary" />
+          <Button text="Link Button" variant="primary" href="/test" />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Link</span>
+          <Link href="/test" text="A styled link" />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Input</span>
+          <Input label="Sample input" name="sample" placeholder="Type here" />
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">SlotCard</span>
+          <SlotCard title="Slotted card">
+            <slot name="body">This body came through the <b>body</b> slot.</slot>
+          </SlotCard>
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Modal</span>
+          <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('test-modal').classList.add('active')">Open Modal</button>
+          <Modal id="test-modal" title="Test Modal">
+            <p>This is a modal component.</p>
+            <div class="modal-actions">
+              <button type="button" class="vlo-btn vlo-btn-secondary" onclick="document.getElementById('test-modal').classList.remove('active')">Close</button>
+            </div>
+          </Modal>
+        </div>
+        <div class="showcase-row">
+          <span class="showcase-label">Toast</span>
+          {if flash_messages}
+            <Toast />
+          {else}
+            <p class="hint">No flash messages. Trigger one via API mutation.</p>
+          {/if}
+        </div>
+      </div>
+    </Card>
+
+    <!-- ── 12. PAGINATION COMPONENT ───────────────────────────── -->
+    <Card title="12 · Pagination Component" description="The Pagination component with page navigation.">
+      <Pagination />
+      <div class="grid-3" style="margin-top: 12px;">
+        <div class="kv"><span>current page</span><b>{{page}}</b></div>
+        <div class="kv"><span>total pages</span><b>{{total_pages}}</b></div>
+        <div class="kv"><span>has_next</span><b>{if has_next}true{else}false{/if}</b></div>
+      </div>
+    </Card>
+
+    <!-- ── 13. INFINITE SCROLL / LOAD MORE ────────────────────── -->
+    <Card title="13 · Infinite Scroll / Load More" description="AJAX-powered pagination with data-append.">
+      <div class="table-wrap">
+        <table class="products-table">
+          <thead>
+            <tr><th>ID</th><th>Product</th><th>Price</th></tr>
+          </thead>
+          <tbody data-append>
+            {for product in products}
+              <tr>
+                <td>#{{product.id}}</td>
+                <td>{{product.title}}</td>
+                <td>${{product.price}}</td>
+              </tr>
+            {/for}
+          </tbody>
+        </table>
+      </div>
+      {if has_next}
+        <div class="load-more-container">
+          <a href="?page={{next_page}}" class="vlo-btn vlo-btn-secondary" data-load-more data-auto>Load More</a>
+        </div>
+      {/if}
+    </Card>
+
+    <!-- ── 14. AJAX MODIFIER ──────────────────────────────────── -->
+    <Card title="14 · AJAX Modifier" description="The |ajax modifier for dynamic data fetching.">
+      <div class="grid-2">
+        <div class="kv">
+          <span>JSON mode (auto-fetch)</span>
+          <span>{{"" | ajax:"/api/products"}}</span>
+        </div>
+        <div class="kv">
+          <span>HTML mode (listen-only)</span>
+          <span>{{"" | ajax:"",0,#products-ajax-wrapper,html}}</span>
+        </div>
+      </div>
+    </Card>
+
+    <!-- ── 15. REAL-TIME SYNC (SSE) ───────────────────────────── -->
+    <Card title="15 · Real-time Sync (SSE)" description="Values bound with |sync update live across tabs via /__vlo_sse.">
+      <div class="grid-3">
+        <div class="kv"><span>first product stock</span><b>{{products.0.stock | sync:"products" | default:"—"}}</b></div>
+        <div class="kv"><span>total (live)</span><b>{{total | sync:"products"}}</b></div>
+      </div>
+      <p class="hint">Edit a stock value in section 8 and watch these update in a second tab without refresh.</p>
+    </Card>
+
+    <!-- ── 16. FLASH MESSAGES & TOAST ─────────────────────────── -->
+    <Card title="16 · Flash Messages & Toast" description="Cookie-based flash rendered by the Toast component.">
+      {if flash_messages}
+        <Toast />
+      {else}
+        <p class="hint">No flash present. Trigger one by saving or deleting in sections 9/10 — the toast appears after the mutation.</p>
+      {/if}
+    </Card>
+
+    <!-- ── 17. IMAGE OPTIMIZATION ─────────────────────────────── -->
+    <Card title="17 · Image Optimization" description="The |image modifier emits responsive AVIF/WebP with blur-up.">
+      <div class="image-row">
+        {for product in products}
+          {if product.image}
+            <div class="image-cell">
+              {{product.image | image:"w=120,h=120,webp,blur"}}
+              <span>{{product.title}}</span>
+            </div>
+          {/if}
+        {/for}
+        <div class="image-cell">
+          <div class="image-placeholder">📦</div>
+          <span>fallback when no image</span>
+        </div>
+      </div>
+    </Card>
+
+    <!-- ── 18. AUTH STATE ─────────────────────────────────────── -->
+    <Card title="18 · Auth State" description="Session context injected by the auth middleware.">
+      {if logged_in}
+        <div class="grid-2">
+          <div class="kv"><span>logged_in</span><b>✅ true</b></div>
+          <div class="kv"><span>user_name</span><b>{{user_name}}</b></div>
+          <div class="kv"><span>user_role</span><b>{{user_role}}</b></div>
+          <div class="kv"><span>user_email</span><b>{{user_email}}</b></div>
+        </div>
+      {else}
+        <p class="hint">Not logged in. <a href="/login">Log in</a> to verify session variables populate.</p>
+      {/if}
+    </Card>
+
+    <!-- ── 19. AUTH LOGIN/LOGOUT ──────────────────────────────── -->
+    <Card title="19 · Auth Login/Logout" description="Login and logout forms with CSRF protection.">
+      <div class="grid-2">
+        <div class="kv">
+          <span>Login Form</span>
+          <form v-post="/api/auth/login" enctype="application/x-www-form-urlencoded">
+            <input type="text" name="email" placeholder="Email" required />
+            <input type="password" name="password" placeholder="Password" required />
+            <label><input type="checkbox" name="remember_me" /> Remember me</label>
+            <button type="submit" class="vlo-btn vlo-btn-primary">Login</button>
+          </form>
+        </div>
+        <div class="kv">
+          <span>Logout</span>
+          <a href="/api/auth/logout" class="vlo-btn vlo-btn-secondary">Logout</a>
+        </div>
+      </div>
+    </Card>
+
+    <!-- ── 20. FILE UPLOAD/DOWNLOAD/DELETE ────────────────────── -->
+    <Card title="20 · File Upload/Download/Delete" description="File operations via /api/files endpoints.">
+      <div class="grid-2">
+        <div class="kv">
+          <span>Upload File</span>
+          <form v-post="/api/files/upload" enctype="multipart/form-data">
+            <FileInput name="file" button="Choose File" />
+            <button type="submit" class="vlo-btn vlo-btn-primary">Upload</button>
+          </form>
+        </div>
+        <div class="kv">
+          <span>Download/Delete</span>
+          <p class="hint">Use /api/files/:id/download and DELETE /api/files/:id for file operations.</p>
+        </div>
+      </div>
+    </Card>
+
+    <!-- ── 21. NAMESPACED APIs ────────────────────────────────── -->
+    <Card title="21 · Namespaced APIs" description="API actions organized under namespaces.">
+      <div class="table-wrap">
+        <table class="products-table">
+          <thead>
+            <tr><th>ID</th><th>Category</th><th>Count</th></tr>
+          </thead>
+          <tbody data-source="/api/test/stats/get_category_stats">
+            {for stat in stats}
+              <tr>
+                <td>{{stat.id}}</td>
+                <td>{{stat.category}}</td>
+                <td>{{stat.count}}</td>
+              </tr>
+            {else}
+              <tr><td colspan="3" class="empty-note">No stats found</td></tr>
+            {/for}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+
+    <!-- ── 22. HEALTH CHECK ───────────────────────────────────── -->
+    <Card title="22 · Health Check" description="The /healthz endpoint returns system status.">
+      <div class="kv">
+        <span>Health Endpoint</span>
+        <a href="/healthz" class="vlo-btn vlo-btn-secondary">Check Health</a>
+      </div>
+      <p class="hint">Expected: JSON response with status, uptime_seconds, database, and version.</p>
+    </Card>
+
+    <!-- ── 23. ERROR HANDLING ─────────────────────────────────── -->
+    <Card title="23 · Error Handling" description="Missing components, invalid APIs, and 404 pages.">
+      <div class="grid-2">
+        <div class="kv">
+          <span>Missing Component</span>
+          <NonExistentComponent prop="value" />
+          <p class="hint">Expected: HTML comment about missing component.</p>
+        </div>
+        <div class="kv">
+          <span>404 Page</span>
+          <a href="/nonexistent-page" class="vlo-btn vlo-btn-secondary">Visit 404 Page</a>
+          <p class="hint">Expected: 404 page renders correctly.</p>
+        </div>
+      </div>
+    </Card>
+
+    <!-- ── 24. QUERY PARAMS ───────────────────────────────────── -->
+    <Card title="24 · Query Params" description="URL query parameters available in template context.">
+      <div class="grid-3">
+        <div class="kv"><span>page</span><b>{{page | default:"1"}}</b></div>
+        <div class="kv"><span>limit</span><b>{{limit | default:"20"}}</b></div>
+        <div class="kv"><span>search</span><b>{{search | default:"(none)"}}</b></div>
+        <div class="kv"><span>sort</span><b>{{sort | default:"(none)"}}</b></div>
+        <div class="kv"><span>order</span><b>{{order | default:"(none)"}}</b></div>
+        <div class="kv"><span>_columns</span><b>{{_columns | default:"(none)"}}</b></div>
+      </div>
+    </Card>
+
+  </div><!-- /data-source -->
+</div>
+
+<style>
+.test-page { max-width: 1100px; margin: 0 auto; padding: 32px 20px 80px; }
+.test-header { margin-bottom: 28px; }
+.test-eyebrow { color: var(--primary,#00f5ff); font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; }
+.test-header h1 { margin: 8px 0 6px; font-size: 2rem; }
+.test-header p { color: #888; margin: 0 0 14px; }
+.test-header code { background: #1a1a2e; padding: 2px 6px; border-radius: 4px; color: var(--primary,#00f5ff); }
+.test-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.test-page > [data-source] { display: flex; flex-direction: column; gap: 20px; }
+
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.kv { background: #111119; border: 1px solid #26263a; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.kv span { color: #777; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.kv b { color: #eee; font-size: 0.95rem; word-break: break-word; }
+
+.mini-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.mini-table th, .mini-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #26263a; }
+.mini-table th { color: #777; font-size: 0.72rem; text-transform: uppercase; }
+.mini-table td:first-child { color: var(--primary,#00f5ff); font-family: monospace; }
+.mini-table td b { color: #00ff88; }
+
+.loop-list { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.loop-item { display: flex; align-items: center; gap: 10px; background: #111119; border: 1px solid #26263a; border-radius: 8px; padding: 8px 12px; }
+.loop-item.is-first { border-color: var(--primary,#00f5ff); }
+.loop-item.is-last { border-color: #ffaa00; }
+.loop-num { color: #666; font-family: monospace; font-size: 0.75rem; width: 34px; }
+.loop-title { color: #ddd; flex: 1; }
+
+.table-wrap { overflow-x: auto; }
+.products-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.products-table th, .products-table td { padding: 10px 12px; border-bottom: 1px solid #26263a; text-align: left; }
+.products-table th { color: #888; font-size: 0.72rem; text-transform: uppercase; }
+.stock-empty { color: #ff4444; font-weight: 600; }
+.stock-low { color: #ffaa00; }
+.stock-good { color: #00ff88; }
+
+.empty-note { color: #666; font-style: italic; padding: 16px; text-align: center; }
+.hint { color: #777; font-size: 0.82rem; margin: 8px 0 0; }
+
+.showcase { display: flex; flex-direction: column; gap: 16px; }
+.showcase-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.showcase-label { color: #777; font-size: 0.75rem; text-transform: uppercase; width: 90px; flex-shrink: 0; }
+
+.image-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.image-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.image-cell span { color: #777; font-size: 0.72rem; max-width: 120px; text-align: center; }
+.image-placeholder { width: 120px; height: 120px; display: grid; place-items: center; background: #111119; border: 1px dashed #333; border-radius: 8px; font-size: 2rem; }
+
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 12px; }
+.form-field { display: flex; flex-direction: column; gap: 6px; }
+.form-field label { color: #999; font-size: 0.78rem; }
+.form-field input { padding: 8px 10px; background: #111119; border: 1px solid #26263a; border-radius: 6px; color: #eee; }
+.modal-form { display: flex; flex-direction: column; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+
+.load-more-container { text-align: center; margin-top: 16px; }
+</style>
+</BaseLayout>

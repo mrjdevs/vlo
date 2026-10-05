@@ -1,0 +1,29 @@
+<div class="vlo-chart vlo-chart-hbar" style="--chart-color: {{color}}">
+  {if title}
+    <div class="vlo-chart-header">
+      <h4 class="vlo-chart-title">{{title}}</h4>
+      <div class="vlo-chart-summary">
+        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Total</span><span class="vlo-chart-stat-value">{{meta.total|number:2}}</span></span>
+        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Items</span><span class="vlo-chart-stat-value">{{meta.series_count|number:2}}</span></span>
+      </div>
+    </div>
+  {/if}
+
+  <div class="vlo-hbar-body">
+    {for point in data}
+      <div class="vlo-hbar-row">
+        <div class="vlo-hbar-head">
+          <span class="vlo-hbar-label">{if point.label}{{point.label}}{else}Other{/if}</span>
+          <span class="vlo-hbar-value">{{point.value|number:2}}</span>
+        </div>
+        <div class="vlo-hbar-track">
+          <div class="vlo-hbar-fill" style="width: {{point.percentage|number:2}}%"></div>
+        </div>
+      </div>
+    {/for}
+  </div>
+
+  {if !data}
+    <div class="vlo-chart-empty"><p>No data available</p></div>
+  {/if}
+</div>

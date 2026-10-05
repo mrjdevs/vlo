@@ -6,11 +6,16 @@
     <title>{{title}}</title>
     <link rel="icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/style.css">
+    <meta
+    name="description"
+    content="{{title}}">
 </head>
+
 <body>
-<BaseNav brand="VLO" />
-{{hero}}
-{{children}}
-{{footer}}
+ <!-- The global navbar, automatically active on all pages -->
+    <BaseNav brand="VLO" subtitle="Ship faster." />
+    {{hero}}
+    {{children}}
+    {{footer}}
 </body>
 </html>

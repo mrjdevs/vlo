@@ -1,0 +1,38 @@
+{if total_pages > 1}
+  {if variant == "load_more" || variant == "infinite"}
+    <!-- 🔥 AJAX Load More / Infinite Scroll Variant -->
+    <div class="vlo-pagination-load-more" style="text-align: center; margin-top: 24px;">
+      <a href="?page={{next_page}}{if search}&search={{search}}{/if}{if sort}&sort={{sort}}&order={{order}}{/if}{if limit && limit != 20}&limit={{limit}}{/if}{if _columns}&_columns={{_columns}}{/if}" 
+         class="vlo-btn vlo-btn-secondary" 
+         data-load-more 
+         {if variant == "infinite"} data-auto {/if}>
+        {if variant == "infinite"}Loading more...{else}Load more{/if}
+      </a>
+    </div>
+  {else}
+    <!-- 🔥 Default Numbered Pagination -->
+    <nav class="vlo-pagination" style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 24px;">
+      {if page > 1}
+        <a href="?page={{prev_page}}{if search}&search={{search}}{/if}{if sort}&sort={{sort}}&order={{order}}{/if}{if limit && limit != 20}&limit={{limit}}{/if}{if _columns}&_columns={{_columns}}{/if}" class="vlo-btn vlo-btn-secondary" style="padding: 8px 16px;">← Prev</a>
+      {else}
+        <span class="vlo-btn vlo-btn-secondary" style="padding: 8px 16px; opacity: 0.5; cursor: not-allowed;">← Prev</span>
+      {/if}
+      
+      <div style="display: flex; align-items: center; gap: 8px; color: #888; font-size: 0.9rem;">
+        <span style="font-weight: 600; color: #fff;">{{page}}</span>
+        <span>/</span>
+        <span>{{total_pages}}</span>
+      </div>
+      
+      {if page < total_pages}
+        <a href="?page={{next_page}}{if search}&search={{search}}{/if}{if sort}&sort={{sort}}&order={{order}}{/if}{if limit && limit != 20}&limit={{limit}}{/if}{if _columns}&_columns={{_columns}}{/if}" class="vlo-btn vlo-btn-secondary" style="padding: 8px 16px;">Next →</a>
+      {else}
+        <span class="vlo-btn vlo-btn-secondary" style="padding: 8px 16px; opacity: 0.5; cursor: not-allowed;">Next →</span>
+      {/if}
+    </nav>
+  {/if}
+{/if}
+
+<style>
+.vlo-btn{padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid #444;background:transparent;color:#ccc;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;transition:all .15s ease}.vlo-btn:hover:not([style*="opacity: 0.5"]){border-color:#00f5ff;color:#00f5ff}
+</style>

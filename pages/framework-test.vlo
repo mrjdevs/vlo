@@ -1,9 +1,9 @@
 <BaseLayout title="VLO Framework Test">
 <div class="framework-test">
     <div class="test-header">
-        <Badge text="VLO 0.3.0" variant="success" />
-        <h1>VLO Framework Test 0.3.0</h1>
-        <p>Component engine, props, children, API and runtime verification.</p>
+        <Badge text="VLO 0.5.0" variant="success" />
+        <h1>VLO Framework Test 0.5.0</h1>
+        <p>Component engine, props, children, slots, API and runtime verification.</p>
     </div>
 
     <Card title="Component Engine" description="Testing all registered VLO components.">
@@ -14,139 +14,146 @@
             <Badge text="Info Badge" variant="info" />
         </div>
     </Card>
+
     <h2>VLO 0.5.0 Slot Test</h2>
 
     <SlotCard>
         <div slot="header">Custom Header</div>
-
         <p>This is the default slot content.</p>
-
-        <div slot="footer">
-            Custom Footer
-        </div>
+        <div slot="footer">Custom Footer</div>
     </SlotCard>
 
-<hr/>
-```vlo
-<SlotCard>
-    <div slot="header" class="slot-header-content">
-        <div class="header-main">
-            <Badge text="Featured" />
-            <h2>Advanced Slot Test</h2>
-        </div>
+    <hr />
 
-        <div class="header-actions">
-            <Button text="Primary Action" />
-            <Button text="Secondary Action" />
-        </div>
+    <h2>Advanced Nested Component Test</h2>
 
-        <p>
-            This header contains multiple elements and nested components.
-        </p>
-    </div>
-
-    <section class="content-wrapper">
-        <h3>Default Slot Content</h3>
-
-        <p>
-            This paragraph belongs to the default slot and should appear
-            between the named header and footer slots.
-        </p>
-
-        <div class="content-grid">
-            <Card>
-                <h4>First Card</h4>
-                <p>Nested card inside the default slot.</p>
-
-                <Button text="Card Action" />
-            </Card>
-
-            <Card>
-                <h4>Second Card</h4>
-                <p>Another nested component inside default content.</p>
-
-                <Badge text="Nested Badge" />
-                <Button text="Another Action" />
-            </Card>
-        </div>
-
-        <div class="form-section">
-            <label>User Information</label>
-
-            <Input
-                type="text"
-                name="username"
-                placeholder="Enter username"
-            />
-
-            <Input
-                type="email"
-                name="email"
-                placeholder="Enter email"
-            />
-
-            <div class="form-actions">
-                <Button text="Save" />
-                <Button text="Cancel" />
+    <SlotCard>
+        <div slot="header" class="slot-header-content">
+            <div class="header-main">
+                <Badge text="Featured" />
+                <h2>Advanced Slot Test</h2>
             </div>
+
+            <div class="header-actions">
+                <Button text="Primary Action" />
+                <Button text="Secondary Action" />
+            </div>
+
+            <p>
+                This header contains multiple elements and nested components.
+            </p>
         </div>
 
-        <Alert>
-            <strong>Important:</strong>
-            This alert is nested inside the default slot.
-        </Alert>
+        <section class="content-wrapper">
+            <h3>Default Slot Content</h3>
 
-        <div class="nested-content">
-            <h4>Deeply Nested Content</h4>
+            <p>
+                This paragraph belongs to the default slot and should appear
+                between the named header and footer slots.
+            </p>
 
-            <div>
-                <p>Level 1</p>
+            <div class="content-grid">
+                <Card>
+                    <h4>First Card</h4>
+                    <p>Nested card inside the default slot.</p>
+                    <Button text="Card Action" />
+                </Card>
+
+                <Card>
+                    <h4>Second Card</h4>
+                    <p>Another nested component inside default content.</p>
+                    <Badge text="Nested Badge" />
+                    <Button text="Another Action" />
+                </Card>
+            </div>
+
+            <div class="form-section">
+                <label>User Information</label>
+
+                <Input
+                    type="text"
+                    name="username"
+                    placeholder="Enter username"
+                />
+
+                <Input
+                    type="email"
+                    name="email"
+                    placeholder="Enter email"
+                />
+
+                <div class="form-actions">
+                    <Button text="Save" />
+                    <Button text="Cancel" />
+                </div>
+            </div>
+
+            <Alert>
+                <strong>Important:</strong>
+                This alert is nested inside the default slot.
+            </Alert>
+
+            <div class="nested-content">
+                <h4>Deeply Nested Content</h4>
 
                 <div>
-                    <p>Level 2</p>
+                    <p>Level 1</p>
 
                     <div>
-                        <p>Level 3</p>
-                        <Badge text="Deep Badge" />
+                        <p>Level 2</p>
+
+                        <div>
+                            <p>Level 3</p>
+                            <Badge text="Deep Badge" />
+                        </div>
                     </div>
                 </div>
             </div>
+        </section>
+
+        <div slot="footer" class="slot-footer-content">
+            <div class="footer-info">
+                <Badge text="Status: Active" />
+                <span>Footer information</span>
+            </div>
+
+            <div class="footer-actions">
+                <Button text="Back" />
+                <Button text="Reset" />
+                <Button text="Continue" />
+            </div>
+
+            <p>
+                Footer can contain multiple elements, text, and components.
+            </p>
         </div>
-    </section>
+    </SlotCard>
 
-    <div slot="footer" class="slot-footer-content">
-        <div class="footer-info">
-            <Badge text="Status: Active" />
-            <span>Footer information</span>
-        </div>
-
-        <div class="footer-actions">
-            <Button text="Back" />
-            <Button text="Reset" />
-            <Button text="Continue" />
-        </div>
-
-        <p>
-            Footer can contain multiple elements, text, and components.
-        </p>
-    </div>
-</SlotCard>
-
-<hr />
-```
-
-<hr/>
+    <hr />
 
     <Card title="Input Component" description="Testing input props and classes.">
-        <Input type="text" placeholder="VLO Input Component" class="test-input" />
+        <Input
+            type="text"
+            placeholder="VLO Input Component"
+            class="test-input"
+        />
     </Card>
 
     <Card title="Alert Component" description="Testing alert props and variants.">
-        <Alert title="Success" description="Alert component rendered successfully." variant="success" />
-        <Alert title="Information" description="Props are being passed correctly." variant="info" />
+        <Alert
+            title="Success"
+            description="Alert component rendered successfully."
+            variant="success"
+        />
+
+        <Alert
+            title="Information"
+            description="Props are being passed correctly."
+            variant="info"
+        />
     </Card>
 
-    <Card title="Children Rendering" description="Testing {{children}} inside Card.">
+    <Card title="Children Rendering" description="Testing children inside Card.">
         <div class="children-test">
             <Badge text="Nested Badge" variant="success" />
             <Button text="Nested Button" variant="primary" />
@@ -155,38 +162,94 @@
     </Card>
 
     <Card title="Toast Component" description="Testing toast properties and rendering.">
-        <Toast icon="✓" title="Success Toast" description="Toast component rendered successfully." variant="success" />
-        <Toast icon="!" title="Info Toast" description="VLO component engine is working." variant="info" />
+        <Toast
+            icon="✓"
+            title="Success Toast"
+            description="Toast component rendered successfully."
+            variant="success"
+        />
+
+        <Toast
+            icon="!"
+            title="Info Toast"
+            description="VLO component engine is working."
+            variant="info"
+        />
     </Card>
 
-    <Card title="API Engine" description="Testing VLO REST API routing2.">
+    <Card title="API Engine" description="Testing VLO REST API routing.">
         <div class="api-test">
-            <Button text="GET Products" variant="primary" onclick="testApi('/api/products')" />
-            <Button text="GET Users" variant="secondary" onclick="testApi('/api/users')" />
+            <Button
+                text="GET Products"
+                variant="primary"
+                onclick="testApi('/api/products')"
+            />
+
+            <Button
+                text="GET Users"
+                variant="secondary"
+                onclick="testApi('/api/users')"
+            />
         </div>
+
         <pre id="api-result">API result will appear here...</pre>
     </Card>
 
-    <Card title="Runtime Status" description="Basic browser-side framework verification.">
-        <Link text="Open Components" href="/components" variant="ghost" />
-        <Link text="Open Docs" href="/docs" variant="secondary" />
+    <Card title="Navigation" description="Testing VLO Link component.">
+        <Link
+            text="Open Components"
+            href="/components"
+            variant="ghost"
+        />
+
+        <Link
+            text="Open Docs"
+            href="/docs"
+            variant="secondary"
+        />
     </Card>
 
     <Card title="Runtime Status" description="Basic browser-side framework verification.">
-        <Alert title="✓ VLO 0.3.0 Loaded" description="The framework test page rendered successfully." variant="success" />
-        <Alert title="✓ JavaScript Loaded" description="Browser JavaScript is running correctly." variant="success" />
+        <Alert
+            title="✓ VLO 0.5.0 Loaded"
+            description="The framework test page rendered successfully."
+            variant="success"
+        />
+
+        <Alert
+            title="✓ JavaScript Loaded"
+            description="Browser JavaScript is running correctly."
+            variant="success"
+        />
     </Card>
-    <card>
-    <Button text="Attribute Test" id="test-button" onclick="alert('VLO 0.4.0 works')" />
-    <Input type="email" placeholder="Email" id="test-input" required />
-    <Link text="External Link" href="https://example.com" target="_blank" />
-    </card>
+
+    <Card title="Attribute Test" description="Testing component HTML attributes.">
+        <Button
+            text="Attribute Test"
+            id="test-button"
+            onclick="alert('VLO 0.5.0 works')"
+        />
+
+        <Input
+            type="email"
+            placeholder="Email"
+            id="test-input"
+            required
+        />
+
+        <Link
+            text="External Link"
+            href="https://example.com"
+            target="_blank"
+        />
+    </Card>
 </div>
 
 <script>
 async function testApi(url) {
     const result = document.getElementById('api-result');
     result.textContent = 'Loading...';
+
     try {
         const response = await fetch(url);
         const data = await response.json();

@@ -1,0 +1,28 @@
+<div class="vlo-chart vlo-chart-lollipop" style="--chart-color: {{color}}">
+  {if title}
+    <div class="vlo-chart-header">
+      <h4 class="vlo-chart-title">{{title}}</h4>
+      <div class="vlo-chart-summary">
+        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Total</span><span class="vlo-chart-stat-value">{{meta.total|number:2}}</span></span>
+        <span class="vlo-chart-stat"><span class="vlo-chart-stat-label">Average</span><span class="vlo-chart-stat-value">{{meta.avg_value|number:2}}</span></span>
+      </div>
+    </div>
+  {/if}
+
+  <div class="vlo-lollipop-body">
+    {for point in data}
+      <div class="vlo-lollipop-item">
+        <div class="vlo-lollipop-value">{{point.value|number:2}}</div>
+        <div class="vlo-lollipop-track">
+          <div class="vlo-lollipop-line" style="height: {{point.percentage|number:2}}%"></div>
+          <div class="vlo-lollipop-dot" style="bottom: {{point.percentage|number:2}}%"></div>
+        </div>
+        <div class="vlo-lollipop-label">{if point.label}{{point.label}}{else}Other{/if}</div>
+      </div>
+    {/for}
+  </div>
+
+  {if !data}
+    <div class="vlo-chart-empty"><p>No data available</p></div>
+  {/if}
+</div>
