@@ -280,7 +280,7 @@ pub struct LoadedModule {
     pub manifest: ModuleManifest,
     pub path: PathBuf,
     pub components: Vec<PathBuf>,
-    pub api_sql: HashMap<String, String>,
+    pub api_sql: HashMap<String, crate::api::ApiAction>, // 🔥 Changed from String to ApiAction
     pub styles: Vec<String>,
     pub scripts: Vec<String>,
 }

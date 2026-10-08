@@ -192,7 +192,6 @@ async fn session_cleanup_task() {
     }
 }
 
-
 // ─── HELPER 1: Common Routes (No layers yet) ─────────────────────────
 fn build_common_routes() -> Router {
     Router::new()
@@ -201,6 +200,18 @@ fn build_common_routes() -> Router {
         .route("/api/files/upload", axum::routing::post(upload_file))
         .route("/api/files/:id/download", get(download_file))
         .route("/api/files/:id", get(get_file).delete(delete_file))
+        
+        // 🔥 CRITICAL: Specific routes MUST be defined BEFORE generic catch-alls
+        .route("/api/auth/login", axum::routing::post(auth::login_handler))
+        .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
+        .route("/api/auth/me", axum::routing::get(auth::me_handler))
+        .route("/api/auth/register", axum::routing::post(auth::register_handler))
+        .route("/api/auth/activate", axum::routing::get(auth::activate_handler))
+        .route("/api/auth/resend-activation", axum::routing::post(auth::resend_activation_handler))
+        .route("/api/auth/forgot-password", axum::routing::post(auth::forgot_password_handler))
+        .route("/api/auth/reset-password", axum::routing::post(auth::reset_password_handler))
+
+        // Generic API routes (Catch-alls) come LAST
         .route(
             "/api",
             get(api_handler_root)
@@ -225,12 +236,6 @@ fn build_common_routes() -> Router {
                 .patch(api_handler_id)
                 .delete(api_handler_id),
         )
-        .route("/api/auth/login", axum::routing::post(auth::login_handler))
-        .route(
-            "/api/auth/logout",
-            axum::routing::post(auth::logout_handler).get(auth::logout_handler),
-        )
-        .route("/api/auth/me", axum::routing::get(auth::me_handler))
         .route("/__vlo_sse", get(crate::router::sse_handler))
         .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
         .route("/api/broadcast", axum::routing::post(broadcast_handler))
@@ -991,6 +996,7 @@ pub fn resolve_directives(source: &str) -> String {
         rest.find(q).map(|e| &rest[..e])
     }
 
+    // Shared JS generator for POST/PUT forms (already handles inline errors nicely)
     // Shared JS generator for POST/PUT forms
     fn form_submit_js(method: &str, url_js: &str) -> String {
         format!(
@@ -1004,11 +1010,25 @@ pub fn resolve_directives(source: &str) -> String {
                 var bd=mp?new FormData(f):new URLSearchParams(new FormData(f));
                 var un=new URLSearchParams(window.location.search).get('next');
                 if(un&&!bd.has('next')){{bd.append('next',un)}}
-                
                 fetch({url},{{credentials:'same-origin',method:'{method}',headers:h,body:bd}})
                 .then(async function(r){{
                     var d;try{{d=await r.json()}}catch(x){{d={{}}}}
-                    if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}
+                    if(!r.ok){{
+                        // 🔥 CHECK FOR ACTIVATION REQUIRED FIRST
+                        if(d.activation_required === true) {{
+                            var old=f.querySelector('.vlo-inline-error');
+                            if(old)old.remove();
+                            var err=document.createElement('div');
+                            err.className='auth-alert vlo-inline-error'; 
+                            err.style.cssText='display:flex;flex-direction:column;gap:10px;margin-bottom:15px;padding:16px;background:rgba(0,245,255,0.05);border:1px solid rgba(0,245,255,0.25);border-radius:8px;font-size:0.9rem;';
+                            err.innerHTML='<div style=\"display:flex;align-items:center;gap:10px\"><span style=\"background:rgba(0,245,255,0.1);color:#00f5ff;font-weight:bold;font-size:1.2rem;width:24px;height:24px;display:grid;place-items:center;border-radius:7px\">i</span><p style=\"margin:0;color:#80f0ff\">'+(d.error||'Account is not active')+' Please check your email.</p></div><button type=\"button\" onclick=\"openResendActivationModal()\" style=\"margin-top:8px;padding:8px 12px;background:#00f5ff;color:#000;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:0.8rem;\">Resend Activation Email →</button>';
+                            var btn=f.querySelector('button[type=\"submit\"]');
+                            if(btn) btn.parentNode.insertBefore(err, btn);
+                            else f.appendChild(err);
+                            return; // Stop further processing, do NOT throw error
+                        }}
+                        throw new Error(d.error||d.details||d.message||'Request failed')
+                    }}
                     if(d.redirect){{window.location.href=d.redirect;return;}}
                     f.reset();
                     window.dispatchEvent(new CustomEvent('vlo:mutation'));
@@ -1016,16 +1036,12 @@ pub fn resolve_directives(source: &str) -> String {
                 }})
                 .catch(function(e){{
                     console.error('[VLO {method}]', e);
-                    // 🔥 FIX: Inject error directly into the DOM instantly
                     var old=f.querySelector('.vlo-inline-error');
                     if(old)old.remove();
-                    
                     var err=document.createElement('div');
-                    // Reuses your 'auth-alert' class for login, falls back to inline styles for other forms
                     err.className='auth-alert vlo-inline-error'; 
                     err.style.cssText='display:flex;align-items:center;gap:10px;color:#ff4444;margin-bottom:15px;padding:12px;background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);border-radius:8px;font-size:0.9rem;';
                     err.innerHTML='<span style=\"font-weight:bold;font-size:1.2rem\">!</span><p style=\"margin:0;color:#ff4444\">'+(e.message||'Request failed')+'</p>';
-                    
                     var btn=f.querySelector('button[type=\"submit\"]');
                     if(btn) btn.parentNode.insertBefore(err, btn);
                     else f.appendChild(err);
@@ -1037,6 +1053,10 @@ pub fn resolve_directives(source: &str) -> String {
         )
     }
 
+    // 🔥 NEW: Shared floating toast for non-form button errors (replaces native alert)
+    // Note: Braces are doubled ({{ }}) so Rust's format! macro doesn't treat them as placeholders.
+    let error_toast = "var t=document.createElement('div');t.className='vlo-flash';t.style.cssText='position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';t.innerHTML='<span style=\\\"font-size:1.4rem\\\">⚠️</span><div><strong style=\\\"display:block;font-size:0.9rem;margin-bottom:2px\\\">Error</strong><span style=\\\"color:#aaa;font-size:0.78rem\\\">'+(e.message||'Request failed')+'</span></div>';document.body.appendChild(t);setTimeout(function(){{t.style.transition='opacity 0.4s';t.style.opacity='0';setTimeout(function(){{t.remove();}},400);}},4000);";
+
     // ============================================================
     // v-delete
     // ============================================================
@@ -1046,19 +1066,17 @@ pub fn resolve_directives(source: &str) -> String {
         let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
         let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
         let url = url_raw.replace("|ajax", "");
-
         let all_attrs = format!("{} {}", attrs_before, attrs_after);
         let confirm_js = if let Some(msg) = attr_val(&all_attrs, "v-confirm") {
             format!("confirm({})", js_string_literal(msg))
         } else { "true".to_string() };
-
         let clean_before = strip_vlo_directive_attrs(attrs_before);
         let clean_after = strip_vlo_directive_attrs(attrs_after);
         let url_js = js_string_literal(&url);
         let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
-
+        
         let onclick = format!(
-            "return(function(){{if({confirm}){{fetch({url},{{credentials:'same-origin',method:'DELETE',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}}}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.dispatchEvent(new CustomEvent('vlo:mutation'))}}).catch(function(e){{console.error('[VLO DELETE]',e);alert(e.message)}})}}return false}})()",
+            "return(function(){{if({confirm}){{fetch({url},{{credentials:'same-origin',method:'DELETE',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}}}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.error||d.details||d.message||'Request failed')}}window.dispatchEvent(new CustomEvent('vlo:mutation'))}}).catch(function(e){{console.error('[VLO DELETE]',e);{error_toast}}})}}return false}})()",
             confirm = confirm_js,
             url = url_js
         );
@@ -1075,12 +1093,11 @@ pub fn resolve_directives(source: &str) -> String {
         let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
         let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
         let url = url_raw.replace("|ajax", "");
-
         let clean_before = strip_vlo_directive_attrs(attrs_before);
         let clean_after = strip_vlo_directive_attrs(attrs_after);
         let url_js = js_string_literal(&url);
         let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
-
+        
         if tag.eq_ignore_ascii_case("form") {
             let onsubmit = form_submit_js("PUT", &url_js);
             let onsubmit_attr = escape_html_attribute(&onsubmit);
@@ -1091,9 +1108,9 @@ pub fn resolve_directives(source: &str) -> String {
             let prompt = attr_val(&all_attrs, "v-prompt").unwrap_or("Enter new value:");
             let prompt_js = js_string_literal(prompt);
             let param_js = js_string_literal(param);
-
+            
             let onclick = format!(
-                "return(function(){{var v=prompt({prompt});if(v!==null){{fetch({url},{{credentials:'same-origin',method:'PUT',headers:{{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:JSON.stringify({{{param}:v}})}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.details||d.error||'Request failed')}}window.dispatchEvent(new CustomEvent('vlo:mutation'))}}).catch(function(e){{console.error('[VLO PUT]',e);alert(e.message)}})}}return false}})()",
+                "return(function(){{var v=prompt({prompt});if(v!==null){{fetch({url},{{credentials:'same-origin',method:'PUT',headers:{{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:JSON.stringify({{{param}:v}})}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.error||d.details||d.message||'Request failed')}}window.dispatchEvent(new CustomEvent('vlo:mutation'))}}).catch(function(e){{console.error('[VLO PUT]',e);{error_toast}}})}}return false}})()",
                 prompt = prompt_js,
                 url = url_js,
                 param = param_js
@@ -1112,12 +1129,11 @@ pub fn resolve_directives(source: &str) -> String {
         let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
         let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
         let url = url_raw.replace("|ajax", "");
-
         let clean_before = strip_vlo_directive_attrs(attrs_before);
         let clean_after = strip_vlo_directive_attrs(attrs_after);
         let url_js = js_string_literal(&url);
         let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
-
+        
         if tag.eq_ignore_ascii_case("form") {
             let onsubmit = form_submit_js("POST", &url_js);
             let onsubmit_attr = escape_html_attribute(&onsubmit);

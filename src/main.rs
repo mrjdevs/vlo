@@ -13,6 +13,7 @@ mod auth;
 mod modules;
 mod module_handler;
 mod modifier;
+mod mailer;
 
 use clap::Parser;
 

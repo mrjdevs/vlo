@@ -14,15 +14,14 @@
                 Sign in to manage your projects, dashboards and content.
             </p>
 
-            {if status == "error"}
+            {if status == "error" || error}
                 <div class="auth-alert">
                     <span>!</span>
-                    <p>{{message}}</p>
+                    <p>{{error}}</p>
                 </div>
             {/if}
 
             <form v-post="/api/auth/login" class="auth-form">
-                
                 <Input 
                     class="auth-field"
                     label="{{auth_identifier_field|upper}}" 
@@ -55,14 +54,159 @@
             </form>
 
             <div class="auth-footer">
+                <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                    <a href="#modal-forgot">Forgot password?</a>
+                    <a href="#modal-register">Create account</a>
+                </div>
                 <a href="/">← Back to Home</a>
-                <span>Free during beta • Built with Rust</span>
             </div>
         </div>
+
+        <!-- =========================================
+             REGISTER MODAL
+        ========================================= -->
+        <div id="modal-register" class="auth-modal">
+            <div class="auth-modal-content">
+                <a href="#" class="auth-modal-close">×</a>
+                <h2>Create Account</h2>
+                <p>Join VLO to start building zero-boilerplate applications.</p>
+                <form v-post="/api/auth/register" class="auth-form">
+                    <Input class="auth-field" label="Full Name" name="name" type="text" placeholder="John Doe" required />
+                    <Input class="auth-field" label="{{auth_identifier_field|upper}}" name="{{auth_identifier_field}}" type="email" placeholder="you@example.com" required />
+                    <Input class="auth-field" label="{{auth_password_field|upper}}" name="{{auth_password_field}}" type="password" placeholder="••••••••" required />
+                    <button type="submit" class="auth-submit">Create Account →</button>
+                </form>
+                <div class="auth-footer" style="justify-content: center; margin-top: 20px; border: none; padding-top: 0;">
+                    <a href="#">← Back to Login</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- =========================================
+             FORGOT PASSWORD MODAL
+        ========================================= -->
+        <div id="modal-forgot" class="auth-modal">
+            <div class="auth-modal-content">
+                <a href="#" class="auth-modal-close">×</a>
+                <h2>Reset Password</h2>
+                <p>Enter your email address and we'll send you a secure link to reset your password.</p>
+                <form v-post="/api/auth/forgot-password" class="auth-form">
+                    <Input class="auth-field" label="{{auth_identifier_field|upper}}" name="{{auth_identifier_field}}" type="email" placeholder="you@example.com" required />
+                    <button type="submit" class="auth-submit">Send Reset Link →</button>
+                </form>
+                <div class="auth-footer" style="justify-content: center; margin-top: 20px; border: none; padding-top: 0;">
+                    <a href="#">← Back to Login</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- =========================================
+             RESET PASSWORD MODAL
+        ========================================= -->
+        <div id="modal-reset" class="auth-modal">
+            <div class="auth-modal-content">
+                <a href="/login" class="auth-modal-close">×</a>
+                <h2>Set New Password</h2>
+                <p>Please enter your new password below.</p>
+                <form v-post="/api/auth/reset-password" class="auth-form">
+                    <input type="hidden" name="token" id="reset-token-input" value="" />
+                    <Input class="auth-field" label="New Password" name="new_password" type="password" placeholder="••••••••" required />
+                    <button type="submit" class="auth-submit">Update Password →</button>
+                </form>
+                <div class="auth-footer" style="justify-content: center; margin-top: 20px; border: none; padding-top: 0;">
+                    <a href="/login">← Back to Login</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- =========================================
+             RESEND ACTIVATION MODAL (NEW)
+        ========================================= -->
+        <div id="modal-resend-activation" class="auth-modal">
+            <div class="auth-modal-content">
+                <a href="#" class="auth-modal-close">×</a>
+                <h2>Resend Activation Link</h2>
+                <p>Enter your email address and we'll send you a new activation link.</p>
+                <form id="resend-activation-form" class="auth-form">
+                    <Input 
+                        class="auth-field"
+                        label="{{auth_identifier_field|upper}}" 
+                        name="{{auth_identifier_field}}" 
+                        type="email" 
+                        id="resend-email"
+                        placeholder="you@example.com" 
+                        required 
+                    />
+                    <button type="submit" class="auth-submit">Send Activation Link →</button>
+                </form>
+                <div class="auth-footer" style="justify-content: center; margin-top: 20px; border: none; padding-top: 0;">
+                    <a href="#">← Back to Login</a>
+                </div>
+            </div>
+        </div>
+
     </div>
 </BaseLayout>
 
+<script>
+
+    // 1. Auto-populate reset token from URL and open modal if present
+    (function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token');
+        if (token) {
+            const tokenInput = document.getElementById('reset-token-input');
+            if (tokenInput) {
+                tokenInput.value = token;
+                window.location.hash = 'modal-reset';
+            }
+        }
+    })();
+
+    // 2. Resend Activation Modal Logic
+    function openResendActivationModal() {
+        window.location.hash = 'modal-resend-activation';
+    }
+
+    document.getElementById('resend-activation-form')?.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const btn = e.target.querySelector('button[type="submit"]');
+        const originalText = btn.innerText;
+        btn.innerText = 'Sending...';
+        btn.disabled = true;
+
+        const formData = new FormData(e.target);
+        
+        try {
+            const response = await fetch('/api/auth/resend-activation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams(formData)
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                alert(data.message || 'Activation link sent!');
+                window.location.hash = ''; // Close modal
+                e.target.reset();
+            } else {
+                alert(data.error || 'Failed to send activation link.');
+            }
+        } catch (err) {
+            console.error(err);
+            alert('Network error. Please try again.');
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    });
+</script>
+
+
 <style>
+/* (Keep all your existing CSS exactly as it was, plus add this for the modal button if needed) */
+.auth-modal .auth-submit { margin-top: 10px; }
+
 /* =========================================
    PAGE & GLOW
 ========================================= */
@@ -231,7 +375,6 @@
     gap: 10px;
     cursor: pointer;
     user-select: none;
-    /* Reset inherited .auth-field label styles */
     font-family: inherit;
     font-size: inherit;
     font-weight: 400;
@@ -332,10 +475,80 @@
 }
 
 /* =========================================
+   MODALS (Pure CSS :target)
+========================================= */
+.auth-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(8px);
+    display: none;
+    place-items: center;
+    z-index: 100;
+    padding: 24px;
+}
+
+/* Show modal when its ID is in the URL hash */
+.auth-modal:target {
+    display: grid;
+}
+
+.auth-modal-content {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    padding: 40px 34px;
+    border: 1px solid rgba(0,245,255,.16);
+    border-radius: 15px;
+    background: #0f0f12;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+    animation: modalIn 0.3s ease;
+}
+
+@keyframes modalIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.auth-modal-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.05);
+    color: #888;
+    text-decoration: none;
+    font-size: 1.2rem;
+    transition: all 0.2s ease;
+}
+
+.auth-modal-close:hover {
+    background: rgba(255,92,122,0.15);
+    color: #ff6680;
+}
+
+.auth-modal h2 {
+    margin: 0 0 10px;
+    font-size: 1.5rem;
+    color: #fff;
+}
+
+.auth-modal p {
+    margin: 0 0 24px;
+    color: #858585;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+/* =========================================
    RESPONSIVE
 ========================================= */
 @media (max-width: 480px) {
-    .auth-card {
+    .auth-card, .auth-modal-content {
         padding: 32px 22px;
     }
     .auth-footer {

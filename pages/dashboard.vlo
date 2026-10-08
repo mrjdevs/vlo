@@ -82,7 +82,7 @@
                 <LineChart 
                     source="/api/dash/get_sales_stats"
                     title="Cumulative Revenue Growth"
-                    label_column="date"
+                    label_column="date|qtr"
                     value_column="price"
                     computed="cumulative"
                     color="#00f5ff"

@@ -4,24 +4,54 @@ use crate::{
 };
 use axum::{
     body::Bytes,
-    extract::{FromRequest, Multipart, Path as AxumPath, Request},
+    extract::{Extension, FromRequest, Multipart, Path as AxumPath, Request},
     http::{Method, StatusCode},
     response::{IntoResponse, Json, Response},
 };
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
     fs,
     path::Path,
-    sync::{LazyLock, Mutex, Arc},
+    sync::{Arc, LazyLock, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
+// ============================================================================
+// API Action: Supports both simple SQL strings and role-protected objects
+// ============================================================================
 
-// ---------------------------------------------------------------------------
-// API Action Cache (supports namespaces)
-// ---------------------------------------------------------------------------
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ApiAction {
+    Simple(String),
+    Protected {
+        sql: String,
+        #[serde(default)]
+        roles: Vec<String>,
+    },
+}
 
+impl ApiAction {
+    pub fn sql(&self) -> &str {
+        match self {
+            ApiAction::Simple(s) => s,
+            ApiAction::Protected { sql, .. } => sql,
+        }
+    }
+
+    pub fn roles(&self) -> &[String] {
+        match self {
+            ApiAction::Simple(_) => &[],
+            ApiAction::Protected { roles, .. } => roles,
+        }
+    }
+}
+
+// ============================================================================
+// API Action Cache
+// ============================================================================
 
 static API_ACTIONS_CACHE: LazyLock<Mutex<Option<CachedActions>>> = LazyLock::new(|| Mutex::new(None));
 
@@ -42,41 +72,33 @@ pub fn strip_server_block(content: &str) -> String {
     content.to_string()
 }
 
-/// Load actions from a single api.vlo file
-fn load_actions_from_file(file: &Path) -> HashMap<String, String> {
+fn load_actions_from_file(file: &Path) -> HashMap<String, ApiAction> {
     let mut actions = HashMap::new();
-    
     if let Ok(content) = fs::read_to_string(file) {
         if let Some(block) = extract_server_block(&content) {
             let clean = block.trim_start_matches('\u{feff}').replace('\u{a0}', " ").replace('\r', "");
             if let Ok(json) = serde_json::from_str::<Value>(&clean) {
                 if let Some(object) = json.as_object() {
                     for (name, value) in object {
-                        if let Some(sql) = value.as_str() {
-                            actions.insert(name.clone(), sql.to_string());
+                        if let Ok(action) = serde_json::from_value::<ApiAction>(value.clone()) {
+                            actions.insert(name.clone(), action);
                         }
                     }
                 }
             }
         }
     }
-    
     actions
 }
 
-/// Get the latest modification time across all api.vlo files
 fn get_api_modified_time(api_dir: &Path) -> SystemTime {
     let mut latest = UNIX_EPOCH;
-    
-    // Check main api.vlo
     let main_file = api_dir.join("api.vlo");
     if let Ok(meta) = fs::metadata(&main_file) {
         if let Ok(modified) = meta.modified() {
             if modified > latest { latest = modified; }
         }
     }
-    
-    // Check namespace subdirectories
     if let Ok(entries) = fs::read_dir(api_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -90,27 +112,21 @@ fn get_api_modified_time(api_dir: &Path) -> SystemTime {
             }
         }
     }
-    
     latest
 }
 
 struct CachedActions {
-    actions: Arc<HashMap<String, String>>,
+    actions: Arc<HashMap<String, ApiAction>>,
     modified: SystemTime,
 }
 
-pub fn load_api_actions() -> Result<Arc<HashMap<String, String>>, String> {
+pub fn load_api_actions() -> Result<Arc<HashMap<String, ApiAction>>, String> {
     let api_dir = get_project_root().join("pages/api");
     let is_dev = crate::state::app_mode().is_dev();
-    
-    // Only fetch mtime if we are in dev mode (production skips mtime checks)
     let modified = if is_dev { get_api_modified_time(&api_dir) } else { SystemTime::UNIX_EPOCH };
 
-    // ─── 1. CHECK CACHE ─────────────────────────────────────
     if let Ok(cache) = API_ACTIONS_CACHE.lock() {
         if let Some(cached) = cache.as_ref() {
-            // In production: always use cache if it exists
-            // In dev: only use cache if mtime matches
             if !is_dev || cached.modified == modified {
                 crate::vlo_debug!("⚡ API actions served from memory cache");
                 return Ok(Arc::clone(&cached.actions));
@@ -118,10 +134,7 @@ pub fn load_api_actions() -> Result<Arc<HashMap<String, String>>, String> {
         }
     }
 
-    // ─── 2. CACHE MISS: LOAD FROM DISK ──────────────────────
     let mut actions = HashMap::new();
-
-    // Load main API (pages/api/api.vlo)
     let main_file = api_dir.join("api.vlo");
     if main_file.exists() {
         let main_actions = load_actions_from_file(&main_file);
@@ -129,69 +142,70 @@ pub fn load_api_actions() -> Result<Arc<HashMap<String, String>>, String> {
         actions.extend(main_actions);
     }
 
-    // Load namespaced APIs (pages/api/*/api.vlo)
     if let Ok(entries) = fs::read_dir(&api_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_dir() { continue; }
-            
             let namespace = path.file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
-            
             let ns_file = path.join("api.vlo");
             if !ns_file.exists() { continue; }
-            
             let ns_actions = load_actions_from_file(&ns_file);
             crate::vlo_debug!("📡 Loaded {} actions from api/{}/api.vlo", ns_actions.len(), namespace);
-            
-            // Store with namespace prefix: "dash/get_category_stats"
-            for (name, sql) in ns_actions {
-                actions.insert(format!("{}/{}", namespace, name), sql);
+            for (name, action) in ns_actions {
+                actions.insert(format!("{}/{}", namespace, name), action);
             }
         }
     }
 
-    // Merge module APIs
     let module_actions = crate::modules::get_module_api_actions();
     actions.extend(module_actions);
 
-    // ─── 3. UPDATE CACHE & RETURN ───────────────────────────
     let actions_arc = Arc::new(actions);
-    
     if let Ok(mut cache) = API_ACTIONS_CACHE.lock() {
-        *cache = Some(CachedActions { 
-            actions: Arc::clone(&actions_arc), 
-            modified 
+        *cache = Some(CachedActions {
+            actions: Arc::clone(&actions_arc),
+            modified,
         });
     }
-    
     crate::vlo_debug!("📡 Total API actions available: {}", actions_arc.len());
     Ok(actions_arc)
 }
 
+// ============================================================================
+// HTTP Handlers (Updated to extract AuthUser)
+// ============================================================================
 
-// ---------------------------------------------------------------------------
-// HTTP Handlers
-// ---------------------------------------------------------------------------
-pub async fn api_handler_root(req: Request) -> Response {
+pub async fn api_handler_root(
+    Extension(auth): Extension<crate::auth::AuthUser>,
+    req: Request,
+) -> Response {
     match prepare_api_request(req).await {
-        Ok((method, query)) => api_route_handler(None, None, method, query).await.into_response(),
+        Ok((method, query)) => api_route_handler(None, None, method, query, &auth).await.into_response(),
         Err(response) => response,
     }
 }
 
-pub async fn api_handler_path(AxumPath(resource): AxumPath<String>, req: Request) -> Response {
+pub async fn api_handler_path(
+    Extension(auth): Extension<crate::auth::AuthUser>,
+    AxumPath(resource): AxumPath<String>,
+    req: Request,
+) -> Response {
     match prepare_api_request(req).await {
-        Ok((method, query)) => api_route_handler(Some(resource), None, method, query).await.into_response(),
+        Ok((method, query)) => api_route_handler(Some(resource), None, method, query, &auth).await.into_response(),
         Err(response) => response,
     }
 }
 
-pub async fn api_handler_id(AxumPath((resource, id)): AxumPath<(String, String)>, req: Request) -> Response {
+pub async fn api_handler_id(
+    Extension(auth): Extension<crate::auth::AuthUser>,
+    AxumPath((resource, id)): AxumPath<(String, String)>,
+    req: Request,
+) -> Response {
     match prepare_api_request(req).await {
-        Ok((method, query)) => api_route_handler(Some(resource), Some(id), method, query).await.into_response(),
+        Ok((method, query)) => api_route_handler(Some(resource), Some(id), method, query, &auth).await.into_response(),
         Err(response) => response,
     }
 }
@@ -234,11 +248,9 @@ async fn parse_multipart_body(multipart: &mut Multipart, query: &mut HashMap<Str
         let name = field.name().unwrap_or("").to_string();
         let file_name = field.file_name().map(|n| n.to_string());
         let bytes = field.bytes().await.map_err(|e| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"success": false, "error": "Failed to read file", "details": e.to_string()}))).into_response())?;
-
         if bytes.len() as u64 > max_size {
             return Err((StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({"success": false, "error": "File too large"}))).into_response());
         }
-
         if let Some(original_name) = file_name {
             let upload_name = generate_upload_name(&original_name);
             let upload_name_clone = upload_name.clone();
@@ -257,10 +269,10 @@ async fn parse_multipart_body(multipart: &mut Multipart, query: &mut HashMap<Str
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
+// ============================================================================
 // Auto-Pagination Helper
-// ---------------------------------------------------------------------------
-// ─── STATIC REGEXES (Compiled once at startup) ───────────────────────
+// ============================================================================
+
 static RE_LIMIT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)\s+LIMIT\s+\{\{.*?\}\}").unwrap());
 static RE_OFFSET: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)\s+OFFSET\s+\{\{.*?\}\}").unwrap());
 
@@ -272,9 +284,10 @@ pub fn generate_count_sql(sql_template: &str) -> String {
     format!("SELECT COUNT(*) as total FROM ({}) AS _vlo_count_subquery", stripped)
 }
 
-// ---------------------------------------------------------------------------
-// Flash Message
-// ---------------------------------------------------------------------------
+// ============================================================================
+// Flash Message Helper
+// ============================================================================
+
 fn flash_response(status: StatusCode, body: serde_json::Value, flash_encoded: &str) -> Response {
     let cookie = crate::auth::flash_cookie_header(flash_encoded);
     let mut response = (status, Json(body)).into_response();
@@ -284,14 +297,16 @@ fn flash_response(status: StatusCode, body: serde_json::Value, flash_encoded: &s
     response
 }
 
-// ---------------------------------------------------------------------------
-// Main Route Handler
-// ---------------------------------------------------------------------------
+// ============================================================================
+// Main Route Handler (with Role Checking)
+// ============================================================================
+
 pub async fn api_route_handler(
     mut endpoint: Option<String>,
     id: Option<String>,
     method: Method,
     mut query: HashMap<String, String>,
+    auth: &crate::auth::AuthUser,
 ) -> impl IntoResponse {
     crate::vlo_debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     crate::vlo_debug!("🔧 VLO DEBUG: API request started | Method: {} | Endpoint: {:?} | ID: {:?}", method, endpoint, id);
@@ -304,20 +319,23 @@ pub async fn api_route_handler(
         Some(value) => value.trim().trim_matches('/').to_string(),
         None => {
             return match load_api_actions() {
-                Ok(actions) => (StatusCode::OK, Json(serde_json::json!({"success": true, "actions": actions}))).into_response(),
+                Ok(actions) => {
+                    let action_names: Vec<&String> = actions.keys().collect();
+                    (StatusCode::OK, Json(serde_json::json!({"success": true, "actions": action_names}))).into_response()
+                },
                 Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error}))).into_response(),
             };
         }
     };
-        // ─── INSERT THIS BLOCK RIGHT HERE ────────────────────────
+
     let resource = normalize_resource(&endpoint);
     if !valid_identifier(&resource) {
         return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "success": false, 
+            "success": false,
             "error": "Invalid API resource"
         }))).into_response();
     }
-    // ─────────────────────────────────────────────────────────
+
     let operation = match crud_operation(&method) {
         Some(value) => value,
         None => return (StatusCode::METHOD_NOT_ALLOWED, Json(serde_json::json!({"success": false, "error": "Unsupported HTTP method"}))).into_response(),
@@ -335,38 +353,56 @@ pub async fn api_route_handler(
         format!("{}_{}", operation, endpoint)
     };
 
-    // ─── ACTION RESOLUTION (Direct or Namespaced) ──────────────
-    let mut sql = match actions.get(&action_name) {
+    // ─── ACTION RESOLUTION ─────────────────────────────────────────
+    let action_def = match actions.get(&action_name) {
         Some(value) => value.clone(),
         None => {
-            // Try namespaced lookup: /api/{namespace}/{action}
             if let Some(id_val) = &id {
                 let namespaced_action = format!("{}/{}", endpoint, id_val);
                 if let Some(value) = actions.get(&namespaced_action) {
                     crate::vlo_debug!("📡 Resolved namespaced action: {}", namespaced_action);
                     action_name = namespaced_action;
-                    query.remove("id"); // The "id" was actually the action name
+                    query.remove("id");
                     value.clone()
                 } else {
                     return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-                        "success": false, 
-                        "error": "API operation not found", 
+                        "success": false,
+                        "error": "API operation not found",
                         "action": action_name,
                         "namespaced_attempt": namespaced_action
                     }))).into_response();
                 }
             } else {
                 return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-                    "success": false, 
-                    "error": "API operation not found", 
+                    "success": false,
+                    "error": "API operation not found",
                     "action": action_name
                 }))).into_response();
             }
         }
     };
-    // ─────────────────────────────────────────────────────────────
 
-    // Insert real ID into query params if it wasn't consumed by namespace resolution
+    // ─── ROLE CHECK 🔥 ─────────────────────────────────────────────
+    let required_roles = action_def.roles();
+    if !required_roles.is_empty() {
+        let user_role = auth.user.as_ref().map(|u| u.role.as_str()).unwrap_or("");
+        let has_access = required_roles.iter().any(|r| r.eq_ignore_ascii_case(user_role));
+
+        if !has_access {
+            crate::vlo_debug!("🚫 Access denied for action '{}'. Required roles: {:?}, User role: '{}'", action_name, required_roles, user_role);
+            return (StatusCode::FORBIDDEN, Json(serde_json::json!({
+                "success": false,
+                "error": "Insufficient permissions",
+                "required_roles": required_roles,
+                "your_role": user_role
+            }))).into_response();
+        }
+        crate::vlo_debug!("✅ Role check passed for action '{}'. User role: '{}'", action_name, user_role);
+    }
+
+    let mut sql = action_def.sql().to_string();
+    // ────────────────────────────────────────────────────────────────
+
     let is_namespaced = action_name.contains('/');
     if let Some(id_value) = id.clone() {
         if !is_namespaced {
@@ -379,23 +415,21 @@ pub async fn api_route_handler(
         if key != "action" { params.insert(key, query_string_to_value(&value)); }
     }
 
-    // Auto-inject WHERE id = {id} for GET by ID requests
     let is_id_request = params.contains_key("id") && operation == "get";
     if is_id_request && !sql.contains("{{id}}") && !sql.contains("{id}") {
         let upper = sql.to_uppercase();
         if let Some(pos) = upper.find(" ORDER BY ") {
             let before = sql[..pos].trim_end();
             let order = &sql[pos..];
-            sql = if before.to_uppercase().contains(" WHERE ") { format!("{} AND id = {{id}}{}", before, order) } 
+            sql = if before.to_uppercase().contains(" WHERE ") { format!("{} AND id = {{id}}{}", before, order) }
                   else { format!("{} WHERE id = {{id}}{}", before, order) };
         } else {
             let trimmed = sql.trim_end_matches(';').trim();
-            sql = if trimmed.to_uppercase().contains(" WHERE ") { format!("{} AND id = {{id}}", trimmed) } 
+            sql = if trimmed.to_uppercase().contains(" WHERE ") { format!("{} AND id = {{id}}", trimmed) }
                   else { format!("{} WHERE id = {{id}}", trimmed) };
         }
     }
 
-    // ─── DEFAULT PAGINATION PARAMS ───────────────────────────
     if !params.contains_key("limit") { params.insert("limit".to_string(), Value::Number(20.into())); }
     if !params.contains_key("page") { params.insert("page".to_string(), Value::Number(1.into())); }
     if let (Some(page_val), Some(limit_val)) = (params.get("page"), params.get("limit")) {
@@ -408,7 +442,6 @@ pub async fn api_route_handler(
             params.insert("limit".to_string(), Value::Number(safe_limit.into()));
         }
     }
-    // ─────────────────────────────────────────────────────────
 
     crate::vlo_debug!("🔧 VLO DEBUG: Final SQL parameters = {:?}", params);
 
@@ -425,26 +458,9 @@ pub async fn api_route_handler(
 
     match execute_api_sql(pool, &sql, &params).await {
         Ok(mut data) => {
-            let rows = data
-                .get("data")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
+            let rows = data.get("data").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+            crate::vlo_debug!("✅ VLO DEBUG: SQL successful — rows: {}", rows);
 
-            let first = data
-                .get("data")
-                .and_then(|v| v.as_array())
-                .and_then(|a| a.first())
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| "none".to_string());
-
-            crate::vlo_debug!(
-                "✅ VLO DEBUG: SQL successful — rows: {}, first Object: {}",
-                rows,
-                first
-            );
-
-            // ─── AUTO-PAGINATION FOR GET LIST ENDPOINTS ──────────────────────
             if method == Method::GET && !params.contains_key("id") {
                 let count_sql = generate_count_sql(&sql);
                 if !count_sql.is_empty() {
@@ -469,12 +485,12 @@ pub async fn api_route_handler(
                     }
                 }
             }
-            // ─────────────────────────────────────────────────────────────────
-            // 🔥 ADD THIS: Broadcast live updates for mutations (POST, PUT, DELETE)
+
             if method != Method::GET {
                 let resource = normalize_resource(&endpoint);
                 crate::router::broadcast_live(&resource, &data);
             }
+
             if method != Method::GET {
                 let (icon, title) = match action_type {
                     "updated" => ("✏️", "Update Successful"),
@@ -487,6 +503,7 @@ pub async fn api_route_handler(
                     "message": format!("{} operation successful", action_type)
                 }), &flash);
             }
+
             (StatusCode::OK, Json(data)).into_response()
         }
         Err(error) => {
@@ -504,17 +521,16 @@ pub async fn api_route_handler(
     }
 }
 
-// ---------------------------------------------------------------------------
+// ============================================================================
 // SQL Execution & Helpers
-// ---------------------------------------------------------------------------
+// ============================================================================
+
 pub async fn execute_api_sql(
     pool: &DbPool,
     sql_template: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let mut sql = sql_template.to_string();
-    
-    // 1. Replace known parameters from the payload
     for (key, value) in params {
         let placeholder = format!("{{{{{}}}}}", key);
         let replacement = match value {
@@ -526,18 +542,10 @@ pub async fn execute_api_sql(
         };
         sql = sql.replace(&placeholder, &replacement);
     }
-
-    // 🔥 2. FIX: Handle partial JSON updates (e.g., v-prompt sending only {"stock": 99})
-    // Any remaining {{column}} placeholders are replaced with the column name itself.
-    // This turns `SET title = {{title}}` into `SET title = title` (preserving the DB value).
     let re = regex::Regex::new(r"\{\{([a-zA-Z0-9_]+)\}\}").unwrap();
     sql = re.replace_all(&sql, "$1").into_owned();
-
     crate::vlo_debug!("Executing SQL = {}", sql);
-
-    // Execute the query
     let rows_json = pool.fetch_all_json(&sql).await.map_err(|e| format!("SQL error: {}", e))?;
-    
     Ok(serde_json::json!({
         "success": true,
         "data": rows_json,
@@ -567,7 +575,6 @@ fn normalize_resource(endpoint: &str) -> String {
 fn valid_identifier(value: &str) -> bool {
     !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
-
 
 fn percent_decode(value: &str) -> String {
     let bytes = value.as_bytes();
@@ -599,8 +606,8 @@ fn generate_upload_name(original: &str) -> String {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or_default();
     let extension = Path::new(original).extension().and_then(|v| v.to_str()).map(|v| v.to_ascii_lowercase()).filter(|v| !v.is_empty());
     match extension {
-        Some(ext) => format!("vlo_{}_{}.{}", timestamp, std::process::id(), ext),
-        None => format!("vlo_{}_{}", timestamp, std::process::id()),
+        Some(ext) => format!("vlo_{}{}.{}", timestamp, std::process::id(), ext),
+        None => format!("vlo{}_{}", timestamp, std::process::id()),
     }
 }
 

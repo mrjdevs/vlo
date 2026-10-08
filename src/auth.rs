@@ -13,13 +13,12 @@ use serde_json::json;
 use sha2::Sha256;
 use sqlx::FromRow;
 use std::{
-    sync::{LazyLock, OnceLock},
-    time::{SystemTime, UNIX_EPOCH},
+    collections::HashMap,
+    sync::{LazyLock, Mutex, OnceLock},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-// ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone, FromRow)]
 pub struct User {
@@ -27,6 +26,7 @@ pub struct User {
     pub name: String,
     pub email: String,
     pub role: String,
+    pub status: String, // Added status
 }
 
 #[derive(Debug, Clone)]
@@ -36,45 +36,21 @@ pub struct AuthUser {
     pub session_token: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// Auth Configuration
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Clone)]
 pub struct AuthConfig {
-    pub user_table: String,
-    pub user_id: String,
-    pub user_name: String,
-    pub user_identifier: String,
-    pub user_password: String,
-    pub user_role: String,
-    pub session_table: String,
-    pub session_token: String,
-    pub session_user_id: String,
-    pub session_expires_at: String,
-    pub session_lifetime: i64,
-    pub cookie_name: String,
-    pub identifier_field: String,
-    pub password_field: String,
+    pub user_table: String, pub user_id: String, pub user_identifier: String, pub user_password: String,
+    pub user_name: String, pub user_email: String, pub user_role: String, pub user_status: String,
+    pub session_table: String, pub session_token: String, pub session_user_id: String, pub session_expires_at: String,
+    pub session_lifetime: i64, pub cookie_name: String, pub identifier_field: String, pub password_field: String,
 }
 
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            user_table: "users".into(),
-            user_id: "id".into(),
-            user_name: "name".into(),
-            user_identifier: "email".into(),
-            user_password: "password_hash".into(),
-            user_role: "role".into(),
-            session_table: "sessions".into(),
-            session_token: "token".into(),
-            session_user_id: "user_id".into(),
-            session_expires_at: "expires_at".into(),
-            session_lifetime: 86400,
-            cookie_name: "vlo_session".into(),
-            identifier_field: "email".into(),
-            password_field: "password".into(),
+            user_table: "users".into(), user_id: "id".into(), user_identifier: "email".into(), user_password: "password_hash".into(),
+            user_name: String::new(), user_email: String::new(), user_role: String::new(), user_status: String::new(),
+            session_table: "sessions".into(), session_token: "token".into(), session_user_id: "user_id".into(), session_expires_at: "expires_at".into(),
+            session_lifetime: 86_400, cookie_name: "vlo_session".into(), identifier_field: "email".into(), password_field: "password".into(),
         }
     }
 }
@@ -82,844 +58,866 @@ impl Default for AuthConfig {
 impl AuthConfig {
     pub fn from_env() -> Result<Self, String> {
         let d = Self::default();
-        let c = Self {
-            user_table: env("AUTH_USER_TABLE", d.user_table),
-            user_id: env("AUTH_USER_ID", d.user_id),
-            user_name: env("AUTH_USER_NAME", d.user_name),
-            user_identifier: env("AUTH_USER_IDENTIFIER", d.user_identifier),
-            user_password: env("AUTH_USER_PASSWORD", d.user_password),
-            user_role: env("AUTH_USER_ROLE", d.user_role),
-            session_table: env("AUTH_SESSION_TABLE", d.session_table),
-            session_token: env("AUTH_SESSION_TOKEN", d.session_token),
-            session_user_id: env("AUTH_SESSION_USER_ID", d.session_user_id),
-            session_expires_at: env("AUTH_SESSION_EXPIRES_AT", d.session_expires_at),
+        let cfg = Self {
+            user_table: env_required("AUTH_USER_TABLE", d.user_table)?,
+            user_id: env_required("AUTH_USER_ID", d.user_id)?,
+            user_identifier: env_required("AUTH_USER_IDENTIFIER", d.user_identifier)?,
+            user_password: env_required("AUTH_USER_PASSWORD", d.user_password)?,
+            user_name: env_optional("AUTH_USER_NAME"), user_email: env_optional("AUTH_USER_EMAIL"),
+            user_role: env_optional("AUTH_USER_ROLE"), user_status: env_optional("AUTH_USER_STATUS"),
+            session_table: env("AUTH_SESSION_TABLE", d.session_table), session_token: env("AUTH_SESSION_TOKEN", d.session_token),
+            session_user_id: env("AUTH_SESSION_USER_ID", d.session_user_id), session_expires_at: env("AUTH_SESSION_EXPIRES_AT", d.session_expires_at),
             session_lifetime: env_i64("AUTH_SESSION_LIFETIME", d.session_lifetime)?,
-            cookie_name: env("AUTH_COOKIE", d.cookie_name),
-            identifier_field: env("AUTH_IDENTIFIER_FIELD", d.identifier_field),
+            cookie_name: env("AUTH_COOKIE", d.cookie_name), identifier_field: env("AUTH_IDENTIFIER_FIELD", d.identifier_field),
             password_field: env("AUTH_PASSWORD_FIELD", d.password_field),
         };
-        c.validate()?;
-        Ok(c)
+        cfg.validate()?;
+        Ok(cfg)
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        for (name, value) in [
-            ("AUTH_USER_TABLE", &self.user_table),
-            ("AUTH_USER_ID", &self.user_id),
-            ("AUTH_USER_NAME", &self.user_name),
-            ("AUTH_USER_IDENTIFIER", &self.user_identifier),
-            ("AUTH_USER_PASSWORD", &self.user_password),
-            ("AUTH_USER_ROLE", &self.user_role),
-            ("AUTH_SESSION_TABLE", &self.session_table),
-            ("AUTH_SESSION_TOKEN", &self.session_token),
-            ("AUTH_SESSION_USER_ID", &self.session_user_id),
-            ("AUTH_SESSION_EXPIRES_AT", &self.session_expires_at),
-        ] {
-            if !value.is_empty() {
-                validate_identifier(name, value)?;
-            }
-        }
-        if self.session_lifetime <= 0 {
-            return Err("AUTH_SESSION_LIFETIME must be greater than zero".into());
-        }
-        if self.cookie_name.trim().is_empty() {
-            return Err("AUTH_COOKIE cannot be empty".into());
-        }
+        for (name, value) in &[
+            ("AUTH_USER_TABLE", &self.user_table), ("AUTH_USER_ID", &self.user_id),
+            ("AUTH_USER_IDENTIFIER", &self.user_identifier), ("AUTH_USER_PASSWORD", &self.user_password),
+            ("AUTH_SESSION_TABLE", &self.session_table), ("AUTH_SESSION_TOKEN", &self.session_token),
+            ("AUTH_SESSION_USER_ID", &self.session_user_id), ("AUTH_SESSION_EXPIRES_AT", &self.session_expires_at),
+        ] { validate_identifier(name, value)?; }
+        
+        if self.session_lifetime <= 0 { return Err("AUTH_SESSION_LIFETIME must be > 0".into()); }
+        if self.cookie_name.trim().is_empty() { return Err("AUTH_COOKIE cannot be empty".into()); }
         Ok(())
     }
 
-    fn placeholder(&self, pool: &DbPool, index: usize) -> String {
-        match pool {
-            DbPool::Postgres(_) => format!("${}", index),
-            _ => "?".to_string(),
-        }
+    fn placeholder(&self, pool: &DbPool, n: usize) -> String {
+        match pool { DbPool::Postgres(_) => format!("${n}"), _ => "?".into() }
     }
 }
 
-fn env(name: &str, default: String) -> String {
-    match std::env::var(name) {
-        Ok(v) if !v.trim().is_empty() => v.trim().into(),
-        _ => default,
-    }
+fn env(name: &str, default: String) -> String { std::env::var(name).ok().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_owned()).unwrap_or(default) }
+fn env_optional(name: &str) -> String { std::env::var(name).ok().map(|v| v.trim().to_owned()).unwrap_or_default() }
+fn env_required(name: &str, default: String) -> Result<String, String> {
+    let value = env(name, default);
+    if value.trim().is_empty() { Err(format!("{name} cannot be empty")) } else { Ok(value) }
 }
-
 fn env_i64(name: &str, default: i64) -> Result<i64, String> {
     match std::env::var(name) {
-        Ok(v) if !v.trim().is_empty() => v
-            .trim()
-            .parse()
-            .map_err(|_| format!("{} must be a valid integer", name)),
+        Ok(v) if !v.trim().is_empty() => v.trim().parse().map_err(|_| format!("{name} must be a valid integer")),
         _ => Ok(default),
     }
 }
-
 fn validate_identifier(name: &str, value: &str) -> Result<(), String> {
-    static RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
-    if RE.is_match(value) {
-        Ok(())
-    } else {
-        Err(format!(
-            "Invalid {} value '{}'. SQL identifiers may contain only letters, numbers and underscores and must not start with a number.",
-            name, value
-        ))
-    }
+    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
+    if RE.is_match(value) { Ok(()) } else { Err(format!("Invalid {name} value '{value}'.")) }
 }
 
 static AUTH_CONFIG: OnceLock<AuthConfig> = OnceLock::new();
-
 pub fn init_auth_config() {
     match AuthConfig::from_env() {
-        Ok(cfg) => {
-            AUTH_CONFIG.set(cfg).ok();
-            crate::vlo_debug!("✅ Auth config loaded from ENV");
-        }
-        Err(e) => {
-            eprintln!("❌ Auth config error: {}", e);
-            std::process::exit(1);
-        }
+        Ok(cfg) => { AUTH_CONFIG.set(cfg).ok(); crate::vlo_debug!("✅ Auth config loaded"); }
+        Err(e) => { eprintln!("❌ Auth config error: {e}"); std::process::exit(1); }
     }
 }
-
-pub fn auth_config() -> &'static AuthConfig {
-    AUTH_CONFIG.get().expect("Auth config not initialized")
-}
-
-// ---------------------------------------------------------------------------
-// Session Secret
-// ---------------------------------------------------------------------------
+pub fn auth_config() -> &'static AuthConfig { AUTH_CONFIG.get().expect("Auth config not initialized") }
 
 static SESSION_SECRET: OnceLock<String> = OnceLock::new();
-
 pub fn init_session_secret() {
     let secret = std::env::var("SESSION_SECRET").unwrap_or_else(|_| {
-        let mut bytes = [0u8; 32];
-        OsRng.fill_bytes(&mut bytes);
-        let s: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
-        crate::vlo_debug!("⚠️ VLO DEBUG: Generated random SESSION_SECRET (set in .env for persistence)");
-        s
+        let mut bytes = [0u8; 32]; OsRng.fill_bytes(&mut bytes);
+        let secret = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        crate::vlo_debug!("⚠️ Generated random SESSION_SECRET");
+        secret
     });
     SESSION_SECRET.set(secret).ok();
 }
-
-pub fn get_secret() -> &'static str {
-    SESSION_SECRET.get().map(|s| s.as_str()).unwrap_or("default_secret")
-}
-
-// ---------------------------------------------------------------------------
-// CSRF Tokens
-// ---------------------------------------------------------------------------
-
-type HmacSha256 = Hmac<Sha256>;
+pub fn get_secret() -> &'static str { SESSION_SECRET.get().map(String::as_str).unwrap_or("default_secret") }
 
 pub fn compute_csrf_token(session_token: &str) -> String {
-    let secret = get_secret();
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
-        .expect("HMAC accepts any key size");
+    let mut mac = HmacSha256::new_from_slice(get_secret().as_bytes()).expect("HMAC accepts any key size");
     mac.update(session_token.as_bytes());
-    let result = mac.finalize().into_bytes();
-    result.iter().map(|b| format!("{:02x}", b)).collect()
+    mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect()
 }
-
 pub fn verify_csrf_token(session_token: &str, submitted: &str) -> bool {
-    if submitted.is_empty() {
-        return false;
-    }
+    if submitted.is_empty() { return false; }
     let expected = compute_csrf_token(session_token);
-    if expected.len() != submitted.len() {
-        return false;
-    }
-    expected
-        .bytes()
-        .zip(submitted.bytes())
-        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-        == 0
+    expected.len() == submitted.len() && expected.bytes().zip(submitted.bytes()).fold(0u8, |a, (x, y)| a | (x ^ y)) == 0
 }
-
-// ---------------------------------------------------------------------------
-// Password Hashing
-// ---------------------------------------------------------------------------
 
 #[allow(dead_code)]
 pub async fn hash_password(password: &str) -> Result<String, String> {
-    use argon2::{
-        password_hash::{PasswordHasher, SaltString},
-        Argon2,
-    };
-    Argon2::default()
-        .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
-        .map(|h| h.to_string())
-        .map_err(|e| format!("Failed to hash password: {}", e))
+    use argon2::{password_hash::{PasswordHasher, SaltString}, Argon2};
+    Argon2::default().hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+        .map(|h| h.to_string()).map_err(|e| format!("Failed to hash password: {e}"))
 }
-
 pub fn verify_password(password: &str, hash: &str) -> bool {
-    use argon2::{
-        password_hash::{PasswordHash, PasswordVerifier},
-        Argon2,
-    };
-    PasswordHash::new(hash)
-        .map(|h| Argon2::default().verify_password(password.as_bytes(), &h).is_ok())
-        .unwrap_or(false)
+    use argon2::{password_hash::{PasswordHash, PasswordVerifier}, Argon2};
+    PasswordHash::new(hash).map(|h| Argon2::default().verify_password(password.as_bytes(), &h).is_ok()).unwrap_or(false)
 }
 
-// ---------------------------------------------------------------------------
-// Session Management
-// ---------------------------------------------------------------------------
+fn select_user_fields(cfg: &AuthConfig, alias: Option<&str>) -> String {
+    let p = alias.map(|a| format!("{a}.")).unwrap_or_default();
+    let name = if cfg.user_name.is_empty() { format!("{p}{} AS name", cfg.user_identifier) } else { format!("COALESCE({p}{}, {p}{}) AS name", cfg.user_name, cfg.user_identifier) };
+    let email = if cfg.user_email.is_empty() { format!("{p}{} AS email", cfg.user_identifier) } else { format!("COALESCE({p}{}, {p}{}) AS email", cfg.user_email, cfg.user_identifier) };
+    let role = if cfg.user_role.is_empty() { "'User' AS role".into() } else { format!("COALESCE({p}{}, 'User') AS role", cfg.user_role) };
+    let status = if cfg.user_status.is_empty() { "'active' AS status".into() } else { format!("COALESCE({p}{}, 'active') AS status", cfg.user_status) };
+    format!("{p}{} AS id, {name}, {email}, {role}, {status}", cfg.user_id)
+}
+
+fn status_condition(cfg: &AuthConfig, alias: &str) -> Option<String> {
+    if cfg.user_status.is_empty() { None } else {
+        Some(format!("LOWER(COALESCE({alias}.{}, 'active')) IN ('active','enabled','approved')", cfg.user_status))
+    }
+}
 
 fn generate_token() -> String {
-    let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    let mut bytes = [0u8; 32]; OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
-
-fn now_timestamp() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
+fn now_timestamp() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64 }
 
 pub async fn create_session(user_id: i64, remember_me: bool) -> Result<(String, i64), String> {
     let cfg = auth_config();
     let pool = DB_POOL.get().ok_or("Database not configured")?;
     let token = generate_token();
-    
-    // 30 days if remember_me, otherwise default lifetime (usually 24 hours)
     let lifetime = if remember_me { 30 * 24 * 60 * 60 } else { cfg.session_lifetime };
     let expires_at = now_timestamp() + lifetime;
-    
-    let p1 = cfg.placeholder(pool, 1);
-    let p2 = cfg.placeholder(pool, 2);
-    let p3 = cfg.placeholder(pool, 3);
-    let sql = format!(
-        "INSERT INTO {} ({}, {}, {}) VALUES ({}, {}, {})",
-        cfg.session_table, cfg.session_token, cfg.session_user_id, cfg.session_expires_at, p1, p2, p3
-    );
-    let result = match pool {
+    let sql = format!("INSERT INTO {} ({}, {}, {}) VALUES ({}, {}, {})",
+        cfg.session_table, cfg.session_token, cfg.session_user_id, cfg.session_expires_at,
+        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3));
+    let result: Result<(), sqlx::Error> = match pool {
         DbPool::Sqlite(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
         DbPool::Postgres(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
         DbPool::MySql(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
     };
-    result.map_err(|e| format!("Failed to create session: {}", e))?;
-    
-    Ok((token, lifetime))
+    result.map(|_| (token, lifetime)).map_err(|e| format!("Failed to create session: {e}"))
 }
 
 pub async fn get_user_from_session(token: &str) -> Option<User> {
     let cfg = auth_config();
     let pool = DB_POOL.get()?;
-    let now = now_timestamp();
-    let p1 = cfg.placeholder(pool, 1);
-    let p2 = cfg.placeholder(pool, 2);
-    let role_expr = if cfg.user_role.is_empty() {
-        "'User' AS role".to_string()
-    } else {
-        format!("COALESCE(u.{}, 'User') AS role", cfg.user_role)
-    };
-    let sql = format!(
-        "SELECT u.{id} AS id, u.{name} AS name, u.{ident} AS email, {role} \
-         FROM {ut} u INNER JOIN {st} s ON u.{id} = s.{suc} \
-         WHERE s.{stc} = {p1} AND s.{sec} > {p2}",
-        id = cfg.user_id,
-        name = cfg.user_name,
-        ident = cfg.user_identifier,
-        role = role_expr,
-        ut = cfg.user_table,
-        st = cfg.session_table,
-        suc = cfg.session_user_id,
-        stc = cfg.session_token,
-        sec = cfg.session_expires_at,
-        p1 = p1,
-        p2 = p2
-    );
-
-    crate::vlo_debug!("🔐 DB: Query: {}", sql);
-    crate::vlo_debug!("🔐 DB: Token (first 8): {}", &token[..8.min(token.len())]);
-    crate::vlo_debug!("🔐 DB: Now timestamp: {}", now);
-
-    let result = match pool {
-        DbPool::Sqlite(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now).fetch_optional(c).await,
-        DbPool::Postgres(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now).fetch_optional(c).await,
-        DbPool::MySql(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now).fetch_optional(c).await,
-    };
-
-    match &result {
-        Ok(Some(user)) => crate::vlo_debug!("🔐 DB: Found user: {} ({})", user.name, user.id),
-        Ok(None) => crate::vlo_debug!("🔐 DB: No user found for this token"),
-        Err(e) => crate::vlo_debug!("🔐 DB: Query error: {}", e),
-    }
-
-    result.ok().flatten()
+    let mut sql = format!("SELECT {} FROM {} u INNER JOIN {} s ON u.{} = s.{} WHERE s.{} = {} AND s.{} > {}",
+        select_user_fields(cfg, Some("u")), cfg.user_table, cfg.session_table, cfg.user_id, cfg.session_user_id,
+        cfg.session_token, cfg.placeholder(pool, 1), cfg.session_expires_at, cfg.placeholder(pool, 2));
+    if let Some(condition) = status_condition(cfg, "u") { sql.push_str(" AND "); sql.push_str(&condition); }
+    match pool {
+        DbPool::Sqlite(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now_timestamp()).fetch_optional(c).await,
+        DbPool::Postgres(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now_timestamp()).fetch_optional(c).await,
+        DbPool::MySql(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now_timestamp()).fetch_optional(c).await,
+    }.ok().flatten()
 }
 
 pub async fn delete_session(token: &str) -> Result<(), String> {
     let cfg = auth_config();
     let pool = DB_POOL.get().ok_or("Database not configured")?;
-    let p1 = cfg.placeholder(pool, 1);
-    let sql = format!("DELETE FROM {} WHERE {} = {}", cfg.session_table, cfg.session_token, p1);
-    let result = match pool {
+    let sql = format!("DELETE FROM {} WHERE {} = {}", cfg.session_table, cfg.session_token, cfg.placeholder(pool, 1));
+    let result: Result<(), sqlx::Error> = match pool {
         DbPool::Sqlite(c) => sqlx::query(&sql).bind(token).execute(c).await.map(|_| ()),
         DbPool::Postgres(c) => sqlx::query(&sql).bind(token).execute(c).await.map(|_| ()),
         DbPool::MySql(c) => sqlx::query(&sql).bind(token).execute(c).await.map(|_| ()),
     };
-    result.map_err(|e| format!("Failed to delete session: {}", e))?;
-    Ok(())
+    result.map_err(|e| format!("Failed to delete session: {e}"))
 }
 
 pub async fn cleanup_expired_sessions() -> Result<u64, String> {
     let cfg = auth_config();
     let pool = DB_POOL.get().ok_or("Database not configured")?;
-    let now = now_timestamp();
-    let p1 = cfg.placeholder(pool, 1);
-    let sql = format!(
-        "DELETE FROM {} WHERE {} < {}",
-        cfg.session_table, cfg.session_expires_at, p1
-    );
-    
-    // Extract rows_affected() inside each arm to unify the return type to Result<u64, sqlx::Error>
-    let rows_affected = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&sql).bind(now).execute(c).await.map(|r| r.rows_affected()),
-        DbPool::Postgres(c) => sqlx::query(&sql).bind(now).execute(c).await.map(|r| r.rows_affected()),
-        DbPool::MySql(c) => sqlx::query(&sql).bind(now).execute(c).await.map(|r| r.rows_affected()),
+    let sql = format!("DELETE FROM {} WHERE {} < {}", cfg.session_table, cfg.session_expires_at, cfg.placeholder(pool, 1));
+    let result: Result<u64, sqlx::Error> = match pool {
+        DbPool::Sqlite(c) => sqlx::query(&sql).bind(now_timestamp()).execute(c).await.map(|r| r.rows_affected()),
+        DbPool::Postgres(c) => sqlx::query(&sql).bind(now_timestamp()).execute(c).await.map(|r| r.rows_affected()),
+        DbPool::MySql(c) => sqlx::query(&sql).bind(now_timestamp()).execute(c).await.map(|r| r.rows_affected()),
     };
-    
-    match rows_affected {
-        Ok(count) => Ok(count),
-        Err(e) => Err(format!("Failed to cleanup sessions: {}", e)),
-    }
+    result.map_err(|e| format!("Failed to cleanup sessions: {e}"))
 }
+
+// IMPORTANT: No status condition here. Login must find inactive/pending users so their status 
+// can be revealed ONLY after the password is verified successfully.
 async fn find_user_by_identifier(identifier: &str) -> Option<User> {
     let cfg = auth_config();
     let pool = DB_POOL.get()?;
-    let p1 = cfg.placeholder(pool, 1);
-    let role_expr = if cfg.user_role.is_empty() {
-        "'User' AS role".to_string()
-    } else {
-        format!("COALESCE({}, 'User') AS role", cfg.user_role)
-    };
-    let sql = format!(
-        "SELECT {id} AS id, {name} AS name, {ident} AS email, {role} FROM {ut} WHERE {ident} = {p1}",
-        id = cfg.user_id,
-        name = cfg.user_name,
-        ident = cfg.user_identifier,
-        role = role_expr,
-        ut = cfg.user_table,
-        p1 = p1
-    );
+    let sql = format!("SELECT {} FROM {} u WHERE u.{} = {}",
+        select_user_fields(cfg, Some("u")), cfg.user_table, cfg.user_identifier, cfg.placeholder(pool, 1));
     match pool {
         DbPool::Sqlite(c) => sqlx::query_as::<_, User>(&sql).bind(identifier).fetch_optional(c).await,
         DbPool::Postgres(c) => sqlx::query_as::<_, User>(&sql).bind(identifier).fetch_optional(c).await,
         DbPool::MySql(c) => sqlx::query_as::<_, User>(&sql).bind(identifier).fetch_optional(c).await,
-    }
-    .ok()
-    .flatten()
+    }.ok().flatten()
 }
 
 async fn fetch_password_hash(user_id: i64) -> Option<String> {
     let cfg = auth_config();
     let pool = DB_POOL.get()?;
-    let p1 = cfg.placeholder(pool, 1);
-    let sql = format!(
-        "SELECT {} FROM {} WHERE {} = {}",
-        cfg.user_password, cfg.user_table, cfg.user_id, p1
-    );
+    let sql = format!("SELECT {} FROM {} WHERE {} = {}", cfg.user_password, cfg.user_table, cfg.user_id, cfg.placeholder(pool, 1));
     match pool {
         DbPool::Sqlite(c) => sqlx::query_scalar::<_, String>(&sql).bind(user_id).fetch_optional(c).await,
         DbPool::Postgres(c) => sqlx::query_scalar::<_, String>(&sql).bind(user_id).fetch_optional(c).await,
         DbPool::MySql(c) => sqlx::query_scalar::<_, String>(&sql).bind(user_id).fetch_optional(c).await,
-    }
-    .ok()
-    .flatten()
+    }.ok().flatten()
 }
 
-// ---------------------------------------------------------------------------
-// Middleware
-// ---------------------------------------------------------------------------
-
 pub fn parse_cookie_header(value: &str, cookie_name: &str) -> Option<String> {
-    let prefix = format!("{}=", cookie_name);
-    crate::vlo_debug!("🔐 COOKIE: Looking for prefix '{}' in '{}'", prefix, value);
-
-    let result = value
-        .split(';')
-        .map(str::trim)
-        .find_map(|part| part.strip_prefix(&prefix).map(str::to_string));
-
-    crate::vlo_debug!(
-        "🔐 COOKIE: Parse result: {:?}",
-        result.as_ref().map(|t| &t[..8.min(t.len())])
-    );
-    result
+    let prefix = format!("{cookie_name}=");
+    value.split(';').map(str::trim).find_map(|p| p.strip_prefix(&prefix).map(str::to_owned))
 }
 
 pub async fn session_middleware(mut req: Request, next: Next) -> Response {
-    let cookie_name = auth_config().cookie_name.clone();
-
-    let cookie_header = req
-        .headers()
-        .get(header::COOKIE)
-        .and_then(|v| v.to_str().ok());
-
-    crate::vlo_debug!("🔐 SESSION: Cookie header: {:?}", cookie_header);
-
-    let session_token = cookie_header.and_then(|h| parse_cookie_header(h, &cookie_name));
-
-    crate::vlo_debug!(
-        "🔐 SESSION: Extracted token: {:?}",
-        session_token.as_ref().map(|t| &t[..8.min(t.len())])
-    );
-
-    let (user, csrf_token) = match &session_token {
-        Some(t) => {
-            let found_user = get_user_from_session(t).await;
-            crate::vlo_debug!("🔐 SESSION: User lookup result: {}", found_user.is_some());
-            (found_user, Some(compute_csrf_token(t)))
-        }
-        None => {
-            crate::vlo_debug!("🔐 SESSION: No session token found");
-            (None, None)
-        }
+    let cfg = auth_config();
+    let token = req.headers().get(header::COOKIE).and_then(|v| v.to_str().ok()).and_then(|v| parse_cookie_header(v, &cfg.cookie_name));
+    let (user, csrf_token) = match &token {
+        Some(t) => (get_user_from_session(t).await, Some(compute_csrf_token(t))),
+        None => (None, None),
     };
-
-    req.extensions_mut().insert(AuthUser {
-        user,
-        csrf_token,
-        session_token,
-    });
+    req.extensions_mut().insert(AuthUser { user, csrf_token, session_token: token });
     next.run(req).await
 }
-
-// ---------------------------------------------------------------------------
-// CSRF Middleware
-// ---------------------------------------------------------------------------
 
 pub async fn csrf_middleware(req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let path = req.uri().path().to_owned();
-
-    let is_safe = matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
-    let is_exempt = path.starts_with("/api/auth/") || path.starts_with("/api/files/upload");
-
-    if is_safe || is_exempt {
+    if matches!(method, Method::GET | Method::HEAD | Method::OPTIONS) || path.starts_with("/api/auth/") || path.starts_with("/api/files/upload") {
         return next.run(req).await;
     }
-
-    let auth = req.extensions().get::<AuthUser>().cloned();
-    let session_token = match auth {
-        Some(AuthUser { session_token: Some(t), user: Some(_), .. }) => t,
+    let token = match req.extensions().get::<AuthUser>() {
+        Some(AuthUser { session_token: Some(token), user: Some(_), .. }) => token.clone(),
         _ => return next.run(req).await,
     };
-
-    let submitted = req
-        .headers()
-        .get("X-CSRF-Token")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    if !verify_csrf_token(&session_token, submitted) {
-        crate::vlo_debug!("🛡️ CSRF rejected for {} {}", method, path);
-        return (StatusCode::FORBIDDEN, Json(json!({
-            "success": false,
-            "error": "CSRF token invalid or missing"
-        })))
-            .into_response();
+    let submitted = req.headers().get("X-CSRF-Token").and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !verify_csrf_token(&token, submitted) {
+        return (StatusCode::FORBIDDEN, Json(json!({"success": false, "error": "CSRF token invalid or missing"}))).into_response();
     }
-
     next.run(req).await
 }
-
-// ---------------------------------------------------------------------------
-// API Auth Middleware
-// ---------------------------------------------------------------------------
 
 pub async fn api_auth_middleware(req: Request, next: Next) -> Response {
     let path = req.uri().path().to_owned();
-    let method = req.method().clone();
-
-    // Only protect API routes
-    if !path.starts_with("/api/") {
+    if !path.starts_with("/api/") || path.starts_with("/api/auth/") || path == "/api" || path.starts_with("/api/files/") {
         return next.run(req).await;
     }
-
-    // Exempt routes
-    let is_exempt = path.starts_with("/api/auth/")
-        || path == "/api"
-        || path.starts_with("/api/files/");
-
-    if is_exempt {
-        return next.run(req).await;
+    let public_routes = std::env::var("AUTH_API_PUBLIC_ROUTES").unwrap_or_default();
+    let is_public = public_routes.split(',').map(str::trim).filter(|s| !s.is_empty()).any(|r| {
+        if let Some(prefix) = r.strip_suffix('*') { path.starts_with(prefix) } 
+        else { path == r || path.starts_with(&format!("{r}/")) }
+    });
+    if is_public { return next.run(req).await; }
+    if req.extensions().get::<AuthUser>().and_then(|a| a.user.as_ref()).is_none() {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"}))).into_response();
     }
-
-    // Check public routes from ENV
-    let public_env = std::env::var("AUTH_API_PUBLIC_ROUTES").unwrap_or_default();
-    let public_routes: Vec<&str> = public_env
-        .split(',')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    let is_public = public_routes.iter().any(|r| path.starts_with(r));
-
-    if is_public {
-        return next.run(req).await;
-    }
-
-    // Check if user is authenticated
-    let auth = req.extensions().get::<AuthUser>().cloned();
-    let is_authenticated = auth.as_ref().map_or(false, |a| a.user.is_some());
-
-    if !is_authenticated {
-        crate::vlo_debug!("🔒 API auth rejected: {} {}", method, path);
-        return (StatusCode::UNAUTHORIZED, Json(json!({
-            "success": false,
-            "error": "Authentication required"
-        })))
-            .into_response();
-    }
-
     next.run(req).await
 }
 
-// ---------------------------------------------------------------------------
-// Login / Logout / Me
-// ---------------------------------------------------------------------------
+// Compact login error helper
+fn login_error(status: StatusCode, error: &str, db_status: Option<&str>) -> Response {
+    let mut body = json!({"success": false, "error": error});
+    if let Some(db_status) = db_status {
+        let activation_required = matches!(db_status.to_ascii_lowercase().as_str(), "pending" | "pending_activation" | "unverified" | "inactive" | "in-active");
+        body["status"] = json!(db_status);
+        body["activation_required"] = json!(activation_required);
+    }
+    (status, Json(body)).into_response()
+}
 
 pub async fn login_handler(req: Request) -> impl IntoResponse {
     let cfg = auth_config();
-    let id_field = cfg.identifier_field.clone();
-    let pw_field = cfg.password_field.clone();
-
-    // ─── 1. EXTRACT 'next' REDIRECT URL FROM QUERY STRING ───
-    let mut next_url = "/".to_string();
+    let identifier_field = cfg.identifier_field.clone();
+    let password_field = cfg.password_field.clone();
+    let mut next_url = "/".to_owned();
     if let Some(q) = req.uri().query() {
         for pair in q.split('&') {
             let mut p = pair.splitn(2, '=');
-            if let (Some(k), Some(v)) = (p.next(), p.next()) {
-                if k == "next" {
-                    next_url = urlencoding::decode(v).unwrap_or_default().into_owned();
-                }
-            }
+            if let (Some(k), Some(v)) = (p.next(), p.next()) { if k == "next" { next_url = urlencoding::decode(v).unwrap_or_default().into_owned(); } }
         }
     }
-
-    // ─── RATE LIMITING ──────────────────────────────────────
-    let client_ip = req.headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or("unknown").trim().to_string())
-        .or_else(|| {
-            req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-                .map(|ci| ci.0.ip().to_string())
-        })
-        .unwrap_or_else(|| "unknown".to_string());
+    let client_ip = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok()).map(|s| s.split(',').next().unwrap_or("unknown").trim().to_owned())
+        .or_else(|| req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip().to_string())).unwrap_or_else(|| "unknown".into());
 
     if !check_rate_limit(&client_ip) {
-        crate::vlo_debug!("🚫 Rate limit exceeded for IP: {}", client_ip);
-        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({
-            "success": false,
-            "error": "Too many login attempts. Please try again in 60 seconds."
-        }))).into_response();
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"success": false, "error": "Too many login attempts. Please try again in 60 seconds."}))).into_response();
     }
 
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
-    let mut identifier = String::new();
-    let mut password = String::new();
-    let mut remember_me = false;
+    let mut identifier = String::new(); let mut password = String::new(); let mut remember_me = false;
 
     if content_type.contains("multipart/form-data") {
-        match axum::extract::Multipart::from_request(req, &()).await {
-            Ok(mut multipart) => {
-                while let Ok(Some(field)) = multipart.next_field().await {
-                    let name = field.name().unwrap_or("").to_string();
-                    let value = field.text().await.unwrap_or_default();
-                    if name == id_field { identifier = value; } 
-                    else if name == pw_field { password = value; } 
-                    else if name == "remember_me" { let v = value.to_lowercase(); remember_me = v == "on" || v == "true" || v == "1"; }
-                    else if name == "next" && !value.is_empty() { next_url = value; } // 🔥 Capture from body
-                }
+        let mut multipart = match axum::extract::Multipart::from_request(req, &()).await {
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid multipart request"}))).into_response(),
+        };
+        while let Ok(Some(field)) = multipart.next_field().await {
+            let name = field.name().unwrap_or("").to_owned(); let value = field.text().await.unwrap_or_default();
+            match name.as_str() {
+                x if x == identifier_field => identifier = value,
+                x if x == password_field => password = value,
+                "remember_me" => remember_me = matches!(value.to_lowercase().as_str(), "on" | "true" | "1"),
+                "next" if !value.is_empty() => next_url = value, _ => {}
             }
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid multipart request"}))).into_response()
         }
     } else if content_type.contains("application/json") {
-        match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
-            Ok(payload) => {
-                identifier = payload.get(&id_field).and_then(|v| v.as_str()).unwrap_or("").into();
-                password = payload.get(&pw_field).and_then(|v| v.as_str()).unwrap_or("").into();
-                remember_me = payload.get("remember_me").and_then(|v| v.as_bool()).unwrap_or(false);
-                if let Some(n) = payload.get("next").and_then(|v| v.as_str()) { if !n.is_empty() { next_url = n.to_string(); } } // 🔥 Capture from JSON
-            }
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Invalid JSON"}))).into_response()
-        }
+        let payload = match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
+        };
+        identifier = payload.get(&identifier_field).and_then(|v| v.as_str()).unwrap_or("").into();
+        password = payload.get(&password_field).and_then(|v| v.as_str()).unwrap_or("").into();
+        remember_me = payload.get("remember_me").and_then(|v| v.as_bool()).unwrap_or(false);
+        if let Some(next) = payload.get("next").and_then(|v| v.as_str()) { if !next.is_empty() { next_url = next.into(); } }
     } else if content_type.contains("application/x-www-form-urlencoded") {
-        match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
-            Ok(bytes) => {
-                for pair in String::from_utf8_lossy(&bytes).split('&') {
-                    let mut p = pair.splitn(2, '=');
-                    if let (Some(k), Some(v)) = (p.next(), p.next()) {
-                        let v = urlencoding::decode(v).unwrap_or_default().to_string();
-                        if k == id_field { identifier = v; } 
-                        else if k == pw_field { password = v; } 
-                        else if k == "remember_me" { let val = v.to_lowercase(); remember_me = val == "on" || val == "true" || val == "1"; }
-                        else if k == "next" && !v.is_empty() { next_url = v; } // 🔥 Capture from urlencoded
-                    }
+        let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
+        };
+        for pair in String::from_utf8_lossy(&bytes).split('&') {
+            let mut p = pair.splitn(2, '=');
+            if let (Some(k), Some(v)) = (p.next(), p.next()) {
+                let value = urlencoding::decode(v).unwrap_or_default().into_owned();
+                match k {
+                    x if x == identifier_field => identifier = value,
+                    x if x == password_field => password = value,
+                    "remember_me" => remember_me = matches!(value.to_lowercase().as_str(), "on" | "true" | "1"),
+                    "next" if !value.is_empty() => next_url = value, _ => {}
                 }
             }
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Failed to read body"}))).into_response()
         }
     } else {
-        return (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Unsupported content type"}))).into_response();
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Unsupported content type"}))).into_response();
     }
 
     if identifier.is_empty() || password.is_empty() {
-        let flash = encode_flash("error", "⚠️", "Login Failed", "Credentials required");
-        let mut response = (StatusCode::BAD_REQUEST, Json(json!({"success":false,"error":"Credentials required"}))).into_response();
-        if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) { response.headers_mut().append(header::SET_COOKIE, val); }
-        return response;
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Credentials required"}))).into_response();
     }
 
+    // 1. Never reveal status before password verification.
     let user = match find_user_by_identifier(&identifier).await {
-        Some(u) => u,
-        None => {
-            let flash = encode_flash("error", "⚠️", "Login Failed", "Invalid credentials");
-            let mut response = (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response();
-            if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) { response.headers_mut().append(header::SET_COOKIE, val); }
-            return response;
-        }
-    };
-    
-    let hash = match fetch_password_hash(user.id).await {
-        Some(h) => h,
-        None => return (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response()
-    };
-    
-    if !verify_password(&password, &hash) {
-        let flash = encode_flash("error", "⚠️", "Login Failed", "Invalid credentials");
-        let mut response = (StatusCode::UNAUTHORIZED, Json(json!({"success":false,"error":"Invalid credentials"}))).into_response();
-        if let Ok(val) = HeaderValue::from_str(&flash_cookie_header(&flash)) { response.headers_mut().append(header::SET_COOKIE, val); }
-        return response;
-    }
-    
-    let (token, lifetime) = match create_session(user.id, remember_me).await {
-        Ok(t) => t,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success":false,"error":e}))).into_response()
+        Some(user) => user,
+        None => return login_error(StatusCode::UNAUTHORIZED, "Invalid credentials", None),
     };
 
-    // ─── SANITIZE REDIRECT URL (Prevent Open Redirects) ─────
-    if !next_url.starts_with('/') || next_url.starts_with("//") || next_url.contains("://") {
-        next_url = "/".to_string();
+    let hash = match fetch_password_hash(user.id).await {
+        Some(hash) => hash,
+        None => return login_error(StatusCode::UNAUTHORIZED, "Invalid credentials", None),
+    };
+
+    // 2. Active + wrong cred, pending + wrong cred, inactive + wrong cred: all return ONLY "Invalid credentials".
+    if !verify_password(&password, &hash) {
+        return login_error(StatusCode::UNAUTHORIZED, "Invalid credentials", None);
     }
+
+    // 3. Status is revealed ONLY after the correct password.
+    let active = matches!(user.status.to_ascii_lowercase().as_str(), "active" | "enabled" | "approved");
+    if !active {
+        return login_error(StatusCode::FORBIDDEN, "Account is not active", Some(&user.status));
+    }
+
+    let (token, lifetime) = match create_session(user.id, remember_me).await {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": e}))).into_response(),
+    };
+
+    if !next_url.starts_with('/') || next_url.starts_with("//") || next_url.contains("://") { next_url = "/".into(); }
 
     let cookie = format!("{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}", cfg.cookie_name, token, lifetime);
-    
-    // 🔥 RETURN REDIRECT IN JSON
     let mut response = Json(json!({
-        "success": true,
-        "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role },
-        "redirect": next_url
+        "success": true, "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role, "status": user.status }, "redirect": next_url
     })).into_response();
 
-    if let Ok(value) = HeaderValue::from_str(&cookie) {
-        response.headers_mut().append(header::SET_COOKIE, value);
-    }
+    if let Ok(value) = HeaderValue::from_str(&cookie) { response.headers_mut().append(header::SET_COOKIE, value); }
     response
 }
 
 pub async fn logout_handler(req: Request) -> impl IntoResponse {
     let cfg = auth_config();
-    let cookie_name = cfg.cookie_name.clone();
-    let token = req
-        .headers()
-        .get(header::COOKIE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|h| parse_cookie_header(h, &cookie_name));
-    if let Some(token) = token {
-        let _ = delete_session(&token).await;
-    }
-
-    let cookie = format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", cookie_name);
+    let token = req.headers().get(header::COOKIE).and_then(|v| v.to_str().ok()).and_then(|v| parse_cookie_header(v, &cfg.cookie_name));
+    if let Some(token) = token { let _ = delete_session(&token).await; }
+    let cookie = format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", cfg.cookie_name);
     let mut response = Redirect::to("/").into_response();
-    if let Ok(value) = HeaderValue::from_str(&cookie) {
-        response.headers_mut().append(header::SET_COOKIE, value);
-    }
+    if let Ok(value) = HeaderValue::from_str(&cookie) { response.headers_mut().append(header::SET_COOKIE, value); }
     response
 }
 
 pub async fn me_handler(axum::Extension(auth): axum::Extension<AuthUser>) -> impl IntoResponse {
     match auth.user {
         Some(user) => (StatusCode::OK, Json(json!({
-            "authenticated": true,
-            "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role }
-        })))
-            .into_response(),
-        None => (StatusCode::UNAUTHORIZED, Json(json!({
-            "authenticated": false, "error": "Not authenticated"
-        })))
-            .into_response(),
+            "authenticated": true, "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role, "status": user.status }
+        }))).into_response(),
+        None => (StatusCode::UNAUTHORIZED, Json(json!({"authenticated": false, "error": "Not authenticated"}))).into_response(),
     }
 }
 
-// ---------------------------------------------------------------------------
-// setpass CLI
-// ---------------------------------------------------------------------------
+// ============================================================================
+// Authorization Helpers
+// ============================================================================
 #[allow(dead_code)]
-pub async fn set_password(identifier: &str, password: &str) -> Result<(), String> {
+pub fn is_authenticated(auth: &AuthUser) -> bool { auth.user.is_some() }
+
+#[allow(dead_code)]
+pub fn has_role(auth: &AuthUser, role: &str) -> bool { auth.user.as_ref().is_some_and(|u| u.role.eq_ignore_ascii_case(role)) }
+
+#[allow(dead_code)]
+pub fn require_auth(auth: &AuthUser) -> Result<(), Response> {
+    if is_authenticated(auth) { Ok(()) } 
+    else { Err((StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"}))).into_response()) }
+}
+
+#[allow(dead_code)]
+pub fn require_role(auth: &AuthUser, role: &str) -> Result<(), Response> {
+    if !is_authenticated(auth) { return Err((StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"}))).into_response()); }
+    if has_role(auth, role) { Ok(()) } 
+    else { Err((StatusCode::FORBIDDEN, Json(json!({"success": false, "error": "Insufficient permissions"}))).into_response()) }
+}
+// ============================================================================
+// Registration & Activation (Requires `auth_tokens` table, see schema note below)
+// ============================================================================
+pub async fn register_handler(req: Request) -> impl IntoResponse {
     let cfg = auth_config();
-    let pool = DB_POOL.get().ok_or("Database not configured")?;
-    let hash = hash_password(password).await?;
-    let p1 = cfg.placeholder(pool, 1);
-    let p2 = cfg.placeholder(pool, 2);
-    let sql = format!(
-        "UPDATE {} SET {} = {} WHERE {} = {}",
-        cfg.user_table, cfg.user_password, p1, cfg.user_identifier, p2
-    );
-    match pool {
-        DbPool::Sqlite(c) => sqlx::query(&sql).bind(&hash).bind(identifier).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query(&sql).bind(&hash).bind(identifier).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query(&sql).bind(&hash).bind(identifier).execute(c).await.map(|_| ()),
+    let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
+    
+    let mut name = String::new();
+    let mut email = String::new();
+    let mut password = String::new();
+
+    if content_type.contains("application/json") {
+        let payload = match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
+        };
+        name = payload.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        email = payload.get(&cfg.identifier_field).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        password = payload.get(&cfg.password_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    } else {
+        let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
+        };
+        for pair in String::from_utf8_lossy(&bytes).split('&') {
+            let mut p = pair.splitn(2, '=');
+            if let (Some(k), Some(v)) = (p.next(), p.next()) {
+                let value = urlencoding::decode(v).unwrap_or_default().into_owned();
+                match k {
+                    x if x == "name" => name = value,
+                    x if x == cfg.identifier_field => email = value,
+                    x if x == cfg.password_field => password = value,
+                    _ => {}
+                }
+            }
+        }
     }
-    .map_err(|e| format!("Failed to update password: {}", e))?;
-    Ok(())
+
+    if name.is_empty() || email.is_empty() || password.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Name, email, and password are required"}))).into_response();
+    }
+
+    let pool = match DB_POOL.get() { 
+        Some(p) => p, 
+        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response() 
+    };
+    
+    let hash = match hash_password(&password).await { 
+        Ok(h) => h, 
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": e}))).into_response() 
+    };
+    
+    let status_col = if cfg.user_status.is_empty() { "status" } else { &cfg.user_status };
+    let name_col = if cfg.user_name.is_empty() { &cfg.user_identifier } else { &cfg.user_name };
+
+    let sql = format!("INSERT INTO {} ({}, {}, {}, {}) VALUES ({}, {}, {}, 'pending')",
+        cfg.user_table, name_col, cfg.user_identifier, cfg.user_password, status_col,
+        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3));
+    
+    if let Err(_) = match pool {
+        DbPool::Sqlite(c) => sqlx::query(&sql).bind(&name).bind(&email).bind(&hash).execute(c).await.map(|_| ()),
+        DbPool::Postgres(c) => sqlx::query(&sql).bind(&name).bind(&email).bind(&hash).execute(c).await.map(|_| ()),
+        DbPool::MySql(c) => sqlx::query(&sql).bind(&name).bind(&email).bind(&hash).execute(c).await.map(|_| ()),
+    } { 
+        return (StatusCode::CONFLICT, Json(json!({"success": false, "error": "Email already registered or DB error"}))).into_response(); 
+    }
+
+    let user_id: i64 = match pool {
+        DbPool::Sqlite(c) => sqlx::query_scalar(&format!("SELECT {} FROM {} WHERE {} = ?", cfg.user_id, cfg.user_table, cfg.user_identifier)).bind(&email).fetch_one(c).await,
+        DbPool::Postgres(c) => sqlx::query_scalar(&format!("SELECT {} FROM {} WHERE {} = $1", cfg.user_id, cfg.user_table, cfg.user_identifier)).bind(&email).fetch_one(c).await,
+        DbPool::MySql(c) => sqlx::query_scalar(&format!("SELECT {} FROM {} WHERE {} = ?", cfg.user_id, cfg.user_table, cfg.user_identifier)).bind(&email).fetch_one(c).await,
+    }.ok().flatten().unwrap_or(0);
+
+    let token = generate_token();
+    let expires_at = now_timestamp() + (7 * 24 * 60 * 60);
+    let token_sql = format!("INSERT INTO auth_tokens (user_id, token, type, expires_at) VALUES ({}, {}, 'activate', {})",
+        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3));
+    let _ = match pool {
+        DbPool::Sqlite(c) => sqlx::query(&token_sql).bind(user_id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+        DbPool::Postgres(c) => sqlx::query(&token_sql).bind(user_id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+        DbPool::MySql(c) => sqlx::query(&token_sql).bind(user_id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+    };
+
+    let root = std::env::var("ROOT").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let email_body = format!("<h2>Welcome!</h2><p>Click <a href='{}api/auth/activate?token={}'>here</a> to activate your account.</p>", root, token);
+    
+    // ✅ `email` is safely in scope here
+    match crate::mailer::send_email(&email, "Activate your VLO account", &email_body).await {
+        Ok(_) => crate::vlo_debug!("✅ Activation email queued for {}", email),
+        Err(e) => crate::vlo_debug!("❌ Failed to send activation email to {}: {}", email, e),
+    }
+
+    (StatusCode::CREATED, Json(json!({"success": true, "message": "Registration successful. Please check your email."}))).into_response()
 }
 
-// ---------------------------------------------------------------------------
-// Page Guards
-// ---------------------------------------------------------------------------
+pub async fn activate_handler(req: Request) -> impl IntoResponse {
+    let query = req.uri().query().unwrap_or("");
+    let token = query.split('&').find_map(|p| p.splitn(2, '=').nth(1)).unwrap_or("");
+    let pool = match DB_POOL.get() { Some(p) => p, None => return (StatusCode::INTERNAL_SERVER_ERROR, "DB error").into_response() };
+    let cfg = auth_config();
 
-static LAYOUT_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)<([A-Za-z][A-Za-z0-9_-]*)Layout\s+([^>]*?)>"#).unwrap()
-});
+    let user_id: Option<i64> = match pool {
+        DbPool::Sqlite(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = ? AND type = 'activate' AND expires_at > ?").bind(token).bind(now_timestamp()).fetch_optional(c).await,
+        DbPool::Postgres(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = $1 AND type = 'activate' AND expires_at > $2").bind(token).bind(now_timestamp()).fetch_optional(c).await,
+        DbPool::MySql(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = ? AND type = 'activate' AND expires_at > ?").bind(token).bind(now_timestamp()).fetch_optional(c).await,
+    }.ok().flatten();
 
-pub struct PageGuard {
-    pub auth: bool,
-    pub roles: Vec<String>,
-    pub guest: bool,
+    if let Some(uid) = user_id {
+        let status_col = if cfg.user_status.is_empty() { "status" } else { &cfg.user_status };
+        let update_sql = format!("UPDATE {} SET {} = 'active' WHERE {} = {}", cfg.user_table, status_col, cfg.user_id, cfg.placeholder(pool, 1));
+        let _ = match pool {
+            DbPool::Sqlite(c) => sqlx::query(&update_sql).bind(uid).execute(c).await.map(|_| ()),
+            DbPool::Postgres(c) => sqlx::query(&update_sql).bind(uid).execute(c).await.map(|_| ()),
+            DbPool::MySql(c) => sqlx::query(&update_sql).bind(uid).execute(c).await.map(|_| ()),
+        };
+        let _ = match pool {
+            DbPool::Sqlite(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = ?").bind(token).execute(c).await.map(|_| ()),
+            DbPool::Postgres(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = $1").bind(token).execute(c).await.map(|_| ()),
+            DbPool::MySql(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = ?").bind(token).execute(c).await.map(|_| ()),
+        };
+        
+        // 🔥 Redirect to login with a success flash message
+        let flash = crate::auth::encode_flash("success", "✅", "Account Activated", "Your account has been successfully activated. You can now log in.");
+        let mut response = axum::response::Redirect::to("/login").into_response();
+        if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::flash_cookie_header(&flash)) {
+            response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+        }
+        return response;
+    }
+    
+    // 🔥 Redirect to login with an error flash message
+    let flash = crate::auth::encode_flash("error", "❌", "Activation Failed", "Invalid or expired activation token.");
+    let mut response = axum::response::Redirect::to("/login").into_response();
+    if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::flash_cookie_header(&flash)) {
+        response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+    }
+    response
 }
+// ============================================================================
+// Password Reset Handlers
+// ============================================================================
+
+pub async fn forgot_password_handler(req: Request) -> impl IntoResponse {
+    let cfg = auth_config();
+    let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
+    
+    let client_ip = req.headers().get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or("unknown").trim().to_owned())
+        .or_else(|| req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip().to_string()))
+        .unwrap_or_else(|| "unknown".into());
+
+    if !check_rate_limit(&client_ip) {
+        return (StatusCode::OK, Json(json!({"success": true, "message": "If an account with this email exists, a password reset link has been sent."}))).into_response();
+    }
+
+    let mut identifier = String::new();
+    
+    if content_type.contains("application/json") {
+        let payload = match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
+        };
+        identifier = payload.get(&cfg.identifier_field).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    } else {
+        let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
+        };
+        for pair in String::from_utf8_lossy(&bytes).split('&') {
+            let mut p = pair.splitn(2, '=');
+            if let (Some(k), Some(v)) = (p.next(), p.next()) {
+                if k == cfg.identifier_field {
+                    identifier = urlencoding::decode(v).unwrap_or_default().into_owned();
+                    break;
+                }
+            }
+        }
+    }
+
+    if identifier.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Email is required"}))).into_response();
+    }
+
+    let pool = match DB_POOL.get() {
+        Some(p) => p,
+        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response(),
+    };
+
+    // ✅ `user` is declared here and remains in scope
+    let user = match find_user_by_identifier(&identifier).await {
+        Some(u) => u,
+        None => {
+            return (StatusCode::OK, Json(json!({"success": true, "message": "If an account with this email exists, a password reset link has been sent."}))).into_response();
+        }
+    };
+
+    let token = generate_token();
+    let expires_at = now_timestamp() + 3600; // 1 hour
+
+    let token_sql = format!(
+        "INSERT INTO auth_tokens (user_id, token, type, expires_at) VALUES ({}, {}, 'password_reset', {})",
+        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3)
+    );
+    
+    let _ = match pool {
+        DbPool::Sqlite(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+        DbPool::Postgres(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+        DbPool::MySql(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+    };
+
+    let root = std::env::var("ROOT").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let reset_url = format!("{}api/auth/reset-password?token={}", root, token);
+    let email_body = format!(
+        "<h2>Password Reset Request</h2><p>Click <a href='{}'>here</a> to reset your password. This link expires in 1 hour.</p>",
+        reset_url
+    );
+    
+    // ✅ `user.email` is safely in scope here
+    match crate::mailer::send_email(&user.email, "Reset your VLO password", &email_body).await {
+        Ok(_) => crate::vlo_debug!("✅ Password reset email queued for {}", user.email),
+        Err(e) => crate::vlo_debug!("❌ Failed to send reset email to {}: {}", user.email, e),
+    }
+
+    (StatusCode::OK, Json(json!({"success": true, "message": "If an account with this email exists, a password reset link has been sent."}))).into_response()
+}
+
+pub async fn reset_password_handler(req: Request) -> impl IntoResponse {
+    let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
+    
+    let mut token = String::new();
+    let mut new_password = String::new();
+
+    if content_type.contains("application/json") {
+        let payload = match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
+        };
+        token = payload.get("token").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        new_password = payload.get("new_password").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    } else if content_type.contains("application/x-www-form-urlencoded") {
+        let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
+        };
+        for pair in String::from_utf8_lossy(&bytes).split('&') {
+            let mut p = pair.splitn(2, '=');
+            if let (Some(k), Some(v)) = (p.next(), p.next()) {
+                let val = urlencoding::decode(v).unwrap_or_default().into_owned();
+                if k == "token" { token = val; }
+                else if k == "new_password" { new_password = val; }
+            }
+        }
+    } else {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Unsupported content type"}))).into_response();
+    }
+
+    if token.is_empty() || new_password.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Token and new password are required"}))).into_response();
+    }
+
+    let pool = match DB_POOL.get() {
+        Some(p) => p,
+        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response(),
+    };
+
+    // Verify token
+    let user_id: Option<i64> = match pool {
+        DbPool::Sqlite(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = ? AND type = 'password_reset' AND expires_at > ?").bind(&token).bind(now_timestamp()).fetch_optional(c).await,
+        DbPool::Postgres(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = $1 AND type = 'password_reset' AND expires_at > $2").bind(&token).bind(now_timestamp()).fetch_optional(c).await,
+        DbPool::MySql(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = ? AND type = 'password_reset' AND expires_at > ?").bind(&token).bind(now_timestamp()).fetch_optional(c).await,
+    }.ok().flatten();
+
+    let user_id = match user_id {
+        Some(id) => id,
+        None => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid or expired reset token"}))).into_response(),
+    };
+
+    // Hash new password
+    let hash = match hash_password(&new_password).await {
+        Ok(h) => h,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": e}))).into_response(),
+    };
+
+    let cfg = auth_config();
+    let update_sql = format!(
+        "UPDATE {} SET {} = {} WHERE {} = {}",
+        cfg.user_table, cfg.user_password, cfg.placeholder(pool, 1), cfg.user_id, cfg.placeholder(pool, 2)
+    );
+
+    // 1. Update password
+    if let Err(e) = match pool {
+        DbPool::Sqlite(c) => sqlx::query(&update_sql).bind(&hash).bind(user_id).execute(c).await.map(|_| ()),
+        DbPool::Postgres(c) => sqlx::query(&update_sql).bind(&hash).bind(user_id).execute(c).await.map(|_| ()),
+        DbPool::MySql(c) => sqlx::query(&update_sql).bind(&hash).bind(user_id).execute(c).await.map(|_| ()),
+    } {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": format!("Failed to update password: {}", e)}))).into_response();
+    }
+
+    // 2. Delete used token
+    let _ = match pool {
+        DbPool::Sqlite(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = ?").bind(&token).execute(c).await.map(|_| ()),
+        DbPool::Postgres(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = $1").bind(&token).execute(c).await.map(|_| ()),
+        DbPool::MySql(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = ?").bind(&token).execute(c).await.map(|_| ()),
+    };
+
+    // 3. Delete existing sessions
+    let delete_sessions_sql = format!("DELETE FROM {} WHERE {} = {}", cfg.session_table, cfg.session_user_id, cfg.placeholder(pool, 1));
+    let _ = match pool {
+        DbPool::Sqlite(c) => sqlx::query(&delete_sessions_sql).bind(user_id).execute(c).await.map(|_| ()),
+        DbPool::Postgres(c) => sqlx::query(&delete_sessions_sql).bind(user_id).execute(c).await.map(|_| ()),
+        DbPool::MySql(c) => sqlx::query(&delete_sessions_sql).bind(user_id).execute(c).await.map(|_| ()),
+    };
+
+    (StatusCode::OK, Json(json!({"success": true, "message": "Password reset successfully. You can now log in."}))).into_response()
+}
+
+// ============================================================================
+// Resend Activation Handler
+// ============================================================================
+pub async fn resend_activation_handler(req: Request) -> impl IntoResponse {
+    let cfg = auth_config();
+    let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
+    
+    let mut identifier = String::new();
+    if content_type.contains("application/json") {
+        let payload = match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
+        };
+        identifier = payload.get(&cfg.identifier_field).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    } else {
+        let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
+            Ok(v) => v,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
+        };
+        for pair in String::from_utf8_lossy(&bytes).split('&') {
+            let mut p = pair.splitn(2, '=');
+            if let (Some(k), Some(v)) = (p.next(), p.next()) {
+                if k == cfg.identifier_field {
+                    identifier = urlencoding::decode(v).unwrap_or_default().into_owned();
+                    break;
+                }
+            }
+        }
+    }
+
+    if identifier.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Email is required"}))).into_response();
+    }
+
+    let pool = match DB_POOL.get() {
+        Some(p) => p,
+        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response(),
+    };
+
+    // ✅ `user` is declared here and remains in scope
+    let user = match find_user_by_identifier(&identifier).await {
+        Some(u) => u,
+        None => return (StatusCode::OK, Json(json!({"success": true, "message": "If an account exists, an activation link has been sent."}))).into_response(),
+    };
+
+    if user.status.to_lowercase() == "active" {
+        return (StatusCode::OK, Json(json!({"success": true, "message": "Your account is already active. You can log in."}))).into_response();
+    }
+
+    let token = generate_token();
+    let expires_at = now_timestamp() + (7 * 24 * 60 * 60); // 7 days
+    let token_sql = format!(
+        "INSERT INTO auth_tokens (user_id, token, type, expires_at) VALUES ({}, {}, 'activate', {})",
+        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3)
+    );
+    let _ = match pool {
+        DbPool::Sqlite(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+        DbPool::Postgres(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+        DbPool::MySql(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+    };
+
+    let root = std::env::var("ROOT").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let email_body = format!("<h2>Welcome!</h2><p>Click <a href='{}api/auth/activate?token={}'>here</a> to activate your account.</p>", root, token);
+    
+    // ✅ `user.email` is safely in scope here
+    match crate::mailer::send_email(&user.email, "Activate your VLO account", &email_body).await {
+        Ok(_) => crate::vlo_debug!("✅ Activation email queued for {}", user.email),
+        Err(e) => crate::vlo_debug!("❌ Failed to send activation email to {}: {}", user.email, e),
+    }
+
+    (StatusCode::OK, Json(json!({"success": true, "message": "Activation link sent successfully. Please check your email."}))).into_response()
+}
+// ============================================================================
+// Page Guards & Flash Messages (Unchanged logic, compacted)
+// ============================================================================
+static LAYOUT_TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)<([A-Za-z][A-Za-z0-9_-]*)Layout\s+([^>]*)>"#).unwrap());
+
+pub struct PageGuard { pub auth: bool, pub roles: Vec<String>, pub guest: bool }
 
 pub fn extract_page_guard(source: &str) -> Option<PageGuard> {
     let caps = LAYOUT_TAG_RE.captures(source)?;
     let props = parse_props_v7(caps.get(2)?.as_str());
-
-    let read_bool = |key: &str| match props.get(key) {
-        Some(serde_json::Value::Bool(v)) => *v,
-        Some(serde_json::Value::String(v)) => v.eq_ignore_ascii_case("true"),
-        _ => false,
+    let bool_prop = |key: &str| match props.get(key) {
+        Some(serde_json::Value::Bool(v)) => *v, Some(serde_json::Value::String(v)) => v.eq_ignore_ascii_case("true"), _ => false,
     };
-
-    let auth = read_bool("auth");
-    let guest = read_bool("guest");
+    let auth = bool_prop("auth"); let guest = bool_prop("guest");
     let mut roles = Vec::new();
-    if let Some(serde_json::Value::String(s)) = props.get("roles") {
-        roles.extend(s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from));
+    for key in ["roles", "role"] {
+        if let Some(serde_json::Value::String(value)) = props.get(key) {
+            roles.extend(value.split(',').map(str::trim).filter(|v| !v.is_empty()).map(String::from));
+        }
     }
-    if let Some(serde_json::Value::String(s)) = props.get("role") {
-        roles.extend(s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from));
-    }
-    if auth || guest || !roles.is_empty() {
-        Some(PageGuard { auth, roles, guest })
-    } else {
-        None
-    }
+    (auth || guest || !roles.is_empty()).then_some(PageGuard { auth, roles, guest })
 }
 
 fn safe_next(next: Option<&str>) -> String {
-    match next {
-        Some(n) if n.starts_with('/') && !n.starts_with("/login") && !n.contains("://") => n.into(),
-        _ => "/dashboard".into(),
-    }
+    match next { Some(v) if v.starts_with('/') && !v.starts_with("/login") && !v.contains("://") => v.into(), _ => "/dashboard".into() }
 }
 
-pub fn check_page_guard(
-    guard: &PageGuard,
-    user: &Option<User>,
-    current_path: &str,
-    next: Option<&str>,
-) -> Option<Response> {
-    if guard.guest && user.is_some() {
-        return Some(Redirect::to(&safe_next(next)).into_response());
-    }
-    if guard.auth && user.is_none() {
-        return Some(Redirect::to(&format!("/login?next={}", current_path)).into_response());
-    }
+pub fn check_page_guard(guard: &PageGuard, user: &Option<User>, current_path: &str, next: Option<&str>) -> Option<Response> {
+    if guard.guest && user.is_some() { return Some(Redirect::to(&safe_next(next)).into_response()); }
+    if guard.auth && user.is_none() { return Some(Redirect::to(&format!("/login?next={current_path}")).into_response()); }
     if !guard.roles.is_empty() {
-        let has_role = user.as_ref().map_or(false, |u| {
-            guard.roles.iter().any(|r| r.eq_ignore_ascii_case(&u.role))
-        });
-        if !has_role {
-            if user.is_none() {
-                return Some(Redirect::to(&format!("/login?next={}", current_path)).into_response());
-            }
-            return Some(
-                (StatusCode::FORBIDDEN, Html("<h1>403 Forbidden</h1><p>Insufficient permissions.</p>".to_string()))
-                    .into_response(),
-            );
+        let allowed = user.as_ref().is_some_and(|u| guard.roles.iter().any(|r| r.eq_ignore_ascii_case(&u.role)));
+        if !allowed {
+            if user.is_none() { return Some(Redirect::to(&format!("/login?next={current_path}")).into_response()); }
+            return Some((StatusCode::FORBIDDEN, Html("<h1>403 Forbidden</h1><p>Insufficient permissions.</p>".to_string())).into_response());
         }
     }
     None
 }
 
-// ---------------------------------------------------------------------------
-// Cookie-Based Flash Messages
-// ---------------------------------------------------------------------------
-
 pub const FLASH_COOKIE: &str = "vlo_flash";
-
 pub fn encode_flash(variant: &str, icon: &str, title: &str, description: &str) -> String {
-    let flash = serde_json::json!({
-        "variant": variant,
-        "icon": icon,
-        "title": title,
-        "description": description
-    });
-    let json_str = serde_json::to_string(&flash).unwrap_or_default();
-    urlencoding::encode(&json_str).to_string()
+    urlencoding::encode(&serde_json::to_string(&json!({"variant": variant, "icon": icon, "title": title, "description": description})).unwrap_or_default()).to_string()
 }
+pub fn decode_flash(encoded: &str) -> Option<serde_json::Value> { let decoded = urlencoding::decode(encoded).ok()?; serde_json::from_str(&decoded).ok() }
+pub fn flash_cookie_header(encoded: &str) -> String { format!("{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=60", FLASH_COOKIE, encoded) }
+pub fn expire_flash_cookie() -> String { format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", FLASH_COOKIE) }
 
-pub fn decode_flash(encoded: &str) -> Option<serde_json::Value> {
-    let decoded = urlencoding::decode(encoded).ok()?;
-    serde_json::from_str(&decoded).ok()
-}
-
-pub fn flash_cookie_header(encoded: &str) -> String {
-    format!("{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=60", FLASH_COOKIE, encoded)
-}
-
-pub fn expire_flash_cookie() -> String {
-    format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", FLASH_COOKIE)
-}
-
-// ---------------------------------------------------------------------------
+// ============================================================================
 // Rate Limiting
-// ---------------------------------------------------------------------------
-static RATE_LIMITS: LazyLock<std::sync::Mutex<std::collections::HashMap<String, Vec<std::time::SystemTime>>>> = 
-    LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-
+// ============================================================================
+static RATE_LIMITS: LazyLock<Mutex<HashMap<String, Vec<SystemTime>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_MAX_ATTEMPTS: usize = 5;
 
 pub fn check_rate_limit(ip: &str) -> bool {
-    let now = std::time::SystemTime::now();
+    let now = SystemTime::now();
     let mut limits = RATE_LIMITS.lock().unwrap();
-    
-    let entries = limits.entry(ip.to_string()).or_insert_with(Vec::new);
-    
-    // Remove entries older than the window
-    entries.retain(|t| {
-        now.duration_since(*t).unwrap_or_default() < std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS)
-    });
-    
-    if entries.len() >= RATE_LIMIT_MAX_ATTEMPTS {
-        return false;
-    }
-    
-    entries.push(now);
-    true
+    let entries = limits.entry(ip.into()).or_default();
+    entries.retain(|time| now.duration_since(*time).unwrap_or_default() < Duration::from_secs(RATE_LIMIT_WINDOW_SECS));
+    if entries.len() >= RATE_LIMIT_MAX_ATTEMPTS { return false; }
+    entries.push(now); true
 }
+
 #[allow(dead_code)]
 pub fn cleanup_rate_limits() {
-    let now = std::time::SystemTime::now();
+    let now = SystemTime::now();
     let mut limits = RATE_LIMITS.lock().unwrap();
     limits.retain(|_, entries| {
-        entries.retain(|t| now.duration_since(*t).unwrap_or_default() < std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS));
+        entries.retain(|time| now.duration_since(*time).unwrap_or_default() < Duration::from_secs(RATE_LIMIT_WINDOW_SECS));
         !entries.is_empty()
     });
 }

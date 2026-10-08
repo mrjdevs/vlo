@@ -13,7 +13,10 @@
   "post_products": "INSERT INTO products (title, description, price, stock) VALUES ({{title}}, {{description}}, {{price}}, {{stock}}); SELECT * FROM products ORDER BY id DESC;",
   "put_products": "UPDATE products SET title = {{title}}, description = {{description}}, price = {{price}}, stock = {{stock}} WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",
   "patch_products": "UPDATE products SET title = {{title}}, description = {{description}}, price = {{price}}, stock = {{stock}} WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",
-  "delete_products": "DELETE FROM products WHERE id = {{id}}; SELECT * FROM products ORDER BY id DESC;",
+
+  "delete_products": {"sql": "DELETE FROM products WHERE id = {{id}}", "roles": ["Admin"]},
+  "update_product": {"sql": "UPDATE products SET title = {{title}}, price = {{price}} WHERE id = {{id}}","roles": ["Admin", "Editor"]},
+
 
   "get_cart": "SELECT * FROM cart ORDER BY id DESC;",
   "post_cart": "INSERT INTO cart (product_name, price, quantity) VALUES ({{product_name}}, {{price}}, {{quantity}}); SELECT * FROM cart ORDER BY id DESC;",
