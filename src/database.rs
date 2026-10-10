@@ -1,4 +1,5 @@
 use crate::state::get_project_root;
+use crate::features::{Feature, is_enabled};
 use serde_json::Value;
 use std::{fs, path::Path, sync::OnceLock};
 use sqlx::{Column, Row, ValueRef};
@@ -11,6 +12,19 @@ pub enum DbPool {
 }
 
 pub static DB_POOL: OnceLock<DbPool> = OnceLock::new();
+
+// ---------------------------------------------------------------------------
+// Safe Pool Access (Prevents Panics)
+// ---------------------------------------------------------------------------
+/// Safely retrieves the database pool. 
+/// Returns a clean error message if the Database feature is disabled or not initialized.
+/// Use this in API handlers instead of `DB_POOL.get().unwrap()`.
+pub fn get_pool() -> Result<&'static DbPool, String> {
+    if !is_enabled(Feature::Database) {
+        return Err("Database feature is disabled".to_string());
+    }
+    DB_POOL.get().ok_or_else(|| "Database pool not initialized. Check your DATABASE_URL.".to_string())
+}
 
 // ---------------------------------------------------------------------------
 // JSON Mapping Macro (Moved from api.rs)
@@ -120,14 +134,10 @@ impl DbPool {
 // Initialization
 // ---------------------------------------------------------------------------
 pub async fn init_db() -> Result<(), String> {
-    let root = get_project_root();
-    let env_path = root.join(".env");
+    // 🔥 REMOVED: dotenvy::from_path is no longer needed here. 
+    // main.rs already loads the .env file before init_db() is called.
 
-    if env_path.exists() {
-        if let Err(err) = dotenvy::from_path(&env_path) {
-            eprintln!("⚠️ Failed to load .env: {}", err);
-        }
-    }
+    let root = get_project_root();
 
     let db_url = match std::env::var("DATABASE_URL") {
         Ok(url) if !url.is_empty() => url,

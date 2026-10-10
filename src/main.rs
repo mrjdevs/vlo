@@ -14,6 +14,7 @@ mod modules;
 mod module_handler;
 mod modifier;
 mod mailer;
+mod features;
 
 use clap::Parser;
 
@@ -23,7 +24,7 @@ use clap::Parser;
     author = "VLO Team",
     version,
     about = "⚡ VLO - Ultra-fast, component-driven Web Framework",
-    long_about = "VLO combines component rendering, SSR, dynamic SQL APIs, hot module reloading, and production deployment into a single runtime."
+    long_about = "VLO combines component rendering, SSR, dynamic SQL APIs, hot module reloading, and production deployment into the single runtime."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -32,6 +33,11 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
+    // 🔥 CRITICAL FIX: Load .env file BEFORE anything else!
+    // This ensures VLO_DEBUG and other env vars are available for LazyLock evaluation.
+    // (If you use `dotenvy` instead of `dotenv`, change this to `dotenvy::dotenv().ok();`)
+    dotenvy::dotenv().ok();
+
     crate::state::init_start_time();
     if let Err(error) = run().await {
         eprintln!("❌ {}", error);
@@ -39,55 +45,86 @@ async fn main() {
     }
 }
 
+// 🔥 HELPER: Conditionally initialize features based on VLO_FEATURES env var
+async fn init_enabled_features(is_build: bool) -> Result<(), String> {
+    if is_enabled(Feature::Database) { 
+        database::init_db().await?; 
+    }
+    if is_enabled(Feature::Auth) { 
+        auth::init_auth_config(); 
+        auth::init_session_secret(); 
+    }
+    // Modules and SSE are usually not needed during a static `build` command
+    if !is_build {
+        if is_enabled(Feature::Modules) { 
+            modules::init_modules()?; 
+        }
+        if is_enabled(Feature::Sse) { 
+            crate::router::init_live_broadcast(); 
+        }
+    }
+    Ok(())
+}
+
+use crate::features::{Feature, init_features, is_enabled};
+
 async fn run() -> Result<(), String> {
+    // 1. Initialize feature flags FIRST (now safe because .env is loaded in main)
+    init_features();
+
     let cli = Cli::parse();
+    
     match cli.command {
         server::Commands::Init { ref name, ref db, ref db_name, no_db } => {
             utils::init_project(name, db, db_name.as_deref(), no_db)?;
         }
+        
         server::Commands::Dev { port, ref host } => {
             state::set_app_mode(state::AppMode::Development);
-            state::init_root_url(); // 🔥 ADD THIS
-            database::init_db().await?;
-            auth::init_auth_config();
-            auth::init_session_secret();
-            modules::init_modules()?; 
+            state::init_root_url();
+            
+            // 🔥 Use conditional initialization instead of hardcoding
+            init_enabled_features(false).await?;
+            
             let port = port.map(|value| value.parse::<u16>().map_err(|_| format!("Invalid port '{}'.", value))).transpose()?;
             server::dev(host.as_deref(), port).await?;
         }
+        
         server::Commands::Build { release } => {
             state::set_app_mode(state::AppMode::Production);
-            state::init_root_url(); // 🔥 ADD THIS
-            database::init_db().await?;
-            modules::init_modules()?;
+            state::init_root_url();
+            
+            // Build only needs DB (for schema/data if required) and Modules (to bundle them)
+            init_enabled_features(true).await?;
+            
             server::build(release)?;
         }
+        
         server::Commands::Serve { port, ref host } => {
             state::set_app_mode(state::AppMode::Production);
-            state::init_root_url(); // 🔥 ADD THIS
-            database::init_db().await?;
-            auth::init_auth_config();
-            auth::init_session_secret();
-            crate::router::init_live_broadcast();
-            modules::init_modules()?; 
+            state::init_root_url();
+            
+            init_enabled_features(false).await?;
+            
             let port = port.map(|value| value.parse::<u16>().map_err(|_| format!("Invalid port '{}'.", value))).transpose()?;
             server::serve(host.as_deref(), port).await?;
         }
+        
         server::Commands::Deploy { ref provider } => {
             state::set_app_mode(state::AppMode::Production);
-            state::init_root_url(); // 🔥 ADD THIS
-            database::init_db().await?;
-            modules::init_modules()?;
-            crate::router::init_live_broadcast();
+            state::init_root_url();
+            
+            init_enabled_features(false).await?;
+            
             server::deploy(provider).await?;
         }
+        
         server::Commands::Cgi => {
             state::set_app_mode(state::AppMode::Production);
-            state::init_root_url(); // 🔥 ADD THIS
-            database::init_db().await?;
-            auth::init_auth_config();
-            auth::init_session_secret();
-            modules::init_modules()?;
+            state::init_root_url();
+            
+            init_enabled_features(false).await?;
+            
             server::cgi().await?;
         }
     }

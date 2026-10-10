@@ -1,7 +1,6 @@
 use crate::{
     api::{execute_api_sql, load_api_actions, strip_server_block},
     component::{render_components, render_tag},
-    database::DB_POOL,
     state::{self, RenderedPage, STYLE_RE},
     template::{
         clean_empty_tags,
@@ -190,7 +189,7 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
             // 🔥 Extract SQL from ApiAction enum
             let sql_template = action_def.sql().to_string();
 
-            if let Some(pool) = DB_POOL.get() {
+            if let Ok(pool) = crate::database::get_pool() {
                 let mut sql_params = serde_json::Map::new();
                 for (key, value) in &params { sql_params.insert(key.clone(), value.clone()); }
 
@@ -609,23 +608,33 @@ pub async fn render_page(
         }
         // ────────────────────────────────────────────────────
 
-        // ─── AUTH & CSRF INJECTION (RESTORED) ───────────────
-        let cfg = crate::auth::auth_config();
-        query.insert("auth_identifier_field".to_string(), cfg.identifier_field.clone());
-        query.insert("auth_password_field".to_string(), cfg.password_field.clone());
+        // ─── AUTH & CSRF INJECTION (CONDITIONAL) ───────────────
+        if crate::features::is_enabled(crate::features::Feature::Auth) {
+            let cfg = crate::auth::auth_config();
+            query.insert("auth_identifier_field".to_string(), cfg.identifier_field.clone());
+            query.insert("auth_password_field".to_string(), cfg.password_field.clone());
 
-        match &auth.user {
-            Some(user) => {
-                query.insert("logged_in".to_string(), "true".to_string());
-                query.insert("user_name".to_string(), user.name.clone());
-                query.insert("user_role".to_string(), user.role.clone());
-                query.insert("user_email".to_string(), user.email.clone());
+            match &auth.user {
+                Some(user) => {
+                    query.insert("logged_in".to_string(), "true".to_string());
+                    query.insert("user_name".to_string(), user.name.clone());
+                    query.insert("user_role".to_string(), user.role.clone());
+                    query.insert("user_email".to_string(), user.email.clone());
+                }
+                None => { query.insert("logged_in".to_string(), String::new()); }
             }
-            None => { query.insert("logged_in".to_string(), String::new()); }
-        }
 
-        if let Some(csrf) = &auth.csrf_token { query.insert("csrf_token".to_string(), csrf.clone()); } 
-        else { query.insert("csrf_token".to_string(), String::new()); }
+            if let Some(csrf) = &auth.csrf_token { 
+                query.insert("csrf_token".to_string(), csrf.clone()); 
+            } else { 
+                query.insert("csrf_token".to_string(), String::new()); 
+            }
+        } else {
+            // 🔥 SAFE DEFAULTS: Provide empty strings when Auth is disabled
+            // so templates using {if logged_in} or {{csrf_token}} don't break.
+            query.insert("logged_in".to_string(), String::new());
+            query.insert("csrf_token".to_string(), String::new());
+        }
         // ────────────────────────────────────────────────────
 
         // ─── PAGINATION VARIABLES (RESTORED) ────────────────

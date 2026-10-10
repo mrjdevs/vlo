@@ -1,5 +1,5 @@
 use crate::{
-    database::{DbPool, DB_POOL},
+    database::DbPool,
     state::get_project_root,
 };
 use axum::{
@@ -445,9 +445,12 @@ pub async fn api_route_handler(
 
     crate::vlo_debug!("🔧 VLO DEBUG: Final SQL parameters = {:?}", params);
 
-    let pool = match DB_POOL.get() {
-        Some(p) => p,
-        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Database not configured"}))).into_response(),
+    let pool = match crate::database::get_pool() {
+        Ok(p) => p,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+            "success": false, 
+            "error": e
+        }))).into_response()
     };
 
     let action_type = if action_name.contains("put") || action_name.contains("patch") || method == Method::PUT || method == Method::PATCH { "updated" }

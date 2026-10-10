@@ -5,6 +5,7 @@ use crate::{
     state::{self, get_project_root},
     template::escape_html_attribute,
 };
+use crate::features::{Feature, is_enabled};
 use axum::{
     http::StatusCode,
     response::IntoResponse,
@@ -28,7 +29,6 @@ use axum::middleware::{self, Next};
 use axum::extract::Request;
 use axum::response::Response;
 use axum::http::header::{CACHE_CONTROL, HeaderValue};
-
 
 // ─── PRODUCTION CACHE: Eliminates disk I/O on every request ───
 struct BuildCache {
@@ -125,18 +125,34 @@ pub enum Commands {
 // Health Check Endpoint
 // ---------------------------------------------------------------------------
 async fn healthz_handler() -> impl IntoResponse {
-    let db_status = crate::database::DB_POOL.get().is_some();
-    let status = if db_status { "healthy" } else { "degraded" };
-    let http_status = if db_status { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    // 🔥 CONDITIONAL: Only report DB status if the feature is enabled
+    let db_status = if is_enabled(Feature::Database) {
+        crate::database::DB_POOL.get().is_some()
+    } else {
+        false // Or true, depending on how you want to report "disabled"
+    };
+    
+    let status = if !is_enabled(Feature::Database) {
+        "healthy (no db)"
+    } else if db_status { 
+        "healthy" 
+    } else { 
+        "degraded" 
+    };
+    
+    let http_status = if status == "degraded" { 
+        StatusCode::SERVICE_UNAVAILABLE 
+    } else { 
+        StatusCode::OK 
+    };
 
     (http_status, axum::Json(serde_json::json!({
         "status": status,
         "uptime_seconds": crate::state::uptime_seconds(),
-        "database": if db_status { "connected" } else { "disconnected" },
+        "database": if !is_enabled(Feature::Database) { "disabled" } else if db_status { "connected" } else { "disconnected" },
         "version": env!("CARGO_PKG_VERSION")
     })))
 }
-
 // ---------------------------------------------------------------------------
 // Request ID Middleware
 // ---------------------------------------------------------------------------
@@ -192,64 +208,136 @@ async fn session_cleanup_task() {
     }
 }
 
-// ─── HELPER 1: Common Routes (No layers yet) ─────────────────────────
+
+// ─── HELPER 1: Build Routes with Conditional Feature Support ─────────────────
 fn build_common_routes() -> Router {
-    Router::new()
+    let mut app = Router::new();
+
+    // ═══════════════════════════════════════════════════════════
+    // ALWAYS REGISTERED: Static files and health check
+    // ═══════════════════════════════════════════════════════════
+    app = app
         .route("/uploads/*path", get(serve_file))
         .route("/healthz", get(healthz_handler))
-        .route("/api/files/upload", axum::routing::post(upload_file))
-        .route("/api/files/:id/download", get(download_file))
-        .route("/api/files/:id", get(get_file).delete(delete_file))
-        
-        // 🔥 CRITICAL: Specific routes MUST be defined BEFORE generic catch-alls
-        .route("/api/auth/login", axum::routing::post(auth::login_handler))
-        .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
-        .route("/api/auth/me", axum::routing::get(auth::me_handler))
-        .route("/api/auth/register", axum::routing::post(auth::register_handler))
-        .route("/api/auth/activate", axum::routing::get(auth::activate_handler))
-        .route("/api/auth/resend-activation", axum::routing::post(auth::resend_activation_handler))
-        .route("/api/auth/forgot-password", axum::routing::post(auth::forgot_password_handler))
-        .route("/api/auth/reset-password", axum::routing::post(auth::reset_password_handler))
+        .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler));
 
-        // Generic API routes (Catch-alls) come LAST
-        .route(
+    // ═══════════════════════════════════════════════════════════
+    // FILES FEATURE: Upload/Download endpoints
+    // ═══════════════════════════════════════════════════════════
+    if is_enabled(Feature::Files) {
+        crate::vlo_debug!("📁 [FEATURE] Files enabled - registering upload/download routes");
+        app = app
+            .route("/api/files/upload", axum::routing::post(upload_file))
+            .route("/api/files/:id/download", get(download_file))
+            .route("/api/files/:id", get(get_file).delete(delete_file));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // AUTH FEATURE: Authentication endpoints
+    // ═══════════════════════════════════════════════════════════
+    if is_enabled(Feature::Auth) {
+        crate::vlo_debug!("🔐 [FEATURE] Auth enabled - registering auth routes");
+        app = app
+            .route("/api/auth/login", axum::routing::post(auth::login_handler))
+            .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
+            .route("/api/auth/me", axum::routing::get(auth::me_handler))
+            .route("/api/auth/register", axum::routing::post(auth::register_handler))
+            .route("/api/auth/activate", axum::routing::get(auth::activate_handler))
+            .route("/api/auth/resend-activation", axum::routing::post(auth::resend_activation_handler))
+            .route("/api/auth/forgot-password", axum::routing::post(auth::forgot_password_handler))
+            .route("/api/auth/reset-password", axum::routing::post(auth::reset_password_handler));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // SSE FEATURE: Real-time broadcast endpoints
+    // ═══════════════════════════════════════════════════════════
+    if is_enabled(Feature::Sse) {
+        crate::vlo_debug!("📡 [FEATURE] SSE enabled - registering broadcast routes");
+        app = app
+            .route("/__vlo_sse", get(crate::router::sse_handler))
+            .route("/api/broadcast", axum::routing::post(broadcast_handler));
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // API FEATURE: Generic CRUD API routes (catch-alls)
+    // ═══════════════════════════════════════════════════════════
+    if is_enabled(Feature::Api) {
+        crate::vlo_debug!("🔌 [FEATURE] API enabled - registering CRUD routes");
+        
+        // Root API endpoint
+        app = app.route(
             "/api",
             get(api_handler_root)
                 .post(api_handler_root)
                 .put(api_handler_root)
                 .patch(api_handler_root)
                 .delete(api_handler_root),
-        )
-        .route(
+        );
+        
+        // Resource endpoints (e.g., /api/products)
+        app = app.route(
             "/api/:resource",
             get(api_handler_path)
                 .post(api_handler_path)
                 .put(api_handler_path)
                 .patch(api_handler_path)
                 .delete(api_handler_path),
-        )
-        .route(
+        );
+        
+        // Resource by ID endpoints (e.g., /api/products/123)
+        app = app.route(
             "/api/:resource/:id",
             get(api_handler_id)
                 .post(api_handler_id)
                 .put(api_handler_id)
                 .patch(api_handler_id)
                 .delete(api_handler_id),
-        )
-        .route("/__vlo_sse", get(crate::router::sse_handler))
-        .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
-        .route("/api/broadcast", axum::routing::post(broadcast_handler))
+        );
+    }
+
+    crate::vlo_debug!("🚀 [ROUTER] Routes built with {} features enabled", crate::features::enabled_features().len());
+    app
 }
 
-// ─── HELPER 2: Apply Common Middleware Layers ────────────────────────
+// ─── HELPER 2: Apply Middleware Layers with Conditional Feature Support ──────
 fn apply_common_layers(app: Router) -> Router {
-    app.layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
+    let mut app = app;
+
+    // ═══════════════════════════════════════════════════════════
+    // ALWAYS APPLIED: Core middleware (compression, caching, etc.)
+    // ═══════════════════════════════════════════════════════════
+    app = app
+        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
         .layer(CompressionLayer::new())
         .layer(middleware::from_fn(cache_middleware))
-        .layer(middleware::from_fn(request_id_middleware))
-        .layer(axum::middleware::from_fn(auth::csrf_middleware))
-        .layer(axum::middleware::from_fn(auth::api_auth_middleware))
-        .layer(axum::middleware::from_fn(auth::session_middleware))
+        .layer(middleware::from_fn(request_id_middleware));
+
+    // ═══════════════════════════════════════════════════════════
+    // AUTH FEATURE: Session and authentication middleware
+    // Order matters: session → api_auth → csrf (inside-out)
+    // ═══════════════════════════════════════════════════════════
+    if is_enabled(Feature::Auth) {
+        crate::vlo_debug!("🔐 [FEATURE] Auth enabled - applying session/auth middleware");
+        app = app
+            .layer(axum::middleware::from_fn(auth::session_middleware));
+        
+        // API auth middleware only if both auth and api are enabled
+        if is_enabled(Feature::Api) {
+            app = app.layer(axum::middleware::from_fn(auth::api_auth_middleware));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // CSRF MIDDLEWARE: Only if auth is enabled
+    // Applied last (outermost layer) so it wraps all state-changing routes
+    // ═══════════════════════════════════════════════════════════
+    if is_enabled(Feature::Auth) {
+        crate::vlo_debug!("🛡️ [FEATURE] Auth enabled - applying CSRF middleware");
+        app = app.layer(axum::middleware::from_fn(auth::csrf_middleware));
+    }
+
+    crate::vlo_debug!("🚀 [MIDDLEWARE] Applied with {} features enabled", crate::features::enabled_features().len());
+    app
 }
 
 // ─── HELPER 3: Common Server Startup Logic ───────────────────────────
@@ -261,7 +349,11 @@ async fn run_server(
     server_type: &str,
 ) -> Result<(), String> {
     state::set_app_mode(mode);
-    crate::router::init_live_broadcast();
+    
+    // 🔥 CONDITIONAL: Only initialize SSE broadcast if enabled
+    if is_enabled(Feature::Sse) {
+        crate::router::init_live_broadcast();
+    }
 
     let host_str = host
         .map(str::to_string)
@@ -290,9 +382,12 @@ async fn run_server(
 
     println!("⚡ VLO {} server: http://{}", server_type, addr);
     
-    // Spawn background cleanup tasks
-    tokio::spawn(rate_limit_cleanup_task());
-    tokio::spawn(session_cleanup_task());
+    // 🔥 CONDITIONAL: Only spawn auth cleanup tasks if Auth is enabled
+    // (Otherwise, session_cleanup_task will call auth_config() and panic!)
+    if is_enabled(Feature::Auth) {
+        tokio::spawn(rate_limit_cleanup_task());
+        tokio::spawn(session_cleanup_task());
+    }
     
     if let Err(error) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
@@ -461,63 +556,68 @@ fn parse_cgi_query(query: &str) -> HashMap<String, String> {
         .collect()
 }
 
+
 async fn serve_build_page(
     build_dir: std::path::PathBuf,
     uri: axum::http::Uri,
     req: Request,
 ) -> impl IntoResponse {
-    // 🔥 FIX: Load manifest and pages into memory ONCE. 
-    // Subsequent requests have ZERO disk I/O for file reads.
+    // 🔥 Load manifest and pages into memory ONCE. 
     ensure_build_cache(&build_dir);
     let cache = BUILD_CACHE.get().unwrap();
 
     let path = uri.path();
 
-    // ─── 1. RESOLVE AUTH ───────────────────────────────────
-    let mut auth = req.extensions().get::<crate::auth::AuthUser>().cloned();
-    if auth.is_none() || auth.as_ref().map_or(true, |a| a.user.is_none()) {
-        let cookie_header = req.headers().get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok());
-        let cookie_name = crate::auth::auth_config().cookie_name.clone();
-        if let Some(header) = cookie_header {
-            if let Some(token) = crate::auth::parse_cookie_header(header, &cookie_name) {
-                let user = crate::auth::get_user_from_session(&token).await;
-                if user.is_some() {
-                    auth = Some(crate::auth::AuthUser {
-                        user,
-                        csrf_token: Some(crate::auth::compute_csrf_token(&token)),
-                        session_token: Some(token),
-                    });
+    // ─── 1. RESOLVE AUTH (Conditional) ───────────────────────────────────
+    let mut auth: Option<crate::auth::AuthUser> = None;
+    if is_enabled(Feature::Auth) {
+        auth = req.extensions().get::<crate::auth::AuthUser>().cloned();
+        if auth.is_none() || auth.as_ref().map_or(true, |a| a.user.is_none()) {
+            let cookie_header = req.headers().get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok());
+            let cookie_name = crate::auth::auth_config().cookie_name.clone();
+            if let Some(header) = cookie_header {
+                if let Some(token) = crate::auth::parse_cookie_header(header, &cookie_name) {
+                    let user = crate::auth::get_user_from_session(&token).await;
+                    if user.is_some() {
+                        auth = Some(crate::auth::AuthUser {
+                            user,
+                            csrf_token: Some(crate::auth::compute_csrf_token(&token)),
+                            session_token: Some(token),
+                        });
+                    }
                 }
             }
         }
     }
 
-    // ─── 2. EXTRACT FLASH EARLY ────────────────────────────
-    let flash_encoded = req.headers().get("cookie")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|h| crate::auth::parse_cookie_header(h, crate::auth::FLASH_COOKIE));
-
+    // ─── 2. EXTRACT FLASH EARLY (Conditional) ────────────────────────────
     let mut flash_value: Option<serde_json::Value> = None;
     let mut flash_html = String::new();
     let mut expire_cookie = false;
 
-    if let Some(encoded) = &flash_encoded {
-        if let Some(flash) = crate::auth::decode_flash(encoded) {
-            let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
-            let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
-            let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
-            let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
-            flash_html = format!(
-                r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div><style>@keyframes vloFlashIn{{from{{opacity:0;transform:translateX(40px)}}to{{opacity:1;transform:translateX(0)}}}}</style>"#,
-                border_color, icon, title, description
-            );
-            flash_value = Some(flash);
-            expire_cookie = true;
+    if is_enabled(Feature::Flash) {
+        let flash_encoded = req.headers().get("cookie")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|h| crate::auth::parse_cookie_header(h, crate::auth::FLASH_COOKIE));
+
+        if let Some(encoded) = &flash_encoded {
+            if let Some(flash) = crate::auth::decode_flash(encoded) {
+                let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
+                let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
+                let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let border_color = match variant { "success" => "#00ff88", "error" => "#ff4444", "warning" => "#ffaa00", _ => "#00f5ff" };
+                flash_html = format!(
+                    r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div><style>@keyframes vloFlashIn{{from{{opacity:0;transform:translateX(40px)}}to{{opacity:1;transform:translateX(0)}}}}</style>"#,
+                    border_color, icon, title, description
+                );
+                flash_value = Some(flash);
+                expire_cookie = true;
+            }
         }
     }
 
-    // ─── 3. CHECK AUTH GUARD (Using cached manifest) ───────
+    // ─── 3. CHECK AUTH GUARD (Conditional) ───────────────────────────────
     let raw_query = uri.query().unwrap_or("");
     let next_decoded = raw_query.split('&').find_map(|pair| {
         let mut parts = pair.splitn(2, '=');
@@ -527,22 +627,24 @@ async fn serve_build_page(
     });
     let next_ref = next_decoded.as_deref();
 
-    if let Some(routes) = cache.manifest.as_object() {
-        if let Some(route_config) = routes.get(path) {
-            let guard = crate::auth::PageGuard {
-                auth: route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false),
-                guest: route_config.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
-                roles: route_config.get("roles").and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
-            };
-            let user = auth.as_ref().and_then(|a| a.user.clone());
-            if let Some(mut response) = crate::auth::check_page_guard(&guard, &user, path, next_ref) {
-                if expire_cookie {
-                    if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
-                        response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+    if is_enabled(Feature::Auth) {
+        if let Some(routes) = cache.manifest.as_object() {
+            if let Some(route_config) = routes.get(path) {
+                let guard = crate::auth::PageGuard {
+                    auth: route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false),
+                    guest: route_config.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
+                    roles: route_config.get("roles").and_then(|v| v.as_array())
+                        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
+                };
+                let user = auth.as_ref().and_then(|a| a.user.clone());
+                if let Some(mut response) = crate::auth::check_page_guard(&guard, &user, path, next_ref) {
+                    if expire_cookie {
+                        if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
+                            response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+                        }
                     }
+                    return response;
                 }
-                return response;
             }
         }
     }
@@ -551,7 +653,7 @@ async fn serve_build_page(
     let lookup_path = if path == "/" { "/".to_string() } else { path.to_string() };
     
     if let Some(html_arc) = cache.pages.get(&lookup_path) {
-        let html = html_arc.as_ref(); // &str (Zero-allocation lookup!)
+        let html = html_arc.as_ref(); 
         
         let query: std::collections::HashMap<String, String> = uri.query().unwrap_or("").split('&')
             .filter_map(|pair| {
@@ -567,47 +669,61 @@ async fn serve_build_page(
             else { context.insert(key.clone(), serde_json::Value::String(value.clone())); }
         }
 
-        let cfg = crate::auth::auth_config();
-        context.insert("auth_identifier_field".to_string(), serde_json::Value::String(cfg.identifier_field.clone()));
-        context.insert("auth_password_field".to_string(), serde_json::Value::String(cfg.password_field.clone()));
+        // Auth Context Injection
+        if is_enabled(Feature::Auth) {
+            let cfg = crate::auth::auth_config();
+            context.insert("auth_identifier_field".to_string(), serde_json::Value::String(cfg.identifier_field.clone()));
+            context.insert("auth_password_field".to_string(), serde_json::Value::String(cfg.password_field.clone()));
 
-        if let Some(auth_user) = &auth {
-            if let Some(user) = &auth_user.user {
-                context.insert("logged_in".to_string(), serde_json::Value::Bool(true));
-                context.insert("user_name".to_string(), serde_json::Value::String(user.name.clone()));
-                context.insert("user_role".to_string(), serde_json::Value::String(user.role.clone()));
-                context.insert("user_email".to_string(), serde_json::Value::String(user.email.clone()));
-            }
-        }
-
-        if let Some(flash) = &flash_value {
-            context.insert("flash_messages".to_string(), serde_json::json!([flash]));
-            if let Some(obj) = flash.as_object() {
-                for (key, value) in obj {
-                    context.insert(format!("flash_{}", key), value.clone());
+            if let Some(auth_user) = &auth {
+                if let Some(user) = &auth_user.user {
+                    context.insert("logged_in".to_string(), serde_json::Value::Bool(true));
+                    context.insert("user_name".to_string(), serde_json::Value::String(user.name.clone()));
+                    context.insert("user_role".to_string(), serde_json::Value::String(user.role.clone()));
+                    context.insert("user_email".to_string(), serde_json::Value::String(user.email.clone()));
                 }
-                if let Some(v) = obj.get("variant") { context.insert("variant".to_string(), v.clone()); }
-                if let Some(v) = obj.get("icon") { context.insert("icon".to_string(), v.clone()); }
-                if let Some(v) = obj.get("title") { context.insert("title".to_string(), v.clone()); }
-                if let Some(v) = obj.get("description") { context.insert("description".to_string(), v.clone()); }
-                let desc_len = obj.get("description").and_then(|v| v.as_str()).map(|s| s.chars().count()).unwrap_or(0);
-                let duration = if desc_len < 30 { "short" } else if desc_len < 80 { "medium" } else { "long" };
-                context.insert("duration".to_string(), serde_json::Value::String(duration.to_string()));
             }
         }
 
-        if !context.contains_key("limit") { context.insert("limit".to_string(), serde_json::Value::Number(20.into())); }
-        if !context.contains_key("page") { context.insert("page".to_string(), serde_json::Value::Number(1.into())); }
-        if !context.contains_key("order") { context.insert("order".to_string(), serde_json::Value::String("asc".to_string())); }
-        if let (Some(p), Some(l)) = (context.get("page").and_then(|v| v.as_i64()), context.get("limit").and_then(|v| v.as_i64())) {
-            let offset = (p.max(1) - 1) * l.max(1);
-            context.insert("offset".to_string(), serde_json::Value::Number(offset.into()));
-            context.insert("prev_page".to_string(), serde_json::Value::Number((p.max(1) - 1).max(1).into()));
-            context.insert("next_page".to_string(), serde_json::Value::Number((p + 1).into()));
+        // Flash Context Injection
+        if is_enabled(Feature::Flash) {
+            if let Some(flash) = &flash_value {
+                context.insert("flash_messages".to_string(), serde_json::json!([flash]));
+                if let Some(obj) = flash.as_object() {
+                    for (key, value) in obj {
+                        context.insert(format!("flash_{}", key), value.clone());
+                    }
+                    if let Some(v) = obj.get("variant") { context.insert("variant".to_string(), v.clone()); }
+                    if let Some(v) = obj.get("icon") { context.insert("icon".to_string(), v.clone()); }
+                    if let Some(v) = obj.get("title") { context.insert("title".to_string(), v.clone()); }
+                    if let Some(v) = obj.get("description") { context.insert("description".to_string(), v.clone()); }
+                    let desc_len = obj.get("description").and_then(|v| v.as_str()).map(|s| s.chars().count()).unwrap_or(0);
+                    let duration = if desc_len < 30 { "short" } else if desc_len < 80 { "medium" } else { "long" };
+                    context.insert("duration".to_string(), serde_json::Value::String(duration.to_string()));
+                }
+            }
         }
 
-        // ─── 5. RESOLVE DATA SOURCES ───────────────────
-        let (html_with_data, computed_vars) = crate::router::resolve_data_sources(html, &context);
+        // Pagination Context Injection
+        if is_enabled(Feature::Pagination) {
+            if !context.contains_key("limit") { context.insert("limit".to_string(), serde_json::Value::Number(20.into())); }
+            if !context.contains_key("page") { context.insert("page".to_string(), serde_json::Value::Number(1.into())); }
+            if !context.contains_key("order") { context.insert("order".to_string(), serde_json::Value::String("asc".to_string())); }
+            if let (Some(p), Some(l)) = (context.get("page").and_then(|v| v.as_i64()), context.get("limit").and_then(|v| v.as_i64())) {
+                let offset = (p.max(1) - 1) * l.max(1);
+                context.insert("offset".to_string(), serde_json::Value::Number(offset.into()));
+                context.insert("prev_page".to_string(), serde_json::Value::Number((p.max(1) - 1).max(1).into()));
+                context.insert("next_page".to_string(), serde_json::Value::Number((p + 1).into()));
+            }
+        }
+
+        // ─── 5. RESOLVE DATA SOURCES (Conditional on Database) ───────
+        let (html_with_data, computed_vars) = if is_enabled(Feature::Database) {
+            crate::router::resolve_data_sources(html, &context)
+        } else {
+            (html.to_string(), std::collections::HashMap::new())
+        };
+        
         let mut context = context;
         for (key, value) in computed_vars { context.insert(key, value); }
 
@@ -629,13 +745,25 @@ async fn serve_build_page(
         let mut final_html = crate::template::render_control_flow(&render_page.html, &render_page.template_context);
 
         // ─── 8. RUNTIME PLACEHOLDER + SCRIPT INJECTION ──
-        let csrf_token = auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default();
-        final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
-        final_html = final_html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
+        
+        // CSRF Token replacement
+        if is_enabled(Feature::Auth) {
+            let csrf_token = auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default();
+            final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", &csrf_token);
+        } else {
+            final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", "");
+        }
+        
+        // Flash placeholder replacement
+        if is_enabled(Feature::Flash) {
+            final_html = final_html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
+        }
 
-        if final_html.contains("class=\"vlo-sync\"") || final_html.contains("data-channel=") {
-            if !final_html.contains("__VLO_SSE__") {
-                let sse_script = r#"<script>
+        // SSE script injection
+        if is_enabled(Feature::Sse) {
+            if final_html.contains("class=\"vlo-sync\"") || final_html.contains("data-channel=") {
+                if !final_html.contains("__VLO_SSE__") {
+                    let sse_script = r#"<script id="__VLO_SSE__">
 (function(){
   if(window.__VLO_SSE__) return;
   window.__VLO_SSE__ = new EventSource("/__vlo_sse");
@@ -657,14 +785,15 @@ async fn serve_build_page(
   window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error:', e); };
 })();
 </script>"#;
-                if let Some(i) = final_html.rfind("</body>") {
-                    final_html.insert_str(i, &format!("{}\n", sse_script));
+                    if let Some(i) = final_html.rfind("</body>") {
+                        final_html.insert_str(i, &format!("{}\n", sse_script));
+                    }
                 }
             }
         }
 
         let mut response = (axum::http::StatusCode::OK, axum::response::Html(final_html)).into_response();
-        if expire_cookie {
+        if expire_cookie && is_enabled(Feature::Flash) {
             if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
                 response.headers_mut().append(axum::http::header::SET_COOKIE, val);
             }
