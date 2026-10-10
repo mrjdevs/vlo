@@ -192,7 +192,6 @@ async fn session_cleanup_task() {
     }
 }
 
-
 // ─── HELPER 1: Common Routes (No layers yet) ─────────────────────────
 fn build_common_routes() -> Router {
     Router::new()
@@ -201,6 +200,18 @@ fn build_common_routes() -> Router {
         .route("/api/files/upload", axum::routing::post(upload_file))
         .route("/api/files/:id/download", get(download_file))
         .route("/api/files/:id", get(get_file).delete(delete_file))
+        
+        // 🔥 CRITICAL: Specific routes MUST be defined BEFORE generic catch-alls
+        .route("/api/auth/login", axum::routing::post(auth::login_handler))
+        .route("/api/auth/logout", axum::routing::post(auth::logout_handler).get(auth::logout_handler))
+        .route("/api/auth/me", axum::routing::get(auth::me_handler))
+        .route("/api/auth/register", axum::routing::post(auth::register_handler))
+        .route("/api/auth/activate", axum::routing::get(auth::activate_handler))
+        .route("/api/auth/resend-activation", axum::routing::post(auth::resend_activation_handler))
+        .route("/api/auth/forgot-password", axum::routing::post(auth::forgot_password_handler))
+        .route("/api/auth/reset-password", axum::routing::post(auth::reset_password_handler))
+
+        // Generic API routes (Catch-alls) come LAST
         .route(
             "/api",
             get(api_handler_root)
@@ -225,12 +236,6 @@ fn build_common_routes() -> Router {
                 .patch(api_handler_id)
                 .delete(api_handler_id),
         )
-        .route("/api/auth/login", axum::routing::post(auth::login_handler))
-        .route(
-            "/api/auth/logout",
-            axum::routing::post(auth::logout_handler).get(auth::logout_handler),
-        )
-        .route("/api/auth/me", axum::routing::get(auth::me_handler))
         .route("/__vlo_sse", get(crate::router::sse_handler))
         .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
         .route("/api/broadcast", axum::routing::post(broadcast_handler))
@@ -966,10 +971,6 @@ pub async fn deploy(provider: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn js_string_literal(value: &str) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
-}
-
 // ─── STATIC REGEXES (Compiled once at startup) ───────────────────────
 static RE_DEL: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-delete\s*=\s*["']([^"']+)["']([^>]*?)>"#).unwrap());
 static RE_PUT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"<([a-zA-Z][a-zA-Z0-9-]*)\s+([^>]*?)v-put\s*=\s*["']([^"']+)["']([^>]*?)>"#).unwrap());
@@ -991,142 +992,350 @@ pub fn resolve_directives(source: &str) -> String {
         rest.find(q).map(|e| &rest[..e])
     }
 
-    // Shared JS generator for POST/PUT forms
-    fn form_submit_js(method: &str, url_js: &str) -> String {
-        format!(
-            "return(function(e){{
-                e.preventDefault();
-                var f=e.currentTarget;
-                if(!f.checkValidity()){{f.reportValidity();return false}}
-                var mp=f.enctype==='multipart/form-data';
-                var h={{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}};
-                if(!mp)h['Content-Type']='application/x-www-form-urlencoded';
-                var bd=mp?new FormData(f):new URLSearchParams(new FormData(f));
-                var un=new URLSearchParams(window.location.search).get('next');
-                if(un&&!bd.has('next')){{bd.append('next',un)}}
-                
-                fetch({url},{{credentials:'same-origin',method:'{method}',headers:h,body:bd}})
-                .then(async function(r){{
-                    var d;try{{d=await r.json()}}catch(x){{d={{}}}}
-                    if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}
-                    if(d.redirect){{window.location.href=d.redirect;return;}}
-                    f.reset();
-                    window.dispatchEvent(new CustomEvent('vlo:mutation'));
-                    var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active')
-                }})
-                .catch(function(e){{
-                    console.error('[VLO {method}]', e);
-                    // 🔥 FIX: Inject error directly into the DOM instantly
-                    var old=f.querySelector('.vlo-inline-error');
-                    if(old)old.remove();
-                    
-                    var err=document.createElement('div');
-                    // Reuses your 'auth-alert' class for login, falls back to inline styles for other forms
-                    err.className='auth-alert vlo-inline-error'; 
-                    err.style.cssText='display:flex;align-items:center;gap:10px;color:#ff4444;margin-bottom:15px;padding:12px;background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);border-radius:8px;font-size:0.9rem;';
-                    err.innerHTML='<span style=\"font-weight:bold;font-size:1.2rem\">!</span><p style=\"margin:0;color:#ff4444\">'+(e.message||'Request failed')+'</p>';
-                    
-                    var btn=f.querySelector('button[type=\"submit\"]');
-                    if(btn) btn.parentNode.insertBefore(err, btn);
-                    else f.appendChild(err);
-                }});
-                return false
-            }})(event)",
-            url = url_js,
-            method = method
-        )
-    }
-
     // ============================================================
-    // v-delete
+    // v-delete (Clean Data-Attribute Approach)
     // ============================================================
     result = RE_DEL.replace_all(&result, |caps: &regex::Captures| {
         let tag = caps.get(1).unwrap().as_str();
         let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
         let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+        
         let url = url_raw.replace("|ajax", "");
-
         let all_attrs = format!("{} {}", attrs_before, attrs_after);
-        let confirm_js = if let Some(msg) = attr_val(&all_attrs, "v-confirm") {
-            format!("confirm({})", js_string_literal(msg))
-        } else { "true".to_string() };
-
+        let confirm_msg = attr_val(&all_attrs, "v-confirm").unwrap_or("");
+        
         let clean_before = strip_vlo_directive_attrs(attrs_before);
         let clean_after = strip_vlo_directive_attrs(attrs_after);
-        let url_js = js_string_literal(&url);
         let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
-
-        let onclick = format!(
-            "return(function(){{if({confirm}){{fetch({url},{{credentials:'same-origin',method:'DELETE',headers:{{'X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}}}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.message||d.details||d.error||'Request failed')}}window.dispatchEvent(new CustomEvent('vlo:mutation'))}}).catch(function(e){{console.error('[VLO DELETE]',e);alert(e.message)}})}}return false}})()",
-            confirm = confirm_js,
-            url = url_js
-        );
-        let onclick_attr = escape_html_attribute(&onclick);
-        format!("<{} {} onclick=\"{}\">", tag, all_clean, onclick_attr)
+        
+        let mut data_attrs = format!("data-vlo-delete=\"{}\"", escape_html_attribute(&url));
+        if !confirm_msg.is_empty() {
+            data_attrs.push_str(&format!(" data-confirm=\"{}\"", escape_html_attribute(confirm_msg)));
+        }
+        
+        format!("<{} {} {}>", tag, all_clean, data_attrs)
     }).into_owned();
 
     // ============================================================
-    // v-put
+    // v-put (Clean Data-Attribute Approach)
     // ============================================================
     result = RE_PUT.replace_all(&result, |caps: &regex::Captures| {
         let tag = caps.get(1).unwrap().as_str();
         let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
         let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+        
         let url = url_raw.replace("|ajax", "");
-
+        let all_attrs = format!("{} {}", attrs_before, attrs_after);
+        
         let clean_before = strip_vlo_directive_attrs(attrs_before);
         let clean_after = strip_vlo_directive_attrs(attrs_after);
-        let url_js = js_string_literal(&url);
         let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
-
-        if tag.eq_ignore_ascii_case("form") {
-            let onsubmit = form_submit_js("PUT", &url_js);
-            let onsubmit_attr = escape_html_attribute(&onsubmit);
-            format!("<{} {} onsubmit=\"{}\">", tag, all_clean, onsubmit_attr)
-        } else {
-            let all_attrs = format!("{} {}", attrs_before, attrs_after);
+        
+        let mut data_attrs = format!("data-vlo-put=\"{}\"", escape_html_attribute(&url));
+        
+        // Non-form buttons get extra data attributes for the prompt logic
+        if !tag.eq_ignore_ascii_case("form") {
             let param = attr_val(&all_attrs, "v-param").unwrap_or("value");
             let prompt = attr_val(&all_attrs, "v-prompt").unwrap_or("Enter new value:");
-            let prompt_js = js_string_literal(prompt);
-            let param_js = js_string_literal(param);
-
-            let onclick = format!(
-                "return(function(){{var v=prompt({prompt});if(v!==null){{fetch({url},{{credentials:'same-origin',method:'PUT',headers:{{'Content-Type':'application/json','X-CSRF-Token':document.querySelector('meta[name=\"csrf-token\"]')?.content||''}},body:JSON.stringify({{{param}:v}})}}).then(async function(r){{var d;try{{d=await r.json()}}catch(x){{d={{}}}}if(!r.ok){{throw new Error(d.details||d.error||'Request failed')}}window.dispatchEvent(new CustomEvent('vlo:mutation'))}}).catch(function(e){{console.error('[VLO PUT]',e);alert(e.message)}})}}return false}})()",
-                prompt = prompt_js,
-                url = url_js,
-                param = param_js
-            );
-            let onclick_attr = escape_html_attribute(&onclick);
-            format!("<{} {} onclick=\"{}\">", tag, all_clean, onclick_attr)
+            data_attrs.push_str(&format!(" data-vlo-param=\"{}\"", escape_html_attribute(param)));
+            data_attrs.push_str(&format!(" data-vlo-prompt=\"{}\"", escape_html_attribute(prompt)));
         }
+        
+        format!("<{} {} {}>", tag, all_clean, data_attrs)
     }).into_owned();
 
     // ============================================================
-    // v-post
+    // v-post (Clean Data-Attribute Approach)
     // ============================================================
     result = RE_POST.replace_all(&result, |caps: &regex::Captures| {
         let tag = caps.get(1).unwrap().as_str();
         let attrs_before = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         let url_raw = caps.get(3).map(|m| m.as_str()).unwrap_or("");
         let attrs_after = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+        
         let url = url_raw.replace("|ajax", "");
-
         let clean_before = strip_vlo_directive_attrs(attrs_before);
         let clean_after = strip_vlo_directive_attrs(attrs_after);
-        let url_js = js_string_literal(&url);
         let all_clean = format!("{} {}", clean_before.trim(), clean_after.trim()).trim().to_string();
-
-        if tag.eq_ignore_ascii_case("form") {
-            let onsubmit = form_submit_js("POST", &url_js);
-            let onsubmit_attr = escape_html_attribute(&onsubmit);
-            format!("<{} {} onsubmit=\"{}\">", tag, all_clean, onsubmit_attr)
-        } else {
-            format!("<{} {}>", tag, all_clean)
-        }
+        
+        let data_attrs = format!("data-vlo-post=\"{}\"", escape_html_attribute(&url));
+        
+        format!("<{} {} {}>", tag, all_clean, data_attrs)
     }).into_owned();
 
     vlo_debug!("🧩 [VLO DIRECTIVES] Resolved HTML: {} chars, {} rows", result.len(), result.lines().count());
     result
 }
+
+// ---------------------------------------------------------------------------
+// Conditional Script Injection
+// ---------------------------------------------------------------------------
+pub fn inject_conditional_scripts(source: &str) -> String {
+    let has_delete = source.contains("data-vlo-delete");
+    let has_put = source.contains("data-vlo-put");
+    let has_post = source.contains("data-vlo-post");
+    let has_modal = source.contains("data-modal-open") || source.contains("data-modal-close");
+
+    if !has_delete && !has_put && !has_post && !has_modal {
+        return source.to_string();
+    }
+
+    let mut scripts = Vec::new();
+    
+    // Shared helpers (only if needed)
+    if has_delete || has_put || has_post {
+        scripts.push(VLO_SHARED_RESPONSE_HANDLER_JS);
+    }
+    
+    // Conditional handlers
+    if has_delete { scripts.push(VLO_DELETE_HANDLER_JS); }
+    if has_put { scripts.push(VLO_PUT_HANDLER_JS); }
+    if has_post { scripts.push(VLO_POST_HANDLER_JS); }
+    if has_modal { scripts.push(VLO_MODAL_HANDLER_JS); }
+
+    let combined = scripts.join("\n");
+    let script_block = format!("<script id=\"__VLO_DIRECTIVE_HANDLERS__\">\n{}\n</script>", combined);
+
+    if let Some(pos) = source.rfind("</body>") {
+        let mut result = String::with_capacity(source.len() + script_block.len());
+        result.push_str(&source[..pos]);
+        result.push_str(&script_block);
+        result.push_str(&source[pos..]);
+        result
+    } else {
+        format!("{}\n{}", source, script_block)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JavaScript Handler Constants
+// ---------------------------------------------------------------------------
+
+const VLO_SHARED_RESPONSE_HANDLER_JS: &str = r#"
+function vloHandleResponse(r, form) {
+    return r.json().then(function(d) {
+        if (!r.ok) {
+            if (d.activation_required) {
+                var old = form ? form.querySelector('.vlo-inline-error') : null;
+                if (old) old.remove();
+                var warn = document.createElement('div');
+                warn.className = 'auth-alert vlo-inline-error'; 
+                warn.style.cssText = 'display:flex;flex-direction:column;gap:10px;margin-bottom:15px;padding:16px;background:rgba(0,245,255,0.05);border:1px solid rgba(0,245,255,0.25);border-radius:8px;font-size:0.9rem;';
+                warn.innerHTML = '<div style="display:flex;align-items:center;gap:10px"><span style="background:rgba(0,245,255,0.1);color:#00f5ff;font-weight:bold;font-size:1.2rem;width:24px;height:24px;display:grid;place-items:center;border-radius:7px">i</span><p style="margin:0;color:#80f0ff">' + (d.error || 'Account is not active') + ' Please check your email.</p></div><button type="button" onclick="openResendActivationModal()" style="margin-top:8px;padding:8px 12px;background:#00f5ff;color:#000;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:0.8rem;">Resend Activation Email →</button>';
+                if (form) { var btn = form.querySelector('button[type="submit"]'); if (btn) btn.parentNode.insertBefore(warn, btn); else form.appendChild(warn); }
+                throw new Error("activation_required");
+            }
+            if (d.warning || (r.ok && d.success && d.warning)) {
+                var old = form ? form.querySelector('.vlo-inline-error') : null;
+                if (old) old.remove();
+                var warn = document.createElement('div');
+                warn.className = 'auth-alert vlo-inline-error'; 
+                warn.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:15px;padding:12px;background:rgba(255,170,0,0.1);border:1px solid rgba(255,170,0,0.3);border-radius:8px;font-size:0.9rem;';
+                warn.innerHTML = '<span style="font-weight:bold;font-size:1.2rem">⚠️</span><p style="margin:0;color:#ffaa00">' + (d.message || 'Warning') + '</p>';
+                if (form) {
+                    var btn = form.querySelector('button[type="submit"]');
+                    if (btn) btn.parentNode.insertBefore(warn, btn); else form.appendChild(warn);
+                    setTimeout(function() { var m = form.closest('.vlo-modal-overlay'); if (m) m.classList.remove('active'); else window.location.reload(); }, 4000);
+                }
+                throw new Error("warning");
+            }
+            throw new Error(d.error || d.details || d.message || 'Request failed');
+        }
+        if (d.redirect) { window.location.href = d.redirect; return; }
+        if (form) {
+            var old = form.querySelector('.vlo-inline-error'); if (old) old.remove();
+            if (d.message) {
+                var succ = document.createElement('div');
+                succ.className = 'auth-alert vlo-inline-error'; 
+                succ.style.cssText = 'display:flex;align-items:center;gap:10px;color:#00ff88;margin-bottom:15px;padding:12px;background:rgba(0,255,136,0.1);border:1px solid rgba(0,255,136,0.3);border-radius:8px;font-size:0.9rem;';
+                succ.innerHTML = '<span style="font-weight:bold;font-size:1.2rem">✓</span><p style="margin:0;color:#00ff88">' + d.message + '</p>';
+                var btn = form.querySelector('button[type="submit"]');
+                if (btn) btn.parentNode.insertBefore(succ, btn); else form.appendChild(succ);
+            }
+            form.reset();
+            setTimeout(function() { var m = form.closest('.vlo-modal-overlay'); if (m) m.classList.remove('active'); else window.location.reload(); }, 2000);
+        }
+        window.dispatchEvent(new CustomEvent('vlo:mutation'));
+        return d;
+    });
+}
+
+function vloShowError(e, form) {
+    if (e.message === "activation_required" || e.message === "warning") return;
+    console.error('[VLO API]', e);
+    if (!form) {
+        var t = document.createElement('div');
+        t.className = 'vlo-flash';
+        t.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';
+        t.innerHTML = '<span style="font-size:1.4rem">⚠️</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">' + (e.message || 'Request failed') + '</span></div>';
+        document.body.appendChild(t);
+        setTimeout(function() { t.style.transition = 'opacity 0.4s'; t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 400); }, 4000);
+        return;
+    }
+    var old = form.querySelector('.vlo-inline-error'); if (old) old.remove();
+    var err = document.createElement('div');
+    err.className = 'auth-alert vlo-inline-error'; 
+    err.style.cssText = 'display:flex;align-items:center;gap:10px;color:#ff4444;margin-bottom:15px;padding:12px;background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);border-radius:8px;font-size:0.9rem;';
+    err.innerHTML = '<span style="font-weight:bold;font-size:1.2rem">!</span><p style="margin:0;color:#ff4444">' + (e.message || 'Request failed') + '</p>';
+    var btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.parentNode.insertBefore(err, btn); else form.appendChild(err);
+}
+"#;
+
+const VLO_DELETE_HANDLER_JS: &str = r#"
+document.addEventListener('click', function(e) {
+    const btn = e.target.closest('[data-vlo-delete]');
+    if (!btn) return;
+    e.preventDefault();
+    const url = btn.getAttribute('data-vlo-delete');
+    const confirmMsg = btn.getAttribute('data-confirm');
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    const origText = btn.innerText;
+    btn.innerText = 'Deleting...';
+    btn.disabled = true;
+    fetch(url, { credentials: 'same-origin', method: 'DELETE', headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || '' } })
+    .then(async function(r) {
+        var d; try { d = await r.json() } catch(x) { d = {} }
+        if (!r.ok) throw new Error(d.error || d.details || d.message || 'Request failed');
+        window.dispatchEvent(new CustomEvent('vlo:mutation'));
+    })
+    .catch(function(e) {
+        console.error('[VLO DELETE]', e);
+        var t = document.createElement('div');
+        t.className = 'vlo-flash';
+        t.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';
+        t.innerHTML = '<span style="font-size:1.4rem">⚠️</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">' + (e.message || 'Request failed') + '</span></div>';
+        document.body.appendChild(t);
+        setTimeout(function() { t.style.transition = 'opacity 0.4s'; t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 400); }, 4000);
+    })
+    .finally(function() { btn.innerText = origText; btn.disabled = false; });
+});
+"#;
+
+const VLO_POST_HANDLER_JS: &str = r#"
+document.addEventListener('submit', function(e) {
+    const form = e.target;
+    const url = form.getAttribute('data-vlo-post');
+    if (!url) return;
+    e.preventDefault();
+    if (!form.checkValidity()) { form.reportValidity(); return; }
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.dataset.origText = submitBtn.innerText; submitBtn.innerText = 'Processing...'; }
+    const mp = form.enctype === 'multipart/form-data';
+    const h = { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || '' };
+    if (!mp) h['Content-Type'] = 'application/x-www-form-urlencoded';
+    const bd = mp ? new FormData(form) : new URLSearchParams(new FormData(form));
+    const un = new URLSearchParams(window.location.search).get('next');
+    if (un && !bd.has('next')) bd.append('next', un);
+    fetch(url, { credentials: 'same-origin', method: 'POST', headers: h, body: bd })
+        .then(function(r) { return vloHandleResponse(r, form); })
+        .catch(function(e) { vloShowError(e, form); })
+        .finally(function() { if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = submitBtn.dataset.origText || 'Submit'; } });
+});
+"#;
+
+const VLO_PUT_HANDLER_JS: &str = r#"
+document.addEventListener('submit', function(e) {
+    const form = e.target;
+    const url = form.getAttribute('data-vlo-put');
+    if (!url) return;
+    e.preventDefault();
+    if (!form.checkValidity()) { form.reportValidity(); return; }
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.dataset.origText = submitBtn.innerText; submitBtn.innerText = 'Saving...'; }
+    const mp = form.enctype === 'multipart/form-data';
+    const h = { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || '' };
+    if (!mp) h['Content-Type'] = 'application/x-www-form-urlencoded';
+    const bd = mp ? new FormData(form) : new URLSearchParams(new FormData(form));
+    fetch(url, { credentials: 'same-origin', method: 'PUT', headers: h, body: bd })
+        .then(function(r) { return vloHandleResponse(r, form); })
+        .catch(function(e) { vloShowError(e, form); })
+        .finally(function() { if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = submitBtn.dataset.origText || 'Save'; } });
+});
+
+document.addEventListener('click', function(e) {
+    const btn = e.target.closest('[data-vlo-put]');
+    if (!btn || btn.tagName.toLowerCase() === 'form') return;
+    e.preventDefault();
+    const url = btn.getAttribute('data-vlo-put');
+    const param = btn.getAttribute('data-vlo-param') || 'value';
+    const promptMsg = btn.getAttribute('data-vlo-prompt') || 'Enter new value:';
+    const v = prompt(promptMsg);
+    if (v === null) return;
+    const origText = btn.innerText;
+    btn.innerText = 'Saving...';
+    btn.disabled = true;
+    fetch(url, { credentials: 'same-origin', method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || '' }, body: JSON.stringify({ [param]: v }) })
+    .then(async function(r) {
+        var d; try { d = await r.json() } catch(x) { d = {} }
+        if (!r.ok) throw new Error(d.error || d.details || d.message || 'Request failed');
+        window.dispatchEvent(new CustomEvent('vlo:mutation'));
+    })
+    .catch(function(e) {
+        console.error('[VLO PUT]', e);
+        var t = document.createElement('div');
+        t.className = 'vlo-flash';
+        t.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';
+        t.innerHTML = '<span style="font-size:1.4rem">⚠️</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">' + (e.message || 'Request failed') + '</span></div>';
+        document.body.appendChild(t);
+        setTimeout(function() { t.style.transition = 'opacity 0.4s'; t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 400); }, 4000);
+    })
+    .finally(function() { btn.innerText = origText; btn.disabled = false; });
+});
+"#;
+
+const VLO_MODAL_HANDLER_JS: &str = r#"
+// 🔥 VLO Modal Handler (Event Delegation)
+// Supports: data-modal-open="id", data-modal-close="id", backdrop click, ESC key
+document.addEventListener('click', function(e) {
+    // Helper: find modal by ID, class, or closest fallback
+    function findModal(trigger, id) {
+        if (id) {
+            // 1. Try exact ID match
+            var modal = document.getElementById(id);
+            if (modal) return modal;
+            // 2. Try class match (for dynamic IDs like "edit-123")
+            modal = document.querySelector('.' + id);
+            if (modal) return modal;
+        }
+        // 3. Fallback: closest modal overlay
+        return trigger.closest('.vlo-modal-overlay');
+    }
+    
+    // Handle OPEN
+    var openBtn = e.target.closest('[data-modal-open]');
+    if (openBtn) {
+        e.preventDefault();
+        var id = openBtn.getAttribute('data-modal-open');
+        var modal = findModal(openBtn, id);
+        if (modal) modal.classList.add('active');
+        return;
+    }
+    
+    // Handle CLOSE
+    var closeBtn = e.target.closest('[data-modal-close]');
+    if (closeBtn) {
+        e.preventDefault();
+        var id = closeBtn.getAttribute('data-modal-close');
+        var modal = findModal(closeBtn, id);
+        if (modal) modal.classList.remove('active');
+        return;
+    }
+    
+    // Handle BACKDROP CLICK (click on overlay but not on modal content)
+    var overlay = e.target.closest('.vlo-modal-overlay');
+    if (overlay && e.target === overlay) {
+        overlay.classList.remove('active');
+    }
+});
+
+// Handle ESC key to close active modal
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        var active = document.querySelector('.vlo-modal-overlay.active');
+        if (active) active.classList.remove('active');
+    }
+});
+"#;

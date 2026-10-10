@@ -186,12 +186,14 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
     let params = params.clone();
     let fetch_logic = async move {
         let actions = load_api_actions().unwrap_or_default();
-        if let Some(sql_template) = actions.get(&action) {
+        if let Some(action_def) = actions.get(&action) {
+            // 🔥 Extract SQL from ApiAction enum
+            let sql_template = action_def.sql().to_string();
+
             if let Some(pool) = DB_POOL.get() {
                 let mut sql_params = serde_json::Map::new();
                 for (key, value) in &params { sql_params.insert(key.clone(), value.clone()); }
 
-                // ─── ENSURE PAGINATION DEFAULTS ─────────────────────────
                 if !sql_params.contains_key("limit") { sql_params.insert("limit".to_string(), Value::Number(20.into())); }
                 if !sql_params.contains_key("page") { sql_params.insert("page".to_string(), Value::Number(1.into())); }
                 if let (Some(page_val), Some(limit_val)) = (sql_params.get("page"), sql_params.get("limit")) {
@@ -204,39 +206,28 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
                         sql_params.insert("limit".to_string(), Value::Number(safe_limit.into()));
                     }
                 }
-                // ─────────────────────────────────────────────────────────
-                // ─── SEARCH INJECTION (dynamic columns) ─────────────────
+
                 let mut sql = sql_template.clone();
-                
                 crate::vlo_debug!("🔍 SORT/SEARCH [{}]: Original SQL = {}", action, sql);
-                
+
                 if let Some(search_val) = params.get("search") {
                     if let Some(search) = search_val.as_str() {
                         if !search.trim().is_empty() {
                             let safe_search = search.replace("'", "''").replace('%', "\\%").replace('_', "\\_");
-                            
-                            // Read columns from _columns param, default to "title,description"
                             let columns_str = params.get("_columns")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("title,description");
-                            
-                            // Validate column names (only alphanumeric and underscore)
                             let column_list: Vec<&str> = columns_str
                                 .split(',')
                                 .map(|s| s.trim())
                                 .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
                                 .collect();
-                            
                             if !column_list.is_empty() {
                                 let like_parts: Vec<String> = column_list
                                     .iter()
                                     .map(|col| format!("{} LIKE '%{}%'", col, safe_search))
                                     .collect();
-                                
                                 let where_clause = format!(" WHERE ({})", like_parts.join(" OR "));
-                                
-                                crate::vlo_debug!("🔍 SORT/SEARCH [{}]: Search columns = {:?}, WHERE = {}", action, column_list, where_clause);
-                                
                                 let upper = sql.to_uppercase();
                                 if let Some(pos) = upper.find(" ORDER BY ") {
                                     sql = format!("{}{}{}", &sql[..pos], where_clause, &sql[pos..]);
@@ -249,8 +240,7 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
                         }
                     }
                 }
-                
-                // ─── SORT INJECTION ───────────────────────────────────────
+
                 if let Some(sort_val) = params.get("sort") {
                     if let Some(sort_col) = sort_val.as_str() {
                         if !sort_col.trim().is_empty() && sort_col.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
@@ -259,9 +249,6 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
                                 .unwrap_or("asc");
                             let safe_order = if order.eq_ignore_ascii_case("desc") { "DESC" } else { "ASC" };
                             let order_clause = format!(" ORDER BY {} {}", sort_col, safe_order);
-                            
-                            crate::vlo_debug!("🔍 SORT/SEARCH [{}]: Sort = {} {}", action, sort_col, safe_order);
-                            
                             let upper = sql.to_uppercase();
                             if let Some(pos) = upper.find(" ORDER BY ") {
                                 let after_order = &sql[pos..];
@@ -278,13 +265,8 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
                         }
                     }
                 }
-                
-                crate::vlo_debug!("🔍 SORT/SEARCH [{}]: Final SQL = {}", action, sql);
-                // ─────────────────────────────────────────────────────────
-                // ─────────────────────────────────────────────────────────
 
                 if let Ok(mut res) = execute_api_sql(pool, &sql, &sql_params).await {
-                    // ─── AUTO-PAGINATION FOR DATA-SOURCE BLOCKS ─────────────
                     if action.starts_with("get_") {
                         let count_sql = crate::api::generate_count_sql(&sql);
                         if !count_sql.is_empty() {
@@ -295,16 +277,13 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
                                             let page = sql_params.get("page").and_then(|v| v.as_i64()).unwrap_or(1);
                                             let limit = sql_params.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
                                             let total_pages = (total as f64 / limit as f64).ceil() as i64;
-                                            
                                             let pagination = serde_json::json!({
                                                 "total": total, "page": page, "limit": limit,
                                                 "total_pages": total_pages,
                                                 "has_next": page < total_pages, "has_prev": page > 1
                                             });
-                                            
                                             if let Some(obj) = res.as_object_mut() {
                                                 obj.insert("pagination".to_string(), pagination);
-                                                crate::vlo_debug!("✅ PAGINATION [{}]: {} total records, page {} of {}", action, total, page, total_pages);
                                             }
                                         }
                                     }
@@ -312,19 +291,16 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
                             }
                         }
                     }
-                    // ─────────────────────────────────────────────────────────
-                    return res; 
+                    return res;
                 }
             }
         }
         serde_json::json!({ "data": [], "success": false })
     };
 
-    // 🔥 FIX: Use block_in_place to avoid starving the Tokio runtime
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         tokio::task::block_in_place(|| handle.block_on(fetch_logic))
     } else {
-        // Fallback for CLI/build contexts where no Tokio runtime is active
         DATA_RT.block_on(fetch_logic)
     }
 }
@@ -434,19 +410,31 @@ pub fn render_vlo_for_build_at(page_path: &str, source: String) -> RenderedPage 
         if source == previous { break; }
     }
 
-    source = crate::server::resolve_directives(&source);
-
+    // ========================================================================
+    // 🔥 CRITICAL FIX: Template processing MUST finish BEFORE resolving directives
+    // ========================================================================
+    
     let (source_with_runtime_data_sources, runtime_data_sources) = preserve_runtime_data_sources(&source);
     source = source_with_runtime_data_sources;
 
+    // 1. Render control flow FIRST (so it doesn't eat the { } in our JS later)
     source = render_control_flow_for_build(&source, &context.template_context);
+    
+    // 2. Restore data sources
     source = restore_runtime_data_sources(&source, &runtime_data_sources);
 
+    // 3. Restore runtime interpolations
     for (index, interpolation) in runtime_interpolations.iter().enumerate() {
         let marker = format!("__VLO_RUNTIME_DOTTED_INTERPOLATION_{}__", index);
         source = source.replace(&marker, interpolation);
     }
     source = restore_runtime_query_interpolations(&source, &runtime_query_interpolations);
+
+    // 4. FINALLY: Resolve directives. 
+    // The template engine is now 100% done. The { and } in the generated 
+    // JavaScript are completely safe from being stripped out!
+    source = crate::server::resolve_directives(&source);
+    source = crate::server::inject_conditional_scripts(&source);
 
     context.html = clean_empty_tags(&source);
     context
@@ -529,6 +517,7 @@ pub fn render_vlo_with_query_at(page_path: &str, source: String, query: &HashMap
 
     // ─── STEP 5: Directives (v-post, v-put, v-delete) ───
     source = crate::server::resolve_directives(&source);
+    source = crate::server::inject_conditional_scripts(&source);
 
     if query.contains_key("status") || query.contains_key("action") {
         source.push_str(r#"<script>

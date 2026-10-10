@@ -1,6 +1,4 @@
-<BaseLayout title="Project Guidelines" 
-    footer='<Footer />'
->
+<BaseLayout title="Project Guidelines" footer='<Footer />'>
     <div class="guidelines-page">
         <header class="guidelines-hero">
             <div class="hero-badge"><span class="pulse"></span> VLO PROJECT GUIDELINES</div>
@@ -11,6 +9,8 @@
                 <span>✦ Components</span>
                 <span>✦ Templating</span>
                 <span>✦ Modules</span>
+                <span>✦ Authentication</span>
+                <span>✦ Email</span>
                 <span>✦ Flash Messages</span>
                 <span>✦ Pagination</span>
                 <span>✦ Branding</span>
@@ -28,20 +28,25 @@
                     <a href="#props"><span>05</span> Props</a>
                     <a href="#templating"><span>06</span> Templating</a>
                     <a href="#modifiers"><span>06a</span> Modifiers</a>
-                    <a href="#pages"><span>07</span> Pages</a>
-                    <a href="#layouts"><span>08</span> Layouts</a>
-                    <a href="#styling"><span>09</span> Styling</a>
-                    <a href="#navbar"><span>10</span> Navbar</a>
-                    <a href="#branding"><span>11</span> Branding</a>
-                    <a href="#performance"><span>12</span> Performance</a>
-                    <a href="#accessibility"><span>13</span> Accessibility</a>
-                    <a href="#security"><span>14</span> Security</a>
-                    <a href="#modules"><span>15</span> Modules & Charting</a>
-                    <a href="#api-database"><span>16</span> API & Database</a>
-                    <a href="#flash"><span>17</span> Flash Messages</a>
-                    <a href="#pagination"><span>18</span> Pagination</a>
-                    <a href="#workflow"><span>19</span> Development Workflow</a>
-                    <a href="#checklist"><span>20</span> Checklist</a>
+                    <a href="#directives"><span>06b</span> Directives</a>
+                    <a href="#authentication"><span>07</span> Authentication</a>
+                    <a href="#page-guards"><span>08</span> Page Guards</a>
+                    <a href="#api-security"><span>09</span> API Security</a>
+                    <a href="#pages"><span>10</span> Pages</a>
+                    <a href="#layouts"><span>11</span> Layouts</a>
+                    <a href="#styling"><span>12</span> Styling</a>
+                    <a href="#navbar"><span>13</span> Navbar</a>
+                    <a href="#branding"><span>14</span> Branding</a>
+                    <a href="#performance"><span>15</span> Performance</a>
+                    <a href="#accessibility"><span>16</span> Accessibility</a>
+                    <a href="#security"><span>17</span> Security</a>
+                    <a href="#modules"><span>18</span> Modules & Charting</a>
+                    <a href="#api-database"><span>19</span> API & Database</a>
+                    <a href="#flash"><span>20</span> Flash Messages</a>
+                    <a href="#pagination"><span>21</span> Pagination</a>
+                    <a href="#email"><span>22</span> Email & Mailer</a>
+                    <a href="#workflow"><span>23</span> Development Workflow</a>
+                    <a href="#checklist"><span>24</span> Checklist</a>
                 </nav>
                 <div class="sidebar-card">
                     <div class="sidebar-icon">✦</div>
@@ -86,6 +91,7 @@
 │   ├── home.vlo
 │   ├── about.vlo
 │   ├── docs.vlo
+│   ├── login.vlo
 │   └── admin/
 │       ├── users.vlo
 │       └── dashboard.vlo
@@ -109,6 +115,10 @@
 │   ├── MainNav.vlo
 │   └── admin/
 │       └── AdminLayout.vlo
+├── email_templates/
+│   ├── welcome.html
+│   ├── reset_password.html
+│   └── activation_reminder.html
 ├── modules/
 │   └── charting/
 │       ├── module.json
@@ -122,6 +132,7 @@
                         <div><strong>pages/</strong><p>Application routes and complete pages. Supports subdirectories.</p></div>
                         <div><strong>components/</strong><p>Reusable UI building blocks.</p></div>
                         <div><strong>layouts/</strong><p>Shared page structures with automatic hierarchical resolution.</p></div>
+                        <div><strong>email_templates/</strong><p>HTML email templates with subject extraction and modifier support.</p></div>
                         <div><strong>modules/</strong><p>Self-contained extension packages (components, styles, handlers).</p></div>
                         <div><strong>schema.sql</strong><p>Database schema (DDL statements for all tables).</p></div>
                     </div>
@@ -314,41 +325,14 @@
                         <div><strong>data-source="/api/products"</strong><p>Calls the <code>get_products</code> action defined in <code>pages/api/api.vlo</code>.</p></div>
                         <div><strong>Server-side only</strong><p>Data is fetched during rendering. No client-side fetch needed.</p></div>
                     </div>
-                    <h3>Form Directives</h3>
-                    <p class="component-note">VLO provides declarative directives for form submission and actions. These are compiled into fetch handlers during server-side rendering. CSRF tokens are automatically attached.</p>
-                    <div class="naming-table">
-                        <div class="naming-row header"><span>Directive</span><span>Usage</span><span>Compiles to</span></div>
-                        <div class="naming-row"><span>v-post</span><span>&lt;form v-post="/api/products"&gt;</span><span>fetch(..., method POST)</span></div>
-                        <div class="naming-row"><span>v-put</span><span>&lt;form v-put="/api/products/5"&gt;</span><span>fetch(..., method PUT)</span></div>
-                        <div class="naming-row"><span>v-delete</span><span>&lt;button v-delete="/api/products/5"&gt;</span><span>fetch(..., method DELETE)</span></div>
-                    </div>
-                    <div class="code-card">
-                        <div class="code-header"><span>Directive examples</span><span>VLO</span></div>
-                        <pre><code>&lt;!-- POST form --&gt;
-&lt;form v-post="/api/products" enctype="multipart/form-data"&gt;
-    &lt;input name="title" required /&gt;
-    &lt;input name="price" type="number" required /&gt;
-    &lt;button type="submit"&gt;Add Product&lt;/button&gt;
-&lt;/form&gt;
-
-&lt;!-- PUT form (edit) --&gt;
-&lt;form v-put="/api/products/{{product.id}}"&gt;
-    &lt;input name="title" value="{{product.title}}" /&gt;
-    &lt;button type="submit"&gt;Save Changes&lt;/button&gt;
-&lt;/form&gt;
-
-&lt;!-- DELETE button with confirmation --&gt;
-&lt;button v-delete="/api/products/{{product.id}}" v-confirm="Delete this product?"&gt;
-    Delete Product
-&lt;/button&gt;</code></pre>
-                    </div>
+                    
+                    <h3>Form Encoding</h3>
+                    <p class="component-note">VLO automatically handles URL-encoded form data, including proper conversion of <code>+</code> to spaces according to the <code>application/x-www-form-urlencoded</code> specification.</p>
                     <div class="info-grid">
-                        <div><strong>Auto-reload</strong><p>After POST/PUT/DELETE, the page reloads preserving the current URL (including pagination).</p></div>
-                        <div><strong>CSRF protection</strong><p>X-CSRF-Token header is automatically attached from the meta tag.</p></div>
-                        <div><strong>Toast integration</strong><p>Success/error toasts appear automatically via cookie-based flash messages.</p></div>
-                        <div><strong>Clean URLs</strong><p>No <code>?status=success</code> pollution. The page reloads at its clean URL.</p></div>
-                                                <div><strong>Login Redirects</strong><p>If a <code>v-post</code> form submits to a login endpoint, VLO automatically captures the <code>?next=</code> URL parameter and redirects the browser upon successful authentication.</p></div>
+                        <div><strong>Automatic decoding</strong><p>Form submissions with <code>enctype="application/x-www-form-urlencoded"</code> automatically decode <code>+</code> as spaces.</p></div>
+                        <div><strong>JSON support</strong><p>Forms with <code>enctype="application/json"</code> are parsed as JSON objects.</p></div>
                     </div>
+
                     <h3>Real-time Updates (SSE)</h3>
                     <p class="component-note">VLO includes a built-in Server-Sent Events (SSE) broadcast system. Use the <code>|sync</code> modifier to make any value update instantly across all connected browsers when a mutation occurs.</p>
                     <div class="code-card">
@@ -428,8 +412,285 @@
                     </div>
                 </section>
 
-                <section class="doc-section" id="pages">
+                <section class="doc-section" id="directives">
+                    <div class="section-number">06b</div>
+                    <h2>Directives</h2>
+                    <p class="section-lead">VLO provides declarative directives for form submission and actions using a zero-inline-JS architecture with event delegation.</p>
+                    
+                    <h3>Form & Action Directives</h3>
+                    <p class="component-note">Directives compile into standardized <code>data-vlo-*</code> attributes. VLO automatically injects a single, optimized event-delegation script at the bottom of the page only when needed.</p>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Directive</span><span>Usage</span><span>Compiles to</span></div>
+                        <div class="naming-row"><span>v-post</span><span>&lt;form v-post="/api/products"&gt;</span><span>data-vlo-post="/api/products"</span></div>
+                        <div class="naming-row"><span>v-put</span><span>&lt;form v-put="/api/products/5"&gt;</span><span>data-vlo-put="/api/products/5"</span></div>
+                        <div class="naming-row"><span>v-delete</span><span>&lt;button v-delete="/api/products/5"&gt;</span><span>data-vlo-delete="/api/products/5"</span></div>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Zero Inline JS</strong><p>No more massive <code>onclick</code> attributes. HTML remains clean, readable, and safe from template engine curly-brace mangling.</p></div>
+                        <div><strong>Conditional Injection</strong><p>The handler script is only injected if the page actually uses the directive, keeping pages lightweight.</p></div>
+                        <div><strong>Event Delegation</strong><p>One global event listener handles all buttons/forms with the directive, reducing memory footprint.</p></div>
+                    </div>
+
+                    <h3>Modal Directives</h3>
+                    <p class="component-note">Open and close modals declaratively without writing custom JavaScript. VLO automatically injects the modal handler script, which supports ID lookup, class fallbacks, backdrop clicks, and ESC key dismissal.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Modal usage</span><span>VLO</span></div>
+                        <pre><code>&lt;button data-modal-open="edit-modal"&gt;Edit&lt;/button&gt;
+
+&lt;div id="edit-modal" class="vlo-modal-overlay"&gt;
+    &lt;div class="vlo-modal-box"&gt;
+        &lt;button data-modal-close="edit-modal"&gt;Cancel&lt;/button&gt;
+    &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Smart ID Lookup</strong><p>Tries <code>getElementById</code> first, then <code>querySelector</code> with the value as a class, then falls back to <code>closest()</code>.</p></div>
+                        <div><strong>Backdrop Click</strong><p>Clicking outside the modal content automatically closes the modal.</p></div>
+                        <div><strong>ESC Key</strong><p>Pressing Escape closes the currently active modal.</p></div>
+                    </div>
+
+                    <h3>Directive Examples</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>Complete CRUD example</span><span>VLO</span></div>
+                        <pre><code>&lt;!-- POST form --&gt;
+&lt;form v-post="/api/products" enctype="multipart/form-data"&gt;
+    &lt;input name="title" required /&gt;
+    &lt;input name="price" type="number" required /&gt;
+    &lt;button type="submit"&gt;Add Product&lt;/button&gt;
+&lt;/form&gt;
+
+&lt;!-- PUT form (edit) --&gt;
+&lt;form v-put="/api/products/{{product.id}}"&gt;
+    &lt;input name="title" value="{{product.title}}" /&gt;
+    &lt;button type="submit"&gt;Save Changes&lt;/button&gt;
+&lt;/form&gt;
+
+&lt;!-- DELETE button with confirmation --&gt;
+&lt;button v-delete="/api/products/{{product.id}}" v-confirm="Delete this product?"&gt;
+    Delete Product
+&lt;/button&gt;
+
+&lt;!-- Modal open/close --&gt;
+&lt;button data-modal-open="edit-{{product.id}}"&gt;Edit&lt;/button&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Auto-reload</strong><p>After POST/PUT/DELETE, the page reloads preserving the current URL (including pagination).</p></div>
+                        <div><strong>CSRF protection</strong><p>X-CSRF-Token header is automatically attached from the meta tag.</p></div>
+                        <div><strong>Toast integration</strong><p>Success/error toasts appear automatically via cookie-based flash messages.</p></div>
+                        <div><strong>Clean URLs</strong><p>No <code>?status=success</code> pollution. The page reloads at its clean URL.</p></div>
+                        <div><strong>Login Redirects</strong><p>If a <code>v-post</code> form submits to a login endpoint, VLO automatically captures the <code>?next=</code> URL parameter and redirects the browser upon successful authentication.</p></div>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="authentication">
                     <div class="section-number">07</div>
+                    <h2>Authentication</h2>
+                    <p class="section-lead">VLO includes a complete authentication system with user registration, email verification, password reset, and session management.</p>
+                    
+                    <h3>Authentication Features</h3>
+                    <div class="principles-grid">
+                        <article><div class="principle-icon">🔐</div><h3>User Registration</h3><p>Secure registration with email verification and Argon2 password hashing.</p></article>
+                        <article><div class="principle-icon">✉️</div><h3>Email Verification</h3><p>Token-based account activation sent via configurable email provider.</p></article>
+                        <article><div class="principle-icon">🔑</div><h3>Password Reset</h3><p>Secure password reset flow with time-limited tokens.</p></article>
+                        <article><div class="principle-icon">💾</div><h3>Session Management</h3><p>Database-backed sessions with configurable expiration and "remember me" support.</p></article>
+                        <article><div class="principle-icon">🛡️</div><h3>CSRF Protection</h3><p>Automatic HMAC-SHA256 CSRF tokens for all state-changing requests.</p></article>
+                        <article><div class="principle-icon">⚡</div><h3>Rate Limiting</h3><p>Built-in rate limiting for login attempts to prevent brute force attacks.</p></article>
+                    </div>
+
+                    <h3>Configuration</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>.env</span><span>ENV</span></div>
+                        <pre><code># Authentication tables and columns
+AUTH_USER_TABLE=users
+AUTH_USER_ID=id
+AUTH_USER_IDENTIFIER=email
+AUTH_USER_PASSWORD=password_hash
+AUTH_USER_NAME=name
+AUTH_USER_ROLE=role
+AUTH_USER_STATUS=status
+
+# Session configuration
+AUTH_SESSION_TABLE=sessions
+AUTH_SESSION_TOKEN=token
+AUTH_SESSION_USER_ID=user_id
+AUTH_SESSION_EXPIRES_AT=expires_at
+AUTH_SESSION_LIFETIME=86400
+AUTH_COOKIE=vlo_session
+
+# Form field names
+AUTH_IDENTIFIER_FIELD=email
+AUTH_PASSWORD_FIELD=password
+
+# Public API routes (no auth required)
+AUTH_API_PUBLIC_ROUTES=/api/products,/api/health</code></pre>
+                    </div>
+
+                    <h3>Authentication Flow</h3>
+                    <div class="architecture-flow">
+                        <div><span>01</span><strong>Register</strong><small>POST /api/auth/register</small></div>
+                        <i>→</i>
+                        <div><span>02</span><strong>Email</strong><small>Activation link sent</small></div>
+                        <i>→</i>
+                        <div><span>03</span><strong>Activate</strong><small>GET /api/auth/activate</small></div>
+                        <i>→</i>
+                        <div><span>04</span><strong>Login</strong><small>POST /api/auth/login</small></div>
+                    </div>
+
+                    <h3>Graceful Degradation</h3>
+                    <p class="component-note">If email sending fails but the database transaction succeeds, VLO returns a <code>warning: true</code> flag instead of an error, allowing the UI to show an orange warning toast instead of a red error.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>API Response</span><span>JSON</span></div>
+                        <pre><code>{
+  "success": true,
+  "warning": true,
+  "message": "Account created, but we couldn't send the activation email. Please check your spam folder or try resending later."
+}</code></pre>
+                    </div>
+
+                    <h3>Remember Me</h3>
+                    <p class="component-note">The login form supports a "remember me" checkbox that extends the session lifetime from the default (24 hours) to 30 days.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Login form</span><span>VLO</span></div>
+                        <pre><code>&lt;form v-post="/api/auth/login"&gt;
+    &lt;input name="email" type="email" required /&gt;
+    &lt;input name="password" type="password" required /&gt;
+    &lt;label&gt;
+        &lt;input type="checkbox" name="remember_me" value="true" /&gt;
+        Remember me for 30 days
+    &lt;/label&gt;
+    &lt;button type="submit"&gt;Login&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="page-guards">
+                    <div class="section-number">08</div>
+                    <h2>Page Guards</h2>
+                    <p class="section-lead">Protect individual pages with authentication and role-based access control using layout attributes.</p>
+                    
+                    <h3>Guard Attributes</h3>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Attribute</span><span>Values</span><span>Behavior</span></div>
+                        <div class="naming-row"><span>auth</span><span>true / false</span><span>Requires authentication. Redirects to /login?next=/current-page if not logged in.</span></div>
+                        <div class="naming-row"><span>guest</span><span>true / false</span><span>Only accessible to guests. Redirects authenticated users to /dashboard.</span></div>
+                        <div class="naming-row"><span>roles</span><span>Comma-separated</span><span>Requires specific roles. Returns 403 Forbidden if user lacks required role.</span></div>
+                    </div>
+
+                    <h3>Usage Examples</h3>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/admin/dashboard.vlo</span><span>VLO</span></div>
+                        <pre><code>&lt;BaseLayout title="Admin Dashboard" auth="true" roles="Admin"&gt;
+    &lt;h1&gt;Admin Dashboard&lt;/h1&gt;
+    &lt;p&gt;Only authenticated Admin users can view this page.&lt;/p&gt;
+&lt;/BaseLayout&gt;</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/login.vlo</span><span>VLO</span></div>
+                        <pre><code>&lt;BaseLayout title="Login" guest="true"&gt;
+    &lt;h1&gt;Login&lt;/h1&gt;
+    &lt;p&gt;Only guests can view this page. Authenticated users are redirected.&lt;/p&gt;
+&lt;/BaseLayout&gt;</code></pre>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/editors/content.vlo</span><span>VLO</span></div>
+                        <pre><code>&lt;BaseLayout title="Content Editor" auth="true" roles="Admin, Editor"&gt;
+    &lt;h1&gt;Content Editor&lt;/h1&gt;
+    &lt;p&gt;Accessible to Admin and Editor roles only.&lt;/p&gt;
+&lt;/BaseLayout&gt;</code></pre>
+                    </div>
+
+                    <h3>Next URL Preservation</h3>
+                    <p class="component-note">When a user is redirected to the login page, VLO automatically preserves the <code>?next=</code> parameter so they can return to their intended destination after logging in.</p>
+                    <div class="info-grid">
+                        <div><strong>Automatic capture</strong><p>The middleware captures the current URL and appends it as <code>?next=/original-path</code>.</p></div>
+                        <div><strong>Secure redirect</strong><p>After login, VLO validates the next URL to prevent open redirect attacks.</p></div>
+                        <div><strong>Default fallback</strong><p>If no next URL is provided, users are redirected to <code>/dashboard</code> by default.</p></div>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="api-security">
+                    <div class="section-number">09</div>
+                    <h2>API Security</h2>
+                    <p class="section-lead">VLO provides comprehensive API security with session-based authentication, role-based access control, and CSRF protection.</p>
+                    
+                    <h3>API Authentication</h3>
+                    <p class="component-note">All <code>/api/*</code> routes (except auth and file endpoints) require a valid session. Unauthenticated requests receive <code>401 Unauthorized</code>.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>.env — Public API routes</span><span>ENV</span></div>
+                        <pre><code># Comma-separated list of API prefixes that don't require auth
+AUTH_API_PUBLIC_ROUTES=/api/products,/api/health,/api/public</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Wildcard support</strong><p>Use <code>*</code> for prefix matching: <code>/api/public/*</code> matches all routes starting with <code>/api/public/</code>.</p></div>
+                        <div><strong>Exact matching</strong><p>Routes without <code>*</code> must match exactly or start with the route followed by <code>/</code>.</p></div>
+                    </div>
+
+                    <h3>Role-Based API Access</h3>
+                    <p class="component-note">VLO middleware can enforce role requirements for specific API endpoints. This is configured in the API definition file.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>pages/api/api.vlo</span><span>JSON</span></div>
+                        <pre><code>&lt;script server&gt;
+{
+  "get_products": {
+    "query": "SELECT * FROM products ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}}",
+    "auth": false
+  },
+  "post_products": {
+    "query": "INSERT INTO products (title, price) VALUES ({{title}}, {{price}})",
+    "auth": true,
+    "roles": ["Admin", "Editor"]
+  },
+  "delete_products": {
+    "query": "DELETE FROM products WHERE id = {{id}}",
+    "auth": true,
+    "roles": ["Admin"]
+  }
+}
+&lt;/script&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>auth: false</strong><p>No authentication required (public endpoint).</p></div>
+                        <div><strong>auth: true</strong><p>Requires valid session.</p></div>
+                        <div><strong>roles: []</strong><p>Requires specific roles. User must have at least one of the listed roles.</p></div>
+                    </div>
+
+                    <h3>CSRF Protection</h3>
+                    <p class="component-note">All state-changing API requests (POST, PUT, PATCH, DELETE) require a valid CSRF token in the <code>X-CSRF-Token</code> header.</p>
+                    <div class="architecture-flow">
+                        <div><span>01</span><strong>Session</strong><small>Login creates session</small></div>
+                        <i>→</i>
+                        <div><span>02</span><strong>Token</strong><small>HMAC-SHA256 derived</small></div>
+                        <i>→</i>
+                        <div><span>03</span><strong>Meta tag</strong><small>Injected in &lt;head&gt;</small></div>
+                        <i>→</i>
+                        <div><span>04</span><strong>Header</strong><small>X-CSRF-Token sent</small></div>
+                    </div>
+                    <div class="code-card">
+                        <div class="code-header"><span>Auto-injected by VLO</span><span>HTML</span></div>
+                        <pre><code>&lt;meta name="csrf-token" content="a1b2c3d4e5f6..."&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Stateless</strong><p>Tokens are derived from the session using HMAC. No server-side token storage.</p></div>
+                        <div><strong>Exempt routes</strong><p><code>/api/auth/*</code> and <code>/api/files/upload</code> are exempt from CSRF checks.</p></div>
+                        <div><strong>Timing-safe</strong><p>Token comparison uses constant-time algorithm to prevent timing attacks.</p></div>
+                        <div><strong>Zero config</strong><p><code>v-post</code>, <code>v-put</code>, <code>v-delete</code> automatically attach the token.</p></div>
+                    </div>
+
+                    <h3>Session Management</h3>
+                    <p class="component-note">Sessions are stored in the database with expiration timestamps. The session cookie is <code>HttpOnly</code> and <code>SameSite=Lax</code>.</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>Session cookie</span><span>HTTP</span></div>
+                        <pre><code>Set-Cookie: vlo_session=abc123...; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>HttpOnly</strong><p>JavaScript cannot access the session cookie, preventing XSS attacks.</p></div>
+                        <div><strong>SameSite=Lax</strong><p>Prevents CSRF attacks by restricting cross-site cookie sending.</p></div>
+                        <div><strong>Secure</strong><p>In production (HTTPS), the <code>Secure</code> flag is automatically added.</p></div>
+                    </div>
+                </section>
+
+                <section class="doc-section" id="pages">
+                    <div class="section-number">10</div>
                     <h2>Pages</h2>
                     <p class="section-lead">Pages compose components. They should not duplicate component implementations.</p>
                     <div class="architecture-flow">
@@ -446,7 +707,7 @@
                 </section>
 
                 <section class="doc-section" id="layouts">
-                    <div class="section-number">08</div>
+                    <div class="section-number">11</div>
                     <h2>Layouts</h2>
                     <p class="section-lead">VLO automatically resolves layouts based on page paths, creating a hierarchical system that reduces boilerplate.</p>
                     <h3>Resolution order</h3>
@@ -478,7 +739,7 @@
                 </section>
 
                 <section class="doc-section" id="styling">
-                    <div class="section-number">09</div>
+                    <div class="section-number">12</div>
                     <h2>Styling</h2>
                     <p class="section-lead">VLO uses a dark, modern visual language with cyan accents. Styles should reinforce that identity.</p>
                     <h3>Design tokens</h3>
@@ -500,7 +761,7 @@
                 </section>
 
                 <section class="doc-section" id="navbar">
-                    <div class="section-number">10</div>
+                    <div class="section-number">13</div>
                     <h2>Navbar</h2>
                     <p class="section-lead">VLO includes a responsive Navbar component with built-in variants, sizing, shadows, sticky positioning, CSS-only mobile navigation, and server-side active link resolution.</p>
                     <div class="rule-card">
@@ -510,7 +771,7 @@
                 </section>
 
                 <section class="doc-section" id="branding">
-                    <div class="section-number">11</div>
+                    <div class="section-number">14</div>
                     <h2>VLO Branding</h2>
                     <p class="section-lead">Every VLO page should feel like part of the same product. Branding consistency is not optional.</p>
                     <div class="brand-showcase">
@@ -534,7 +795,7 @@
                 </section>
 
                 <section class="doc-section" id="performance">
-                    <div class="section-number">12</div>
+                    <div class="section-number">15</div>
                     <h2>Performance</h2>
                     <p class="section-lead">VLO includes built-in optimizations for both browser and server performance.</p>
                     <h3>Browser caching</h3>
@@ -554,11 +815,12 @@ Cache-Control: private, no-cache</code></pre>
                         <div><b>04</b><p><strong>Hash-based rendering</strong> — Component loops use hash comparison to avoid infinite expansion.</p></div>
                         <div><b>05</b><p><strong>CSS-only animations</strong> — Toast auto-dismiss uses pure CSS, zero JavaScript.</p></div>
                         <div><b>06</b><p><strong>Global Middleware</strong> — Production <code>vlo serve</code> correctly applies GZIP compression, Cache-Control headers, and Session resolution to all SSR fallback routes.</p></div>
+                        <div><b>07</b><p><strong>Event Delegation</strong> — Form and Modal directives compile to <code>data-*</code> attributes, injecting a single shared JS block instead of inline handlers per row.</p></div>
                     </div>
                 </section>
 
                 <section class="doc-section" id="accessibility">
-                    <div class="section-number">13</div>
+                    <div class="section-number">16</div>
                     <h2>Accessibility</h2>
                     <p class="section-lead">Components should be usable by as many people as possible.</p>
                     <div class="access-grid">
@@ -570,56 +832,9 @@ Cache-Control: private, no-cache</code></pre>
                 </section>
 
                 <section class="doc-section" id="security">
-                    <div class="section-number">14</div>
+                    <div class="section-number">17</div>
                     <h2>Security</h2>
                     <p class="section-lead">VLO projects should treat security as part of normal development rather than an afterthought.</p>
-                    <h3>CSRF Protection</h3>
-                    <p class="component-note">VLO automatically protects all state-changing requests (POST, PUT, PATCH, DELETE) with HMAC-SHA256 CSRF tokens. No manual implementation needed.</p>
-                    <div class="architecture-flow">
-                        <div><span>01</span><strong>Session</strong><small>Login creates session</small></div>
-                        <i>→</i>
-                        <div><span>02</span><strong>Token</strong><small>HMAC-SHA256 derived</small></div>
-                        <i>→</i>
-                        <div><span>03</span><strong>Meta tag</strong><small>Injected in &lt;head&gt;</small></div>
-                        <i>→</i>
-                        <div><span>04</span><strong>Header</strong><small>X-CSRF-Token sent</small></div>
-                    </div>
-                    <div class="code-card">
-                        <div class="code-header"><span>Auto-injected by VLO</span><span>HTML</span></div>
-                        <pre><code>&lt;meta name="csrf-token" content="a1b2c3d4e5f6..."&gt;</code></pre>
-                    </div>
-                    <div class="info-grid">
-                        <div><strong>Stateless</strong><p>Tokens are derived from the session using HMAC. No server-side token storage.</p></div>
-                        <div><strong>Exempt routes</strong><p><code>/api/auth/*</code> and <code>/api/files/upload</code> are exempt from CSRF checks.</p></div>
-                        <div><strong>Timing-safe</strong><p>Token comparison uses constant-time algorithm to prevent timing attacks.</p></div>
-                        <div><strong>Zero config</strong><p><code>v-post</code>, <code>v-put</code>, <code>v-delete</code> automatically attach the token.</p></div>
-                    </div>
-                    <h3>Session Management</h3>
-                    <p class="component-note">Sessions are stored in the database with expiration timestamps. The session cookie is <code>HttpOnly</code> and <code>SameSite=Lax</code>.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Session cookie</span><span>HTTP</span></div>
-                        <pre><code>Set-Cookie: vlo_session=abc123...; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400</code></pre>
-                    </div>
-                    <h3>Page Guards</h3>
-                    <p class="component-note">Protect individual pages with <code>auth</code> and <code>roles</code> attributes on the layout tag.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>pages/admin/users.vlo</span><span>VLO</span></div>
-                        <pre><code>&lt;BaseLayout title="Users" auth="true" roles="Admin"&gt;
-    &lt;!-- Only authenticated Admin users can view this page --&gt;
-&lt;/BaseLayout&gt;</code></pre>
-                    </div>
-                    <div class="info-grid">
-                        <div><strong>auth="true"</strong><p>Redirects unauthenticated users to <code>/login?next=/current-page</code>.</p></div>
-                        <div><strong>roles="Admin"</strong><p>Returns 403 Forbidden for users without the matching role.</p></div>
-                        <div><strong>guest="true"</strong><p>Redirects authenticated users away (useful for login/register pages).</p></div>
-                    </div>
-                    <h3>API Authentication</h3>
-                    <p class="component-note">All <code>/api/*</code> routes (except auth and file endpoints) require a valid session. Unauthenticated requests receive <code>401 Unauthorized</code>.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>.env — Public API routes</span><span>ENV</span></div>
-                        <pre><code># Comma-separated list of API prefixes that don't require auth
-AUTH_API_PUBLIC_ROUTES=/api/public,/api/health</code></pre>
-                    </div>
                     <h3>Security rules</h3>
                     <div class="security-list">
                         <div><span>!</span><div><strong>Never expose secrets.</strong><p>API keys, passwords and private credentials must not be committed into project files.</p></div></div>
@@ -630,7 +845,7 @@ AUTH_API_PUBLIC_ROUTES=/api/public,/api/health</code></pre>
                 </section>
 
                 <section class="doc-section" id="modules">
-                    <div class="section-number">15</div>
+                    <div class="section-number">18</div>
                     <h2>Modules & Charting</h2>
                     <p class="section-lead">VLO supports a modular extension system. Modules are self-contained packages of components, styles, scripts, and declarative data handlers that can be dropped into the <code>modules/</code> directory.</p>
                     
@@ -693,7 +908,7 @@ AUTH_API_PUBLIC_ROUTES=/api/public,/api/health</code></pre>
                 </section>
 
                 <section class="doc-section" id="api-database">
-                    <div class="section-number">16</div>
+                    <div class="section-number">19</div>
                     <h2>API & Database</h2>
                     <p class="section-lead">VLO provides a centralized API definition system backed by SQL. Write standard SQL queries in a single file and they become REST endpoints automatically.</p>
                     <h3>API Definitions</h3>
@@ -783,7 +998,7 @@ DB_SCHEMA=schema.mysql.sql</code></pre>
                 </section>
 
                 <section class="doc-section" id="flash">
-                    <div class="section-number">17</div>
+                    <div class="section-number">20</div>
                     <h2>Flash Messages</h2>
                     <p class="section-lead">Flash messages provide one-time feedback after form submissions and API actions. They use cookie-based storage — no database table required, no URL pollution, and they auto-dismiss.</p>
                     <h3>How it works</h3>
@@ -875,7 +1090,7 @@ DB_SCHEMA=schema.mysql.sql</code></pre>
                 </section>
 
                 <section class="doc-section" id="pagination">
-                    <div class="section-number">18</div>
+                    <div class="section-number">21</div>
                     <h2>Pagination</h2>
                     <p class="section-lead">VLO provides automatic pagination for any <code>get_*</code> API action that includes <code>LIMIT</code> and <code>OFFSET</code>. No manual COUNT queries, no math, no boilerplate.</p>
                     <h3>How it works</h3>
@@ -985,8 +1200,41 @@ DB_SCHEMA=schema.mysql.sql</code></pre>
                     </div>
                 </section>
 
+                <section class="doc-section" id="email">
+                    <div class="section-number">22</div>
+                    <h2>Email & Mailer</h2>
+                    <p class="section-lead">VLO includes a universal, zero-boilerplate mailer supporting both SMTP and API drivers for all major transactional email providers.</p>
+                    
+                    <h3>Universal Provider Support</h3>
+                    <p class="component-note">Configure your provider in <code>.env</code>. VLO automatically formats the payload and authentication headers for the selected service.</p>
+                    <div class="naming-table">
+                        <div class="naming-row header"><span>Provider</span><span>MAIL_API_PROVIDER</span><span>Auth Method</span></div>
+                        <div class="naming-row"><span>Resend</span><span>resend</span><span>Bearer Token</span></div>
+                        <div class="naming-row"><span>Mailjet</span><span>mailjet</span><span>Basic Auth (Key + Secret)</span></div>
+                        <div class="naming-row"><span>SendGrid</span><span>sendgrid</span><span>Bearer Token</span></div>
+                        <div class="naming-row"><span>Mailgun</span><span>mailgun</span><span>Basic Auth (API Key)</span></div>
+                        <div class="naming-row"><span>Postmark</span><span>postmark</span><span>Server Token Header</span></div>
+                        <div class="naming-row"><span>Brevo</span><span>brevo</span><span>API Key Header</span></div>
+                        <div class="naming-row"><span>MailerSend</span><span>mailersend</span><span>Bearer Token</span></div>
+                    </div>
+
+                    <h3>Email Templates</h3>
+                    <p class="component-note">Store HTML templates in the <code>email_templates/</code> directory. VLO extracts the subject line from an HTML comment and processes the body using the full VLO template engine (including modifiers).</p>
+                    <div class="code-card">
+                        <div class="code-header"><span>email_templates/welcome.html</span><span>HTML</span></div>
+                        <pre><code>&lt;!-- subject: Welcome to {{app_name}}, {{name | proper}}! --&gt;
+&lt;h1&gt;Hello {{name | proper}}&lt;/h1&gt;
+&lt;p&gt;Click &lt;a href="{{activation_link}}"&gt;here&lt;/a&gt; to activate.&lt;/p&gt;</code></pre>
+                    </div>
+                    <div class="info-grid">
+                        <div><strong>Subject Extraction</strong><p>The <code>&lt;!-- subject: ... --&gt;</code> comment is parsed and removed from the HTML body.</p></div>
+                        <div><strong>Modifier Support</strong><p>Use <code>| proper</code>, <code>| upper</code>, or any custom modifier directly in your email templates.</p></div>
+                        <div><strong>Graceful Degradation</strong><p>If the email API fails but the DB transaction succeeds, VLO returns a <code>warning: true</code> flag, allowing the UI to show an orange toast instead of a red error.</p></div>
+                    </div>
+                </section>
+
                 <section class="doc-section" id="workflow">
-                    <div class="section-number">19</div>
+                    <div class="section-number">23</div>
                     <h2>Development Workflow</h2>
                     <p class="section-lead">Keep changes small, understandable and easy to review.</p>
                     <div class="workflow">
@@ -1018,7 +1266,7 @@ vlo serve --port 8080</code></pre>
                 </section>
 
                 <section class="doc-section" id="checklist">
-                    <div class="section-number">20</div>
+                    <div class="section-number">24</div>
                     <h2>Pre-Release Checklist</h2>
                     <p class="section-lead">Before considering a feature complete, verify the following.</p>
                     <div class="checklist">
@@ -1035,6 +1283,7 @@ vlo serve --port 8080</code></pre>
                         <label><span>✓</span> Documentation reflects the current behavior</label>
                         <label><span>✓</span> Layout hierarchy tested in dev and build modes</label>
                         <label><span>✓</span> Static assets use cache-busting filenames</label>
+                        <label><span>✓</span> Directives use data-attributes (no inline JS)</label>
                     </div>
                 </section>
 
@@ -1057,6 +1306,7 @@ vlo serve --port 8080</code></pre>
 /* =========================================
    ROOT & HERO
 ========================================= */
+html { scroll-behavior: smooth; }
 .guidelines-page { min-height: 100vh; background: radial-gradient(circle at 50% -10%, rgba(0,245,255,.08), transparent 34%); }
 .guidelines-hero { max-width: 1120px; margin: auto; padding: 85px 24px 65px; }
 .hero-badge { display: inline-flex; align-items: center; gap: 9px; padding: 7px 13px; border: 1px solid rgba(0,245,255,.25); border-radius: 999px; background: rgba(0,245,255,.05); color: #00f5ff; font-size: .72rem; font-weight: 700; letter-spacing: .08em; }
@@ -1242,14 +1492,4 @@ window.addEventListener("scroll", () => {
     else backTop.classList.remove("visible");
 });
 backTop?.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
-
-document.querySelectorAll(".docs-nav a").forEach(link => {
-    link.addEventListener("click", event => {
-        const target = document.querySelector(link.getAttribute("href"));
-        if (!target) return;
-        event.preventDefault();
-        target.scrollIntoView({ behavior: "smooth", block: "start" });
-        history.replaceState(null, "", link.getAttribute("href"));
-    });
-});
 </script>

@@ -179,3 +179,63 @@ pub async fn init_db() -> Result<(), String> {
 
     Ok(())
 }
+
+    // ---------------------------------------------------------------------------
+    // Database Execution Macros (Zero-Boilerplate Query Execution)
+    // ---------------------------------------------------------------------------
+    // If you add a new DB (e.g., Oracle), just add one line to each macro below!
+
+    #[macro_export]
+    macro_rules! db_execute {
+        ($pool:expr, $sql:expr $(, $bind:expr)*) => {
+            match $pool {
+                $crate::database::DbPool::Sqlite(c) => ::sqlx::query($sql) $(.bind($bind))*.execute(c).await.map(|r| r.rows_affected()),
+                $crate::database::DbPool::Postgres(c) => ::sqlx::query($sql) $(.bind($bind))*.execute(c).await.map(|r| r.rows_affected()),
+                $crate::database::DbPool::MySql(c) => ::sqlx::query($sql) $(.bind($bind))*.execute(c).await.map(|r| r.rows_affected()),
+            }
+        };
+    }
+
+    #[macro_export]
+    macro_rules! db_fetch_optional_as {
+        ($pool:expr, $type:ty, $sql:expr $(, $bind:expr)*) => {
+            match $pool {
+                $crate::database::DbPool::Sqlite(c) => ::sqlx::query_as::<_, $type>($sql) $(.bind($bind))*.fetch_optional(c).await,
+                $crate::database::DbPool::Postgres(c) => ::sqlx::query_as::<_, $type>($sql) $(.bind($bind))*.fetch_optional(c).await,
+                $crate::database::DbPool::MySql(c) => ::sqlx::query_as::<_, $type>($sql) $(.bind($bind))*.fetch_optional(c).await,
+            }
+        };
+    }
+
+    #[macro_export]
+    macro_rules! db_fetch_optional_scalar_string {
+        ($pool:expr, $sql:expr $(, $bind:expr)*) => {
+            match $pool {
+                $crate::database::DbPool::Sqlite(c) => ::sqlx::query_scalar::<_, String>($sql) $(.bind($bind))*.fetch_optional(c).await,
+                $crate::database::DbPool::Postgres(c) => ::sqlx::query_scalar::<_, String>($sql) $(.bind($bind))*.fetch_optional(c).await,
+                $crate::database::DbPool::MySql(c) => ::sqlx::query_scalar::<_, String>($sql) $(.bind($bind))*.fetch_optional(c).await,
+            }
+        };
+    }
+
+    #[macro_export]
+    macro_rules! db_fetch_optional_scalar_i64 {
+        ($pool:expr, $sql:expr $(, $bind:expr)*) => {
+            match $pool {
+                $crate::database::DbPool::Sqlite(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_optional(c).await,
+                $crate::database::DbPool::Postgres(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_optional(c).await,
+                $crate::database::DbPool::MySql(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_optional(c).await,
+            }
+        };
+    }
+
+    #[macro_export]
+    macro_rules! db_fetch_one_scalar_i64 {
+        ($pool:expr, $sql:expr $(, $bind:expr)*) => {
+            match $pool {
+                $crate::database::DbPool::Sqlite(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_one(c).await,
+                $crate::database::DbPool::Postgres(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_one(c).await,
+                $crate::database::DbPool::MySql(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_one(c).await,
+            }
+        };
+    }

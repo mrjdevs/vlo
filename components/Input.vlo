@@ -13,40 +13,10 @@
     <span class="vlo-input-label">{{label}}</span>
   {/if}
 </label>
-
 <style>
-.vlo-input-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-}
-
-/* Visually places the label text above the input */
-.vlo-input-label {
-  order: -1;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: #999;
-}
-
-.vlo-input {
-  padding: 10px 12px;
-  border: 1px solid #292929;
-  border-radius: 6px;
-  background: #111;
-  color: #eee;
-  font-size: 0.9rem;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.vlo-input:focus {
-  border-color: #00f5ff;
-}
-
-.vlo-input:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
+.vlo-input-group { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.vlo-input-label { order: -1; font-size: 0.85rem; font-weight: 500; color: #999; }
+.vlo-input { padding: 10px 12px; border: 1px solid #292929; border-radius: 6px; background: #111; color: #eee; font-size: 0.9rem; outline: none; transition: border-color 0.2s; }
+.vlo-input:focus { border-color: #00f5ff; }
+.vlo-input:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>
