@@ -410,19 +410,31 @@ pub fn render_vlo_for_build_at(page_path: &str, source: String) -> RenderedPage 
         if source == previous { break; }
     }
 
-    source = crate::server::resolve_directives(&source);
-
+    // ========================================================================
+    // 🔥 CRITICAL FIX: Template processing MUST finish BEFORE resolving directives
+    // ========================================================================
+    
     let (source_with_runtime_data_sources, runtime_data_sources) = preserve_runtime_data_sources(&source);
     source = source_with_runtime_data_sources;
 
+    // 1. Render control flow FIRST (so it doesn't eat the { } in our JS later)
     source = render_control_flow_for_build(&source, &context.template_context);
+    
+    // 2. Restore data sources
     source = restore_runtime_data_sources(&source, &runtime_data_sources);
 
+    // 3. Restore runtime interpolations
     for (index, interpolation) in runtime_interpolations.iter().enumerate() {
         let marker = format!("__VLO_RUNTIME_DOTTED_INTERPOLATION_{}__", index);
         source = source.replace(&marker, interpolation);
     }
     source = restore_runtime_query_interpolations(&source, &runtime_query_interpolations);
+
+    // 4. FINALLY: Resolve directives. 
+    // The template engine is now 100% done. The { and } in the generated 
+    // JavaScript are completely safe from being stripped out!
+    source = crate::server::resolve_directives(&source);
+    source = crate::server::inject_conditional_scripts(&source);
 
     context.html = clean_empty_tags(&source);
     context
@@ -505,6 +517,7 @@ pub fn render_vlo_with_query_at(page_path: &str, source: String, query: &HashMap
 
     // ─── STEP 5: Directives (v-post, v-put, v-delete) ───
     source = crate::server::resolve_directives(&source);
+    source = crate::server::inject_conditional_scripts(&source);
 
     if query.contains_key("status") || query.contains_key("action") {
         source.push_str(r#"<script>

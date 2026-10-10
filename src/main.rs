@@ -41,79 +41,55 @@ async fn main() {
 
 async fn run() -> Result<(), String> {
     let cli = Cli::parse();
-
     match cli.command {
-        server::Commands::Init {
-            ref name,
-            ref db,
-            ref db_name,
-            no_db,
-        } => {
+        server::Commands::Init { ref name, ref db, ref db_name, no_db } => {
             utils::init_project(name, db, db_name.as_deref(), no_db)?;
         }
-
         server::Commands::Dev { port, ref host } => {
             state::set_app_mode(state::AppMode::Development);
+            state::init_root_url(); // 🔥 ADD THIS
             database::init_db().await?;
             auth::init_auth_config();
             auth::init_session_secret();
             modules::init_modules()?; 
-
-            let port = port
-                .map(|value| {
-                    value
-                        .parse::<u16>()
-                        .map_err(|_| format!("Invalid port '{}'.", value))
-                })
-                .transpose()?;
-
+            let port = port.map(|value| value.parse::<u16>().map_err(|_| format!("Invalid port '{}'.", value))).transpose()?;
             server::dev(host.as_deref(), port).await?;
         }
-
         server::Commands::Build { release } => {
             state::set_app_mode(state::AppMode::Production);
+            state::init_root_url(); // 🔥 ADD THIS
             database::init_db().await?;
-            modules::init_modules()?; // 🔥 CRITICAL: Required to resolve module components (e.g., <PIECHART />) during build
+            modules::init_modules()?;
             server::build(release)?;
         }
-
         server::Commands::Serve { port, ref host } => {
             state::set_app_mode(state::AppMode::Production);
+            state::init_root_url(); // 🔥 ADD THIS
             database::init_db().await?;
             auth::init_auth_config();
             auth::init_session_secret();
             crate::router::init_live_broadcast();
             modules::init_modules()?; 
-
-            let port = port
-                .map(|value| {
-                    value
-                        .parse::<u16>()
-                        .map_err(|_| format!("Invalid port '{}'.", value))
-                })
-                .transpose()?;
-
+            let port = port.map(|value| value.parse::<u16>().map_err(|_| format!("Invalid port '{}'.", value))).transpose()?;
             server::serve(host.as_deref(), port).await?;
         }
-
         server::Commands::Deploy { ref provider } => {
             state::set_app_mode(state::AppMode::Production);
+            state::init_root_url(); // 🔥 ADD THIS
             database::init_db().await?;
-            modules::init_modules()?; // 🔥 CRITICAL: Ensures modules are loaded if deploy triggers an internal build
+            modules::init_modules()?;
             crate::router::init_live_broadcast();
             server::deploy(provider).await?;
         }
-
         server::Commands::Cgi => {
             state::set_app_mode(state::AppMode::Production);
+            state::init_root_url(); // 🔥 ADD THIS
             database::init_db().await?;
             auth::init_auth_config();
             auth::init_session_secret();
-            modules::init_modules()?; // 🔥 CRITICAL: Ensures components render correctly in CGI environments
-
+            modules::init_modules()?;
             server::cgi().await?;
         }
     }
-
     Ok(())
 }

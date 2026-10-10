@@ -26,7 +26,7 @@ pub struct User {
     pub name: String,
     pub email: String,
     pub role: String,
-    pub status: String, // Added status
+    pub status: String,
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +88,7 @@ impl AuthConfig {
         Ok(())
     }
 
-    fn placeholder(&self, pool: &DbPool, n: usize) -> String {
+    pub fn placeholder(&self, pool: &DbPool, n: usize) -> String {
         match pool { DbPool::Postgres(_) => format!("${n}"), _ => "?".into() }
     }
 }
@@ -183,11 +183,8 @@ pub async fn create_session(user_id: i64, remember_me: bool) -> Result<(String, 
     let sql = format!("INSERT INTO {} ({}, {}, {}) VALUES ({}, {}, {})",
         cfg.session_table, cfg.session_token, cfg.session_user_id, cfg.session_expires_at,
         cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3));
-    let result: Result<(), sqlx::Error> = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query(&sql).bind(&token).bind(user_id).bind(expires_at).execute(c).await.map(|_| ()),
-    };
+    
+    let result = crate::db_execute!(pool, &sql, &token, user_id, expires_at).map(|_| ());
     result.map(|_| (token, lifetime)).map_err(|e| format!("Failed to create session: {e}"))
 }
 
@@ -198,60 +195,37 @@ pub async fn get_user_from_session(token: &str) -> Option<User> {
         select_user_fields(cfg, Some("u")), cfg.user_table, cfg.session_table, cfg.user_id, cfg.session_user_id,
         cfg.session_token, cfg.placeholder(pool, 1), cfg.session_expires_at, cfg.placeholder(pool, 2));
     if let Some(condition) = status_condition(cfg, "u") { sql.push_str(" AND "); sql.push_str(&condition); }
-    match pool {
-        DbPool::Sqlite(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now_timestamp()).fetch_optional(c).await,
-        DbPool::Postgres(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now_timestamp()).fetch_optional(c).await,
-        DbPool::MySql(c) => sqlx::query_as::<_, User>(&sql).bind(token).bind(now_timestamp()).fetch_optional(c).await,
-    }.ok().flatten()
+    
+    crate::db_fetch_optional_as!(pool, User, &sql, token, now_timestamp()).ok().flatten()
 }
 
 pub async fn delete_session(token: &str) -> Result<(), String> {
     let cfg = auth_config();
     let pool = DB_POOL.get().ok_or("Database not configured")?;
     let sql = format!("DELETE FROM {} WHERE {} = {}", cfg.session_table, cfg.session_token, cfg.placeholder(pool, 1));
-    let result: Result<(), sqlx::Error> = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&sql).bind(token).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query(&sql).bind(token).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query(&sql).bind(token).execute(c).await.map(|_| ()),
-    };
-    result.map_err(|e| format!("Failed to delete session: {e}"))
+    crate::db_execute!(pool, &sql, token).map(|_| ()).map_err(|e| format!("Failed to delete session: {e}"))
 }
 
 pub async fn cleanup_expired_sessions() -> Result<u64, String> {
     let cfg = auth_config();
     let pool = DB_POOL.get().ok_or("Database not configured")?;
     let sql = format!("DELETE FROM {} WHERE {} < {}", cfg.session_table, cfg.session_expires_at, cfg.placeholder(pool, 1));
-    let result: Result<u64, sqlx::Error> = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&sql).bind(now_timestamp()).execute(c).await.map(|r| r.rows_affected()),
-        DbPool::Postgres(c) => sqlx::query(&sql).bind(now_timestamp()).execute(c).await.map(|r| r.rows_affected()),
-        DbPool::MySql(c) => sqlx::query(&sql).bind(now_timestamp()).execute(c).await.map(|r| r.rows_affected()),
-    };
-    result.map_err(|e| format!("Failed to cleanup sessions: {e}"))
+    crate::db_execute!(pool, &sql, now_timestamp()).map_err(|e| format!("Failed to cleanup sessions: {e}"))
 }
 
-// IMPORTANT: No status condition here. Login must find inactive/pending users so their status 
-// can be revealed ONLY after the password is verified successfully.
 async fn find_user_by_identifier(identifier: &str) -> Option<User> {
     let cfg = auth_config();
     let pool = DB_POOL.get()?;
     let sql = format!("SELECT {} FROM {} u WHERE u.{} = {}",
         select_user_fields(cfg, Some("u")), cfg.user_table, cfg.user_identifier, cfg.placeholder(pool, 1));
-    match pool {
-        DbPool::Sqlite(c) => sqlx::query_as::<_, User>(&sql).bind(identifier).fetch_optional(c).await,
-        DbPool::Postgres(c) => sqlx::query_as::<_, User>(&sql).bind(identifier).fetch_optional(c).await,
-        DbPool::MySql(c) => sqlx::query_as::<_, User>(&sql).bind(identifier).fetch_optional(c).await,
-    }.ok().flatten()
+    crate::db_fetch_optional_as!(pool, User, &sql, identifier).ok().flatten()
 }
 
 async fn fetch_password_hash(user_id: i64) -> Option<String> {
     let cfg = auth_config();
     let pool = DB_POOL.get()?;
     let sql = format!("SELECT {} FROM {} WHERE {} = {}", cfg.user_password, cfg.user_table, cfg.user_id, cfg.placeholder(pool, 1));
-    match pool {
-        DbPool::Sqlite(c) => sqlx::query_scalar::<_, String>(&sql).bind(user_id).fetch_optional(c).await,
-        DbPool::Postgres(c) => sqlx::query_scalar::<_, String>(&sql).bind(user_id).fetch_optional(c).await,
-        DbPool::MySql(c) => sqlx::query_scalar::<_, String>(&sql).bind(user_id).fetch_optional(c).await,
-    }.ok().flatten()
+    crate::db_fetch_optional_scalar_string!(pool, &sql, user_id).ok().flatten()
 }
 
 pub fn parse_cookie_header(value: &str, cookie_name: &str) -> Option<String> {
@@ -304,7 +278,6 @@ pub async fn api_auth_middleware(req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
-// Compact login error helper
 fn login_error(status: StatusCode, error: &str, db_status: Option<&str>) -> Response {
     let mut body = json!({"success": false, "error": error});
     if let Some(db_status) = db_status {
@@ -316,9 +289,9 @@ fn login_error(status: StatusCode, error: &str, db_status: Option<&str>) -> Resp
 }
 
 pub async fn login_handler(req: Request) -> impl IntoResponse {
-    let cfg = auth_config();
-    let identifier_field = cfg.identifier_field.clone();
-    let password_field = cfg.password_field.clone();
+    let auth_cfg = auth_config(); // 🔥 FIX: Renamed from `cfg`
+    let identifier_field = auth_cfg.identifier_field.clone();
+    let password_field = auth_cfg.password_field.clone();
     let mut next_url = "/".to_owned();
     if let Some(q) = req.uri().query() {
         for pair in q.split('&') {
@@ -364,7 +337,7 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
         for pair in String::from_utf8_lossy(&bytes).split('&') {
             let mut p = pair.splitn(2, '=');
             if let (Some(k), Some(v)) = (p.next(), p.next()) {
-                let value = urlencoding::decode(v).unwrap_or_default().into_owned();
+                let value = urlencoding::decode(v).unwrap_or_default().replace('+', " ");
                 match k {
                     x if x == identifier_field => identifier = value,
                     x if x == password_field => password = value,
@@ -381,7 +354,6 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
         return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Credentials required"}))).into_response();
     }
 
-    // 1. Never reveal status before password verification.
     let user = match find_user_by_identifier(&identifier).await {
         Some(user) => user,
         None => return login_error(StatusCode::UNAUTHORIZED, "Invalid credentials", None),
@@ -392,12 +364,10 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
         None => return login_error(StatusCode::UNAUTHORIZED, "Invalid credentials", None),
     };
 
-    // 2. Active + wrong cred, pending + wrong cred, inactive + wrong cred: all return ONLY "Invalid credentials".
     if !verify_password(&password, &hash) {
         return login_error(StatusCode::UNAUTHORIZED, "Invalid credentials", None);
     }
 
-    // 3. Status is revealed ONLY after the correct password.
     let active = matches!(user.status.to_ascii_lowercase().as_str(), "active" | "enabled" | "approved");
     if !active {
         return login_error(StatusCode::FORBIDDEN, "Account is not active", Some(&user.status));
@@ -410,7 +380,7 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
 
     if !next_url.starts_with('/') || next_url.starts_with("//") || next_url.contains("://") { next_url = "/".into(); }
 
-    let cookie = format!("{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}", cfg.cookie_name, token, lifetime);
+    let cookie = format!("{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}", auth_cfg.cookie_name, token, lifetime);
     let mut response = Json(json!({
         "success": true, "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role, "status": user.status }, "redirect": next_url
     })).into_response();
@@ -420,10 +390,10 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
 }
 
 pub async fn logout_handler(req: Request) -> impl IntoResponse {
-    let cfg = auth_config();
-    let token = req.headers().get(header::COOKIE).and_then(|v| v.to_str().ok()).and_then(|v| parse_cookie_header(v, &cfg.cookie_name));
+    let auth_cfg = auth_config(); // 🔥 FIX: Renamed from `cfg`
+    let token = req.headers().get(header::COOKIE).and_then(|v| v.to_str().ok()).and_then(|v| parse_cookie_header(v, &auth_cfg.cookie_name));
     if let Some(token) = token { let _ = delete_session(&token).await; }
-    let cookie = format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", cfg.cookie_name);
+    let cookie = format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", auth_cfg.cookie_name);
     let mut response = Redirect::to("/").into_response();
     if let Ok(value) = HeaderValue::from_str(&cookie) { response.headers_mut().append(header::SET_COOKIE, value); }
     response
@@ -438,61 +408,32 @@ pub async fn me_handler(axum::Extension(auth): axum::Extension<AuthUser>) -> imp
     }
 }
 
-// ============================================================================
-// Authorization Helpers
-// ============================================================================
-#[allow(dead_code)]
-pub fn is_authenticated(auth: &AuthUser) -> bool { auth.user.is_some() }
+#[allow(dead_code)] pub fn is_authenticated(auth: &AuthUser) -> bool { auth.user.is_some() }
+#[allow(dead_code)] pub fn has_role(auth: &AuthUser, role: &str) -> bool { auth.user.as_ref().is_some_and(|u| u.role.eq_ignore_ascii_case(role)) }
+#[allow(dead_code)] pub fn require_auth(auth: &AuthUser) -> Result<(), Response> { if is_authenticated(auth) { Ok(()) } else { Err((StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"}))).into_response()) } }
+#[allow(dead_code)] pub fn require_role(auth: &AuthUser, role: &str) -> Result<(), Response> { if !is_authenticated(auth) { return Err((StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"}))).into_response()); } if has_role(auth, role) { Ok(()) } else { Err((StatusCode::FORBIDDEN, Json(json!({"success": false, "error": "Insufficient permissions"}))).into_response()) } }
 
-#[allow(dead_code)]
-pub fn has_role(auth: &AuthUser, role: &str) -> bool { auth.user.as_ref().is_some_and(|u| u.role.eq_ignore_ascii_case(role)) }
-
-#[allow(dead_code)]
-pub fn require_auth(auth: &AuthUser) -> Result<(), Response> {
-    if is_authenticated(auth) { Ok(()) } 
-    else { Err((StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"}))).into_response()) }
-}
-
-#[allow(dead_code)]
-pub fn require_role(auth: &AuthUser, role: &str) -> Result<(), Response> {
-    if !is_authenticated(auth) { return Err((StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"}))).into_response()); }
-    if has_role(auth, role) { Ok(()) } 
-    else { Err((StatusCode::FORBIDDEN, Json(json!({"success": false, "error": "Insufficient permissions"}))).into_response()) }
-}
-// ============================================================================
-// Registration & Activation (Requires `auth_tokens` table, see schema note below)
-// ============================================================================
 pub async fn register_handler(req: Request) -> impl IntoResponse {
-    let cfg = auth_config();
+    let auth_cfg = auth_config();
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
-    
-    let mut name = String::new();
-    let mut email = String::new();
-    let mut password = String::new();
+    let mut name = String::new(); let mut email = String::new(); let mut password = String::new();
 
     if content_type.contains("application/json") {
         let payload = match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
-            Ok(v) => v,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
         };
-        name = payload.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-        email = payload.get(&cfg.identifier_field).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-        password = payload.get(&cfg.password_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        name = payload.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().replace('+', " ");
+        email = payload.get(&auth_cfg.identifier_field).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+        password = payload.get(&auth_cfg.password_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
     } else {
         let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
-            Ok(v) => v,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
         };
         for pair in String::from_utf8_lossy(&bytes).split('&') {
             let mut p = pair.splitn(2, '=');
             if let (Some(k), Some(v)) = (p.next(), p.next()) {
-                let value = urlencoding::decode(v).unwrap_or_default().into_owned();
-                match k {
-                    x if x == "name" => name = value,
-                    x if x == cfg.identifier_field => email = value,
-                    x if x == cfg.password_field => password = value,
-                    _ => {}
-                }
+                let value = urlencoding::decode(v).unwrap_or_default().replace('+', " ");
+                match k { x if x == "name" => name = value, x if x == auth_cfg.identifier_field => email = value, x if x == auth_cfg.password_field => password = value, _ => {} }
             }
         }
     }
@@ -501,380 +442,285 @@ pub async fn register_handler(req: Request) -> impl IntoResponse {
         return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Name, email, and password are required"}))).into_response();
     }
 
-    let pool = match DB_POOL.get() { 
-        Some(p) => p, 
-        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response() 
-    };
-    
-    let hash = match hash_password(&password).await { 
-        Ok(h) => h, 
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": e}))).into_response() 
-    };
-    
-    let status_col = if cfg.user_status.is_empty() { "status" } else { &cfg.user_status };
-    let name_col = if cfg.user_name.is_empty() { &cfg.user_identifier } else { &cfg.user_name };
+    let pool = match DB_POOL.get() { Some(p) => p, None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response() };
+    let hash = match hash_password(&password).await { Ok(h) => h, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": e}))).into_response() };
+    let status_col = if auth_cfg.user_status.is_empty() { "status" } else { &auth_cfg.user_status };
+    let name_col = if auth_cfg.user_name.is_empty() { &auth_cfg.user_identifier } else { &auth_cfg.user_name };
 
     let sql = format!("INSERT INTO {} ({}, {}, {}, {}) VALUES ({}, {}, {}, 'pending')",
-        cfg.user_table, name_col, cfg.user_identifier, cfg.user_password, status_col,
-        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3));
+        auth_cfg.user_table, name_col, auth_cfg.user_identifier, auth_cfg.user_password, status_col,
+        auth_cfg.placeholder(pool, 1), auth_cfg.placeholder(pool, 2), auth_cfg.placeholder(pool, 3));
     
-    if let Err(_) = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&sql).bind(&name).bind(&email).bind(&hash).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query(&sql).bind(&name).bind(&email).bind(&hash).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query(&sql).bind(&name).bind(&email).bind(&hash).execute(c).await.map(|_| ()),
-    } { 
-        return (StatusCode::CONFLICT, Json(json!({"success": false, "error": "Email already registered or DB error"}))).into_response(); 
+    if let Err(_) = crate::db_execute!(pool, &sql, &name, &email, &hash).map(|_| ()) {  
+        return (StatusCode::CONFLICT, Json(json!({
+            "success": false, 
+            "error": "Email already registered or DB error",
+            "message": "Email already registered or DB error"
+        }))).into_response();  
     }
 
-    let user_id: i64 = match pool {
-        DbPool::Sqlite(c) => sqlx::query_scalar(&format!("SELECT {} FROM {} WHERE {} = ?", cfg.user_id, cfg.user_table, cfg.user_identifier)).bind(&email).fetch_one(c).await,
-        DbPool::Postgres(c) => sqlx::query_scalar(&format!("SELECT {} FROM {} WHERE {} = $1", cfg.user_id, cfg.user_table, cfg.user_identifier)).bind(&email).fetch_one(c).await,
-        DbPool::MySql(c) => sqlx::query_scalar(&format!("SELECT {} FROM {} WHERE {} = ?", cfg.user_id, cfg.user_table, cfg.user_identifier)).bind(&email).fetch_one(c).await,
-    }.ok().flatten().unwrap_or(0);
+    let fetch_sql = format!("SELECT {} FROM {} WHERE {} = {}", auth_cfg.user_id, auth_cfg.user_table, auth_cfg.user_identifier, auth_cfg.placeholder(pool, 1));
+    // 🔥 FIX: Removed .flatten() because .ok() already returns Option<i64>
+    let user_id: i64 = crate::db_fetch_one_scalar_i64!(pool, &fetch_sql, &email).ok().unwrap_or(0);
 
     let token = generate_token();
     let expires_at = now_timestamp() + (7 * 24 * 60 * 60);
     let token_sql = format!("INSERT INTO auth_tokens (user_id, token, type, expires_at) VALUES ({}, {}, 'activate', {})",
-        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3));
-    let _ = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&token_sql).bind(user_id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query(&token_sql).bind(user_id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query(&token_sql).bind(user_id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
+        auth_cfg.placeholder(pool, 1), auth_cfg.placeholder(pool, 2), auth_cfg.placeholder(pool, 3));
+    let _ = crate::db_execute!(pool, &token_sql, user_id, &token, expires_at).map(|_| ());
+    
+    let root = crate::state::get_root_url();
+    let activation_link = format!("{}/api/auth/activate?token={}", root, token);
+    let app_name = std::env::var("APP_NAME").unwrap_or_else(|_| "VLO App".to_string());
+    
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("name".to_string(), serde_json::Value::String(name.clone()));
+    vars.insert("email".to_string(), serde_json::Value::String(email.clone()));
+    vars.insert("activation_link".to_string(), serde_json::Value::String(activation_link.clone()));
+    vars.insert("app_name".to_string(), serde_json::Value::String(app_name.clone()));
+    vars.insert("token".to_string(), serde_json::Value::String(token.clone()));
+    
+    let email_template = crate::mailer::render_email_template("welcome", &vars)
+        .unwrap_or_else(|| crate::mailer::EmailTemplate {
+            subject: format!("Activate your {} account", app_name),
+            body: format!("<h2>Welcome to {}!</h2><p>Hi {},</p><p>Click <a href='{}'>here</a> to activate your account.</p>", app_name, name, activation_link),
+        });
+    
+    // 🔥 CRITICAL: Do NOT put a semicolon after `true` or `false` here!
+    let email_sent = match crate::mailer::send_email(&email, &email_template.subject, &email_template.body).await {
+        Ok(_) => {
+            crate::vlo_debug!("✅ Activation email queued for {}", email);
+            true
+        }
+        Err(e) => {
+            crate::vlo_debug!("❌ Failed to send activation email to {}: {}", email, e);
+            false
+        }
     };
 
-    let root = std::env::var("ROOT").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let email_body = format!("<h2>Welcome!</h2><p>Click <a href='{}api/auth/activate?token={}'>here</a> to activate your account.</p>", root, token);
-    
-    // ✅ `email` is safely in scope here
-    match crate::mailer::send_email(&email, "Activate your VLO account", &email_body).await {
-        Ok(_) => crate::vlo_debug!("✅ Activation email queued for {}", email),
-        Err(e) => crate::vlo_debug!("❌ Failed to send activation email to {}: {}", email, e),
+    if email_sent {
+        return (StatusCode::CREATED, Json(json!({
+            "success": true, 
+            "message": "Registration successful. Please check your email."
+        }))).into_response();
+    } else {
+        return (StatusCode::CREATED, Json(json!({
+            "success": true, 
+            "warning": true,
+            "message": "Account created, but we couldn't send the activation email. Please check your spam folder or try resending later."
+        }))).into_response();
     }
-
-    (StatusCode::CREATED, Json(json!({"success": true, "message": "Registration successful. Please check your email."}))).into_response()
 }
+
 
 pub async fn activate_handler(req: Request) -> impl IntoResponse {
     let query = req.uri().query().unwrap_or("");
     let token = query.split('&').find_map(|p| p.splitn(2, '=').nth(1)).unwrap_or("");
     let pool = match DB_POOL.get() { Some(p) => p, None => return (StatusCode::INTERNAL_SERVER_ERROR, "DB error").into_response() };
-    let cfg = auth_config();
+    let auth_cfg = auth_config(); // 🔥 FIX: Renamed from `cfg` to `auth_cfg`
 
-    let user_id: Option<i64> = match pool {
-        DbPool::Sqlite(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = ? AND type = 'activate' AND expires_at > ?").bind(token).bind(now_timestamp()).fetch_optional(c).await,
-        DbPool::Postgres(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = $1 AND type = 'activate' AND expires_at > $2").bind(token).bind(now_timestamp()).fetch_optional(c).await,
-        DbPool::MySql(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = ? AND type = 'activate' AND expires_at > ?").bind(token).bind(now_timestamp()).fetch_optional(c).await,
-    }.ok().flatten();
+    let p1 = auth_cfg.placeholder(pool, 1); let p2 = auth_cfg.placeholder(pool, 2);
+    let fetch_sql = format!("SELECT user_id FROM auth_tokens WHERE token = {} AND type = 'activate' AND expires_at > {}", p1, p2);
+    let user_id: Option<i64> = crate::db_fetch_optional_scalar_i64!(pool, &fetch_sql, token, now_timestamp()).ok().flatten();
 
     if let Some(uid) = user_id {
-        let status_col = if cfg.user_status.is_empty() { "status" } else { &cfg.user_status };
-        let update_sql = format!("UPDATE {} SET {} = 'active' WHERE {} = {}", cfg.user_table, status_col, cfg.user_id, cfg.placeholder(pool, 1));
-        let _ = match pool {
-            DbPool::Sqlite(c) => sqlx::query(&update_sql).bind(uid).execute(c).await.map(|_| ()),
-            DbPool::Postgres(c) => sqlx::query(&update_sql).bind(uid).execute(c).await.map(|_| ()),
-            DbPool::MySql(c) => sqlx::query(&update_sql).bind(uid).execute(c).await.map(|_| ()),
-        };
-        let _ = match pool {
-            DbPool::Sqlite(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = ?").bind(token).execute(c).await.map(|_| ()),
-            DbPool::Postgres(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = $1").bind(token).execute(c).await.map(|_| ()),
-            DbPool::MySql(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = ?").bind(token).execute(c).await.map(|_| ()),
-        };
+        let status_col = if auth_cfg.user_status.is_empty() { "status" } else { &auth_cfg.user_status };
+        let update_sql = format!("UPDATE {} SET {} = 'active' WHERE {} = {}", auth_cfg.user_table, status_col, auth_cfg.user_id, auth_cfg.placeholder(pool, 1));
+        let _ = crate::db_execute!(pool, &update_sql, uid).map(|_| ());
         
-        // 🔥 Redirect to login with a success flash message
+        let delete_sql = format!("DELETE FROM auth_tokens WHERE token = {}", auth_cfg.placeholder(pool, 1));
+        let _ = crate::db_execute!(pool, &delete_sql, token).map(|_| ());
+        
         let flash = crate::auth::encode_flash("success", "✅", "Account Activated", "Your account has been successfully activated. You can now log in.");
         let mut response = axum::response::Redirect::to("/login").into_response();
-        if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::flash_cookie_header(&flash)) {
-            response.headers_mut().append(axum::http::header::SET_COOKIE, val);
-        }
+        if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::flash_cookie_header(&flash)) { response.headers_mut().append(axum::http::header::SET_COOKIE, val); }
         return response;
     }
-    
-    // 🔥 Redirect to login with an error flash message
     let flash = crate::auth::encode_flash("error", "❌", "Activation Failed", "Invalid or expired activation token.");
     let mut response = axum::response::Redirect::to("/login").into_response();
-    if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::flash_cookie_header(&flash)) {
-        response.headers_mut().append(axum::http::header::SET_COOKIE, val);
-    }
+    if let Ok(val) = axum::http::HeaderValue::from_str(&crate::auth::flash_cookie_header(&flash)) { response.headers_mut().append(axum::http::header::SET_COOKIE, val); }
     response
 }
-// ============================================================================
-// Password Reset Handlers
-// ============================================================================
 
 pub async fn forgot_password_handler(req: Request) -> impl IntoResponse {
     let cfg = auth_config();
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
-    
-    let client_ip = req.headers().get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or("unknown").trim().to_owned())
-        .or_else(|| req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip().to_string()))
-        .unwrap_or_else(|| "unknown".into());
+    let client_ip = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok()).map(|s| s.split(',').next().unwrap_or("unknown").trim().to_owned())
+        .or_else(|| req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip().to_string())).unwrap_or_else(|| "unknown".into());
 
-    if !check_rate_limit(&client_ip) {
-        return (StatusCode::OK, Json(json!({"success": true, "message": "If an account with this email exists, a password reset link has been sent."}))).into_response();
-    }
+    if !check_rate_limit(&client_ip) { return (StatusCode::OK, Json(json!({"success": true, "message": "If an account with this email exists, a password reset link has been sent."}))).into_response(); }
 
     let mut identifier = String::new();
-    
     if content_type.contains("application/json") {
         let payload = match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
-            Ok(v) => v,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
         };
         identifier = payload.get(&cfg.identifier_field).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     } else {
         let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
-            Ok(v) => v,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
         };
         for pair in String::from_utf8_lossy(&bytes).split('&') {
             let mut p = pair.splitn(2, '=');
-            if let (Some(k), Some(v)) = (p.next(), p.next()) {
-                if k == cfg.identifier_field {
-                    identifier = urlencoding::decode(v).unwrap_or_default().into_owned();
-                    break;
-                }
-            }
+            if let (Some(k), Some(v)) = (p.next(), p.next()) { if k == cfg.identifier_field { identifier = urlencoding::decode(v).unwrap_or_default().replace('+', " "); break; } }
         }
     }
 
-    if identifier.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Email is required"}))).into_response();
-    }
+    if identifier.is_empty() { return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Email is required"}))).into_response(); }
+    let pool = match DB_POOL.get() { Some(p) => p, None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response() };
 
-    let pool = match DB_POOL.get() {
-        Some(p) => p,
-        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response(),
-    };
-
-    // ✅ `user` is declared here and remains in scope
     let user = match find_user_by_identifier(&identifier).await {
         Some(u) => u,
-        None => {
-            return (StatusCode::OK, Json(json!({"success": true, "message": "If an account with this email exists, a password reset link has been sent."}))).into_response();
-        }
+        None => return (StatusCode::OK, Json(json!({"success": true, "message": "If an account with this email exists, a password reset link has been sent."}))).into_response(),
     };
 
     let token = generate_token();
-    let expires_at = now_timestamp() + 3600; // 1 hour
+    let expires_at = now_timestamp() + 3600;
+    let token_sql = format!("INSERT INTO auth_tokens (user_id, token, type, expires_at) VALUES ({}, {}, 'password_reset', {})",
+        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3));
+    let _ = crate::db_execute!(pool, &token_sql, user.id, &token, expires_at).map(|_| ());
 
-    let token_sql = format!(
-        "INSERT INTO auth_tokens (user_id, token, type, expires_at) VALUES ({}, {}, 'password_reset', {})",
-        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3)
-    );
+    let root = crate::state::get_root_url();
+    let reset_link = format!("{}/login?token={}", root, token);
+    let app_name = std::env::var("APP_NAME").unwrap_or_else(|_| "VLO App".to_string());
     
-    let _ = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
-    };
-
-    let root = std::env::var("ROOT").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let reset_url = format!("{}api/auth/reset-password?token={}", root, token);
-    let email_body = format!(
-        "<h2>Password Reset Request</h2><p>Click <a href='{}'>here</a> to reset your password. This link expires in 1 hour.</p>",
-        reset_url
-    );
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("email".to_string(), serde_json::Value::String(user.email.clone()));
+    vars.insert("reset_link".to_string(), serde_json::Value::String(reset_link.clone()));
+    vars.insert("app_name".to_string(), serde_json::Value::String(app_name.clone()));
+    vars.insert("token".to_string(), serde_json::Value::String(token.clone()));
     
-    // ✅ `user.email` is safely in scope here
-    match crate::mailer::send_email(&user.email, "Reset your VLO password", &email_body).await {
+    let email_template = crate::mailer::render_email_template("reset_password", &vars)
+        .unwrap_or_else(|| crate::mailer::EmailTemplate {
+            subject: format!("Reset your {} password", app_name),
+            body: format!("<h2>Password Reset Request</h2><p>Click <a href='{}'>here</a> to reset your password. This link expires in 1 hour.</p>", reset_link),
+        });
+    
+    match crate::mailer::send_email(&user.email, &email_template.subject, &email_template.body).await {
         Ok(_) => crate::vlo_debug!("✅ Password reset email queued for {}", user.email),
         Err(e) => crate::vlo_debug!("❌ Failed to send reset email to {}: {}", user.email, e),
     }
-
     (StatusCode::OK, Json(json!({"success": true, "message": "If an account with this email exists, a password reset link has been sent."}))).into_response()
 }
 
 pub async fn reset_password_handler(req: Request) -> impl IntoResponse {
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
-    
-    let mut token = String::new();
-    let mut new_password = String::new();
+    let mut token = String::new(); let mut new_password = String::new();
 
     if content_type.contains("application/json") {
         let payload = match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
-            Ok(v) => v,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
         };
         token = payload.get("token").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
         new_password = payload.get("new_password").and_then(|v| v.as_str()).unwrap_or("").to_string();
     } else if content_type.contains("application/x-www-form-urlencoded") {
         let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
-            Ok(v) => v,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
         };
         for pair in String::from_utf8_lossy(&bytes).split('&') {
             let mut p = pair.splitn(2, '=');
             if let (Some(k), Some(v)) = (p.next(), p.next()) {
-                let val = urlencoding::decode(v).unwrap_or_default().into_owned();
-                if k == "token" { token = val; }
-                else if k == "new_password" { new_password = val; }
+                let val = urlencoding::decode(v).unwrap_or_default().replace('+', " ");
+                if k == "token" { token = val; } else if k == "new_password" { new_password = val; }
             }
         }
-    } else {
-        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Unsupported content type"}))).into_response();
-    }
+    } else { return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Unsupported content type"}))).into_response(); }
 
-    if token.is_empty() || new_password.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Token and new password are required"}))).into_response();
-    }
+    if token.is_empty() || new_password.is_empty() { return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Token and new password are required"}))).into_response(); }
+    let pool = match DB_POOL.get() { Some(p) => p, None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response() };
 
-    let pool = match DB_POOL.get() {
-        Some(p) => p,
-        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response(),
-    };
+    let auth_cfg = auth_config(); // 🔥 FIX: Renamed from `cfg` to `auth_cfg`
+    let p1 = auth_cfg.placeholder(pool, 1); let p2 = auth_cfg.placeholder(pool, 2);
+    let fetch_sql = format!("SELECT user_id FROM auth_tokens WHERE token = {} AND type = 'password_reset' AND expires_at > {}", p1, p2);
+    let user_id: Option<i64> = crate::db_fetch_optional_scalar_i64!(pool, &fetch_sql, &token, now_timestamp()).ok().flatten();
 
-    // Verify token
-    let user_id: Option<i64> = match pool {
-        DbPool::Sqlite(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = ? AND type = 'password_reset' AND expires_at > ?").bind(&token).bind(now_timestamp()).fetch_optional(c).await,
-        DbPool::Postgres(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = $1 AND type = 'password_reset' AND expires_at > $2").bind(&token).bind(now_timestamp()).fetch_optional(c).await,
-        DbPool::MySql(c) => sqlx::query_scalar("SELECT user_id FROM auth_tokens WHERE token = ? AND type = 'password_reset' AND expires_at > ?").bind(&token).bind(now_timestamp()).fetch_optional(c).await,
-    }.ok().flatten();
+    let user_id = match user_id { Some(id) => id, None => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid or expired reset token"}))).into_response() };
+    let hash = match hash_password(&new_password).await { Ok(h) => h, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": e}))).into_response() };
 
-    let user_id = match user_id {
-        Some(id) => id,
-        None => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid or expired reset token"}))).into_response(),
-    };
-
-    // Hash new password
-    let hash = match hash_password(&new_password).await {
-        Ok(h) => h,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": e}))).into_response(),
-    };
-
-    let cfg = auth_config();
-    let update_sql = format!(
-        "UPDATE {} SET {} = {} WHERE {} = {}",
-        cfg.user_table, cfg.user_password, cfg.placeholder(pool, 1), cfg.user_id, cfg.placeholder(pool, 2)
-    );
-
-    // 1. Update password
-    if let Err(e) = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&update_sql).bind(&hash).bind(user_id).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query(&update_sql).bind(&hash).bind(user_id).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query(&update_sql).bind(&hash).bind(user_id).execute(c).await.map(|_| ()),
-    } {
+    let update_sql = format!("UPDATE {} SET {} = {} WHERE {} = {}", auth_cfg.user_table, auth_cfg.user_password, auth_cfg.placeholder(pool, 1), auth_cfg.user_id, auth_cfg.placeholder(pool, 2));
+    if let Err(e) = crate::db_execute!(pool, &update_sql, &hash, user_id).map(|_| ()) {
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": format!("Failed to update password: {}", e)}))).into_response();
     }
 
-    // 2. Delete used token
-    let _ = match pool {
-        DbPool::Sqlite(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = ?").bind(&token).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = $1").bind(&token).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query("DELETE FROM auth_tokens WHERE token = ?").bind(&token).execute(c).await.map(|_| ()),
-    };
+    let delete_token_sql = format!("DELETE FROM auth_tokens WHERE token = {}", auth_cfg.placeholder(pool, 1));
+    let _ = crate::db_execute!(pool, &delete_token_sql, &token).map(|_| ());
 
-    // 3. Delete existing sessions
-    let delete_sessions_sql = format!("DELETE FROM {} WHERE {} = {}", cfg.session_table, cfg.session_user_id, cfg.placeholder(pool, 1));
-    let _ = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&delete_sessions_sql).bind(user_id).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query(&delete_sessions_sql).bind(user_id).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query(&delete_sessions_sql).bind(user_id).execute(c).await.map(|_| ()),
-    };
+    let delete_sessions_sql = format!("DELETE FROM {} WHERE {} = {}", auth_cfg.session_table, auth_cfg.session_user_id, auth_cfg.placeholder(pool, 1));
+    let _ = crate::db_execute!(pool, &delete_sessions_sql, user_id).map(|_| ());
 
     (StatusCode::OK, Json(json!({"success": true, "message": "Password reset successfully. You can now log in."}))).into_response()
 }
 
-// ============================================================================
-// Resend Activation Handler
-// ============================================================================
 pub async fn resend_activation_handler(req: Request) -> impl IntoResponse {
     let cfg = auth_config();
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
-    
     let mut identifier = String::new();
     if content_type.contains("application/json") {
         let payload = match axum::extract::Json::<serde_json::Value>::from_request(req, &()).await {
-            Ok(v) => v,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid JSON"}))).into_response(),
         };
         identifier = payload.get(&cfg.identifier_field).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     } else {
         let bytes = match axum::body::to_bytes(req.into_body(), 1024 * 1024).await {
-            Ok(v) => v,
-            Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
+            Ok(v) => v, Err(_) => return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Failed to read body"}))).into_response(),
         };
         for pair in String::from_utf8_lossy(&bytes).split('&') {
             let mut p = pair.splitn(2, '=');
-            if let (Some(k), Some(v)) = (p.next(), p.next()) {
-                if k == cfg.identifier_field {
-                    identifier = urlencoding::decode(v).unwrap_or_default().into_owned();
-                    break;
-                }
-            }
+            if let (Some(k), Some(v)) = (p.next(), p.next()) { if k == cfg.identifier_field { identifier = urlencoding::decode(v).unwrap_or_default().replace('+', " "); break; } }
         }
     }
 
-    if identifier.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Email is required"}))).into_response();
-    }
+    if identifier.is_empty() { return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Email is required"}))).into_response(); }
+    let pool = match DB_POOL.get() { Some(p) => p, None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response() };
 
-    let pool = match DB_POOL.get() {
-        Some(p) => p,
-        None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response(),
-    };
-
-    // ✅ `user` is declared here and remains in scope
     let user = match find_user_by_identifier(&identifier).await {
         Some(u) => u,
         None => return (StatusCode::OK, Json(json!({"success": true, "message": "If an account exists, an activation link has been sent."}))).into_response(),
     };
 
-    if user.status.to_lowercase() == "active" {
-        return (StatusCode::OK, Json(json!({"success": true, "message": "Your account is already active. You can log in."}))).into_response();
-    }
+    if user.status.to_lowercase() == "active" { return (StatusCode::OK, Json(json!({"success": true, "message": "Your account is already active. You can log in."}))).into_response(); }
 
     let token = generate_token();
-    let expires_at = now_timestamp() + (7 * 24 * 60 * 60); // 7 days
-    let token_sql = format!(
-        "INSERT INTO auth_tokens (user_id, token, type, expires_at) VALUES ({}, {}, 'activate', {})",
-        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3)
-    );
-    let _ = match pool {
-        DbPool::Sqlite(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
-        DbPool::Postgres(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
-        DbPool::MySql(c) => sqlx::query(&token_sql).bind(user.id).bind(&token).bind(expires_at).execute(c).await.map(|_| ()),
-    };
+    let expires_at = now_timestamp() + (7 * 24 * 60 * 60);
+    let token_sql = format!("INSERT INTO auth_tokens (user_id, token, type, expires_at) VALUES ({}, {}, 'activate', {})",
+        cfg.placeholder(pool, 1), cfg.placeholder(pool, 2), cfg.placeholder(pool, 3));
+    let _ = crate::db_execute!(pool, &token_sql, user.id, &token, expires_at).map(|_| ());
 
-    let root = std::env::var("ROOT").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let email_body = format!("<h2>Welcome!</h2><p>Click <a href='{}api/auth/activate?token={}'>here</a> to activate your account.</p>", root, token);
+    let root = crate::state::get_root_url();
+    let activation_link = format!("{}/api/auth/activate?token={}", root, token);
+    let app_name = std::env::var("APP_NAME").unwrap_or_else(|_| "VLO App".to_string());
     
-    // ✅ `user.email` is safely in scope here
-    match crate::mailer::send_email(&user.email, "Activate your VLO account", &email_body).await {
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("email".to_string(), serde_json::Value::String(user.email.clone()));
+    vars.insert("activation_link".to_string(), serde_json::Value::String(activation_link.clone()));
+    vars.insert("app_name".to_string(), serde_json::Value::String(app_name.clone()));
+    vars.insert("token".to_string(), serde_json::Value::String(token.clone()));
+    
+    let email_template = crate::mailer::render_email_template("activation_reminder", &vars)
+        .unwrap_or_else(|| crate::mailer::EmailTemplate {
+            subject: format!("Activate your {} account", app_name),
+            body: format!("<h2>Activate Your Account</h2><p>Click <a href='{}'>here</a> to activate your account.</p>", activation_link),
+        });
+    
+    match crate::mailer::send_email(&user.email, &email_template.subject, &email_template.body).await {
         Ok(_) => crate::vlo_debug!("✅ Activation email queued for {}", user.email),
         Err(e) => crate::vlo_debug!("❌ Failed to send activation email to {}: {}", user.email, e),
     }
-
     (StatusCode::OK, Json(json!({"success": true, "message": "Activation link sent successfully. Please check your email."}))).into_response()
 }
-// ============================================================================
-// Page Guards & Flash Messages (Unchanged logic, compacted)
-// ============================================================================
+
 static LAYOUT_TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)<([A-Za-z][A-Za-z0-9_-]*)Layout\s+([^>]*)>"#).unwrap());
-
 pub struct PageGuard { pub auth: bool, pub roles: Vec<String>, pub guest: bool }
-
 pub fn extract_page_guard(source: &str) -> Option<PageGuard> {
     let caps = LAYOUT_TAG_RE.captures(source)?;
     let props = parse_props_v7(caps.get(2)?.as_str());
-    let bool_prop = |key: &str| match props.get(key) {
-        Some(serde_json::Value::Bool(v)) => *v, Some(serde_json::Value::String(v)) => v.eq_ignore_ascii_case("true"), _ => false,
-    };
+    let bool_prop = |key: &str| match props.get(key) { Some(serde_json::Value::Bool(v)) => *v, Some(serde_json::Value::String(v)) => v.eq_ignore_ascii_case("true"), _ => false };
     let auth = bool_prop("auth"); let guest = bool_prop("guest");
     let mut roles = Vec::new();
-    for key in ["roles", "role"] {
-        if let Some(serde_json::Value::String(value)) = props.get(key) {
-            roles.extend(value.split(',').map(str::trim).filter(|v| !v.is_empty()).map(String::from));
-        }
-    }
+    for key in ["roles", "role"] { if let Some(serde_json::Value::String(value)) = props.get(key) { roles.extend(value.split(',').map(str::trim).filter(|v| !v.is_empty()).map(String::from)); } }
     (auth || guest || !roles.is_empty()).then_some(PageGuard { auth, roles, guest })
 }
-
-fn safe_next(next: Option<&str>) -> String {
-    match next { Some(v) if v.starts_with('/') && !v.starts_with("/login") && !v.contains("://") => v.into(), _ => "/dashboard".into() }
-}
-
+fn safe_next(next: Option<&str>) -> String { match next { Some(v) if v.starts_with('/') && !v.starts_with("/login") && !v.contains("://") => v.into(), _ => "/dashboard".into() } }
 pub fn check_page_guard(guard: &PageGuard, user: &Option<User>, current_path: &str, next: Option<&str>) -> Option<Response> {
     if guard.guest && user.is_some() { return Some(Redirect::to(&safe_next(next)).into_response()); }
     if guard.auth && user.is_none() { return Some(Redirect::to(&format!("/login?next={current_path}")).into_response()); }
@@ -889,35 +735,20 @@ pub fn check_page_guard(guard: &PageGuard, user: &Option<User>, current_path: &s
 }
 
 pub const FLASH_COOKIE: &str = "vlo_flash";
-pub fn encode_flash(variant: &str, icon: &str, title: &str, description: &str) -> String {
-    urlencoding::encode(&serde_json::to_string(&json!({"variant": variant, "icon": icon, "title": title, "description": description})).unwrap_or_default()).to_string()
-}
+pub fn encode_flash(variant: &str, icon: &str, title: &str, description: &str) -> String { urlencoding::encode(&serde_json::to_string(&json!({"variant": variant, "icon": icon, "title": title, "description": description})).unwrap_or_default()).to_string() }
 pub fn decode_flash(encoded: &str) -> Option<serde_json::Value> { let decoded = urlencoding::decode(encoded).ok()?; serde_json::from_str(&decoded).ok() }
 pub fn flash_cookie_header(encoded: &str) -> String { format!("{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=60", FLASH_COOKIE, encoded) }
 pub fn expire_flash_cookie() -> String { format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", FLASH_COOKIE) }
 
-// ============================================================================
-// Rate Limiting
-// ============================================================================
 static RATE_LIMITS: LazyLock<Mutex<HashMap<String, Vec<SystemTime>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_MAX_ATTEMPTS: usize = 5;
-
 pub fn check_rate_limit(ip: &str) -> bool {
-    let now = SystemTime::now();
-    let mut limits = RATE_LIMITS.lock().unwrap();
-    let entries = limits.entry(ip.into()).or_default();
+    let now = SystemTime::now(); let mut limits = RATE_LIMITS.lock().unwrap(); let entries = limits.entry(ip.into()).or_default();
     entries.retain(|time| now.duration_since(*time).unwrap_or_default() < Duration::from_secs(RATE_LIMIT_WINDOW_SECS));
-    if entries.len() >= RATE_LIMIT_MAX_ATTEMPTS { return false; }
-    entries.push(now); true
+    if entries.len() >= RATE_LIMIT_MAX_ATTEMPTS { return false; } entries.push(now); true
 }
-
-#[allow(dead_code)]
-pub fn cleanup_rate_limits() {
-    let now = SystemTime::now();
-    let mut limits = RATE_LIMITS.lock().unwrap();
-    limits.retain(|_, entries| {
-        entries.retain(|time| now.duration_since(*time).unwrap_or_default() < Duration::from_secs(RATE_LIMIT_WINDOW_SECS));
-        !entries.is_empty()
-    });
+#[allow(dead_code)] pub fn cleanup_rate_limits() {
+    let now = SystemTime::now(); let mut limits = RATE_LIMITS.lock().unwrap();
+    limits.retain(|_, entries| { entries.retain(|time| now.duration_since(*time).unwrap_or_default() < Duration::from_secs(RATE_LIMIT_WINDOW_SECS)); !entries.is_empty() });
 }

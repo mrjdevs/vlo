@@ -1,0 +1,22 @@
+<!-- subject: Welcome to {{app_name}}, {{name | proper}}! -->
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; }
+        .btn { display: inline-block; padding: 12px 24px; background: #00f5ff; color: #000; text-decoration: none; border-radius: 6px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- The | proper modifier will capitalize "lucky+boy!" to "Lucky+boy!" -->
+        <h1>Welcome to {{app_name}}, {{name | proper}}!</h1>
+        <p>We're thrilled to have you on board. Please click the button below to verify your email address and activate your account.</p>
+        <p style="text-align: center; margin: 30px 0;">
+            <a href="{{activation_link}}" class="btn">Activate My Account</a>
+        </p>
+        <p style="color: #666; font-size: 12px;">If you didn't create an account, you can safely ignore this email.</p>
+    </div>
+</body>
+</html>

@@ -290,3 +290,23 @@ static MODULE_REGISTRY: LazyLock<Mutex<Vec<LoadedModule>>> = LazyLock::new(|| Mu
 pub fn get_module_registry() -> &'static LazyLock<Mutex<Vec<LoadedModule>>> {
     &MODULE_REGISTRY
 }
+
+// ---------------------------------------------------------------------------
+// Canonical Root URL (Initialized once at startup)
+// ---------------------------------------------------------------------------
+pub static ROOT_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn init_root_url() {
+    let root = std::env::var("ROOT")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "http://localhost:3000".to_string())
+        .trim_end_matches('/')
+        .to_string();
+    
+    ROOT_URL.set(root).ok();
+}
+
+pub fn get_root_url() -> &'static str {
+    ROOT_URL.get().map(|s| s.as_str()).unwrap_or("http://localhost:3000")
+}

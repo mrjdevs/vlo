@@ -14,10 +14,34 @@
                 Sign in to manage your projects, dashboards and content.
             </p>
 
-            {if status == "error" || error}
-                <div class="auth-alert">
+            <!-- Standard Error or Message -->
+            {if error}
+                <div class="auth-alert error">
                     <span>!</span>
                     <p>{{error}}</p>
+                </div>
+            {/if}
+
+            {if message}
+                <div class="auth-alert success">
+                    <span>✓</span>
+                    <p>{{message}}</p>
+                </div>
+            {/if}
+
+            <!-- 2. Warning Message (Orange/Yellow) -->
+            {if warning && message}
+                <div class="auth-alert" style="border-color: rgba(255,170,0,.25); background: rgba(255,170,0,.05);">
+                    <span style="background: rgba(255,170,0,.1); color: #ffaa00; font-weight: bold; font-size: 1.2rem;">⚠️</span>
+                    <p style="color: #ffaa00; margin: 0;">{{message}}</p>
+                </div>
+            {/if}
+
+            <!-- 3. Success Message (Green) -->
+            {if success && message && !warning}
+                <div class="auth-alert" style="border-color: rgba(0,255,136,.25); background: rgba(0,255,136,.05);">
+                    <span style="background: rgba(0,255,136,.1); color: #00ff88; font-weight: bold; font-size: 1.2rem;">✓</span>
+                    <p style="color: #00ff88; margin: 0;">{{message}}</p>
                 </div>
             {/if}
 
