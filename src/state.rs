@@ -297,7 +297,7 @@ pub fn get_module_registry() -> &'static LazyLock<Mutex<Vec<LoadedModule>>> {
 pub static ROOT_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 pub fn init_root_url() {
-    let root = std::env::var("ROOT")
+    let root = std::env::var("APP_URL")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "http://localhost:3000".to_string())

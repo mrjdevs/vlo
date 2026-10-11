@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_token ON auth_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id);
+
 -- ============================================================
 -- 2. PRODUCTS TABLE
 -- ============================================================

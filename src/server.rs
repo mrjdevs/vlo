@@ -355,15 +355,18 @@ async fn run_server(
         crate::router::init_live_broadcast();
     }
 
+    // 🔥 PaaS COMPATIBILITY: Check standard PORT/HOST first, then VLO_ fallbacks
     let host_str = host
         .map(str::to_string)
+        .or_else(|| std::env::var("HOST").ok())
         .or_else(|| std::env::var("VLO_HOST").ok())
-        .unwrap_or_else(|| "127.0.0.1".to_string());
+        .unwrap_or_else(|| "0.0.0.0".to_string());
 
     let port_num = port
         .or_else(|| {
-            std::env::var("VLO_PORT")
+            std::env::var("PORT")
                 .ok()
+                .or_else(|| std::env::var("VLO_PORT").ok())
                 .and_then(|value| value.parse::<u16>().ok())
         })
         .unwrap_or(3000);

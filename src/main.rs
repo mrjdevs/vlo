@@ -54,11 +54,16 @@ async fn init_enabled_features(is_build: bool) -> Result<(), String> {
         auth::init_auth_config(); 
         auth::init_session_secret(); 
     }
-    // Modules and SSE are usually not needed during a static `build` command
+    
+    // 🔥 CRITICAL FIX: Modules MUST be initialized during build!
+    // Otherwise, the renderer won't find module components (like charts) 
+    // and they will be missing from the generated HTML.
+    if is_enabled(Feature::Modules) { 
+        modules::init_modules()?; 
+    }
+
+    // SSE is the only feature truly not needed during a static `build` command
     if !is_build {
-        if is_enabled(Feature::Modules) { 
-            modules::init_modules()?; 
-        }
         if is_enabled(Feature::Sse) { 
             crate::router::init_live_broadcast(); 
         }
