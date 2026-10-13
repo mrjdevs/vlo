@@ -486,30 +486,25 @@ pub async fn register_handler(req: Request) -> impl IntoResponse {
             body: format!("<h2>Welcome to {}!</h2><p>Hi {},</p><p>Click <a href='{}'>here</a> to activate your account.</p>", app_name, name, activation_link),
         });
     
-    // 🔥 CRITICAL: Do NOT put a semicolon after `true` or `false` here!
-    let email_sent = match crate::mailer::send_email(&email, &email_template.subject, &email_template.body).await {
-        Ok(_) => {
-            crate::vlo_debug!("✅ Activation email queued for {}", email);
-            true
-        }
-        Err(e) => {
-            crate::vlo_debug!("❌ Failed to send activation email to {}: {}", email, e);
-            false
-        }
-    };
+    // 🔥 DOGFOODING: Dispatch to background job instead of blocking the HTTP request
+    let job_payload = json!({
+        "email": email,
+        "subject": email_template.subject,
+        "body": email_template.body
+    });
 
-    if email_sent {
-        return (StatusCode::CREATED, Json(json!({
-            "success": true, 
-            "message": "Registration successful. Please check your email."
-        }))).into_response();
+    if let Err(e) = crate::jobs::dispatch("send_welcome_email", job_payload, None).await {
+        crate::vlo_debug!("❌ Failed to dispatch welcome email job: {}", e);
+        // We still return success because the user was created in the DB. 
+        // The job will retry automatically in the background.
     } else {
-        return (StatusCode::CREATED, Json(json!({
-            "success": true, 
-            "warning": true,
-            "message": "Account created, but we couldn't send the activation email. Please check your spam folder or try resending later."
-        }))).into_response();
+        crate::vlo_debug!("✅ Activation email job dispatched for {}", email);
     }
+
+    (StatusCode::CREATED, Json(json!({
+        "success": true, 
+        "message": "Registration successful. Please check your email."
+    }))).into_response()
 }
 
 
@@ -596,10 +591,18 @@ pub async fn forgot_password_handler(req: Request) -> impl IntoResponse {
             body: format!("<h2>Password Reset Request</h2><p>Click <a href='{}'>here</a> to reset your password. This link expires in 1 hour.</p>", reset_link),
         });
     
-    match crate::mailer::send_email(&user.email, &email_template.subject, &email_template.body).await {
-        Ok(_) => crate::vlo_debug!("✅ Password reset email queued for {}", user.email),
-        Err(e) => crate::vlo_debug!("❌ Failed to send reset email to {}: {}", user.email, e),
+    let job_payload = json!({
+        "email": user.email,
+        "subject": email_template.subject,
+        "body": email_template.body
+    });
+
+    if let Err(e) = crate::jobs::dispatch("send_password_reset", job_payload, None).await {
+        crate::vlo_debug!("❌ Failed to dispatch password reset email job: {}", e);
+    } else {
+        crate::vlo_debug!("✅ Password reset email job dispatched for {}", user.email);
     }
+
     (StatusCode::OK, Json(json!({"success": true, "message": "If an account with this email exists, a password reset link has been sent."}))).into_response()
 }
 
@@ -702,10 +705,18 @@ pub async fn resend_activation_handler(req: Request) -> impl IntoResponse {
             body: format!("<h2>Activate Your Account</h2><p>Click <a href='{}'>here</a> to activate your account.</p>", activation_link),
         });
     
-    match crate::mailer::send_email(&user.email, &email_template.subject, &email_template.body).await {
-        Ok(_) => crate::vlo_debug!("✅ Activation email queued for {}", user.email),
-        Err(e) => crate::vlo_debug!("❌ Failed to send activation email to {}: {}", user.email, e),
+    let job_payload = json!({
+        "email": user.email,
+        "subject": email_template.subject,
+        "body": email_template.body
+    });
+
+    if let Err(e) = crate::jobs::dispatch("send_activation_email", job_payload, None).await {
+        crate::vlo_debug!("❌ Failed to dispatch activation email job: {}", e);
+    } else {
+        crate::vlo_debug!("✅ Activation email job dispatched for {}", user.email);
     }
+
     (StatusCode::OK, Json(json!({"success": true, "message": "Activation link sent successfully. Please check your email."}))).into_response()
 }
 

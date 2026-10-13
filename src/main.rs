@@ -15,6 +15,7 @@ mod module_handler;
 mod modifier;
 mod mailer;
 mod features;
+mod jobs;
 
 use clap::Parser;
 
@@ -44,8 +45,6 @@ async fn main() {
         std::process::exit(1);
     }
 }
-
-// 🔥 HELPER: Conditionally initialize features based on VLO_FEATURES env var
 async fn init_enabled_features(is_build: bool) -> Result<(), String> {
     if is_enabled(Feature::Database) { 
         database::init_db().await?; 
@@ -54,22 +53,21 @@ async fn init_enabled_features(is_build: bool) -> Result<(), String> {
         auth::init_auth_config(); 
         auth::init_session_secret(); 
     }
-    
-    // 🔥 CRITICAL FIX: Modules MUST be initialized during build!
-    // Otherwise, the renderer won't find module components (like charts) 
-    // and they will be missing from the generated HTML.
     if is_enabled(Feature::Modules) { 
         modules::init_modules()?; 
     }
+    
+    // 🔥 START THE JOBS WORKER (Only in dev/serve, not build)
+    if !is_build && is_enabled(Feature::Jobs) {
+        tokio::spawn(crate::jobs::start_worker());
+    }
 
-    // SSE is the only feature truly not needed during a static `build` command
-    if !is_build {
-        if is_enabled(Feature::Sse) { 
-            crate::router::init_live_broadcast(); 
-        }
+    if !is_build && is_enabled(Feature::Sse) { 
+        crate::router::init_live_broadcast(); 
     }
     Ok(())
 }
+
 
 use crate::features::{Feature, init_features, is_enabled};
 

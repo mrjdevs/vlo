@@ -13,6 +13,7 @@ pub enum Feature {
     Flash,
     Pagination,
     Directives,
+    Jobs,
 }
 
 impl Feature {
@@ -28,6 +29,7 @@ impl Feature {
             "flash" => Some(Self::Flash),
             "pagination" => Some(Self::Pagination),
             "directives" => Some(Self::Directives),
+            "jobs" => Some(Self::Jobs),
             _ => None,
         }
     }
@@ -44,6 +46,7 @@ impl Feature {
             Self::Flash => "flash",
             Self::Pagination => "pagination",
             Self::Directives => "directives",
+            Self::Jobs => "jobs",
         }
     }
 }

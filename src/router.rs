@@ -838,30 +838,54 @@ function showErr(input, msg) {
     // In serve mode the spans are rendered at request time, so the real
     // injection happens in serve_build_page. This block covers dev mode
     // and any page whose |sync spans ARE visible at build time.
+    // ─── SSE INIT (dev-mode / build-time detection) ────────
     if html.contains("class=\"vlo-sync\"") || html.contains("data-channel=") {
-        let sse_script = r#"<script>
-(function(){
-if(window.__VLO_SSE__) return;
-window.__VLO_SSE__ = new EventSource("/__vlo_sse");
-window.__VLO_SSE__.onmessage = function(e) {
-    try {
-    var data = JSON.parse(e.data);
-    var els = document.querySelectorAll('[data-channel="' + data.channel + '"]');
-    for (var i = 0; i < els.length; i++) {
-        if (typeof data.value === 'object' && data.value !== null) {
-        window.dispatchEvent(new CustomEvent('vlo:mutation'));
+        let csrf_token = if dev {
+            rendered.template_context.get("csrf_token")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
         } else {
-        els[i].innerHTML = data.value;
-        els[i].classList.add('vlo-sync-updated');
-        (function(el){ setTimeout(function(){ el.classList.remove('vlo-sync-updated'); }, 600); })(els[i]);
-        }
+            "__VLO_CSRF_PLACEHOLDER__"
+        };
+
+        // 🔥 BULLETPROOF: Use .replace() instead of format! to avoid macro escaping bugs
+        let mut sse_script = r#"<script id="__VLO_SSE__">
+(function(){
+  window.__VLO_BROADCAST__ = function(channel, value) {
+    var csrfToken = '__CSRF_TOKEN__';
+    if (csrfToken === '__VLO_CSRF_PLACEHOLDER__') {
+        csrfToken = document.querySelector('meta[name="csrf-token"]').content || '';
     }
+    fetch('/api/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      credentials: 'same-origin',
+      body: JSON.stringify({ channel: channel, value: value })
+    }).catch(function(e) { console.error('[VLO Broadcast]', e); });
+  };
+  
+  window.__VLO_SSE__ = new EventSource("/__vlo_sse");
+  window.__VLO_SSE__.onmessage = function(e) {
+    try {
+      var data = JSON.parse(e.data);
+      var els = document.querySelectorAll('[data-channel="' + data.channel + '"]');
+      for (var i = 0; i < els.length; i++) {
+        if (typeof data.value === 'object' && data.value !== null) {
+          window.dispatchEvent(new CustomEvent('vlo:mutation'));
+        } else {
+          els[i].innerHTML = data.value;
+          els[i].classList.add('vlo-sync-updated');
+          setTimeout((function(el){ return function(){ el.classList.remove('vlo-sync-updated'); }; })(els[i]), 600);
+        }
+      }
     } catch(err) { console.error('VLO SSE Error:', err); }
-};
-window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error:', e); };
+  };
+  window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error:', e); };
 })();
-</script>"#;
-        body_injections.push_str(sse_script);
+</script>"#.to_string();
+
+        sse_script = sse_script.replace("__CSRF_TOKEN__", csrf_token);
+        body_injections.push_str(&sse_script);
         body_injections.push('\n');
     }
 

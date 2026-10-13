@@ -1,9 +1,12 @@
-use crate::state::get_project_root;
 use crate::features::{Feature, is_enabled};
+use crate::state::get_project_root;
 use serde_json::Value;
-use std::{fs, path::Path, sync::OnceLock};
 use sqlx::{Column, Row, ValueRef};
+use std::{fs, path::Path, sync::OnceLock};
 
+// ===========================================================================
+// 1. DB POOL & SINGLE SOURCE OF TRUTH
+// ===========================================================================
 #[derive(Clone)]
 pub enum DbPool {
     Sqlite(sqlx::SqlitePool),
@@ -13,239 +16,167 @@ pub enum DbPool {
 
 pub static DB_POOL: OnceLock<DbPool> = OnceLock::new();
 
-// ---------------------------------------------------------------------------
-// Safe Pool Access (Prevents Panics)
-// ---------------------------------------------------------------------------
-/// Safely retrieves the database pool. 
-/// Returns a clean error message if the Database feature is disabled or not initialized.
-/// Use this in API handlers instead of `DB_POOL.get().unwrap()`.
-pub fn get_pool() -> Result<&'static DbPool, String> {
-    if !is_enabled(Feature::Database) {
-        return Err("Database feature is disabled".to_string());
-    }
-    DB_POOL.get().ok_or_else(|| "Database pool not initialized. Check your DATABASE_URL.".to_string())
+#[macro_export]
+macro_rules! for_each_db {
+    ($pool:expr, |$conn:ident| $body:expr) => {
+        match $pool {
+            $crate::database::DbPool::Sqlite($conn) => $body,
+            $crate::database::DbPool::Postgres($conn) => $body,
+            $crate::database::DbPool::MySql($conn) => $body,
+        }
+    };
 }
 
-// ---------------------------------------------------------------------------
-// JSON Mapping Macro (Moved from api.rs)
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 2. SAFE ACCESS & DRIVER RESOLUTION
+// ===========================================================================
+pub fn get_pool() -> Result<&'static DbPool, String> {
+    if !is_enabled(Feature::Database) { return Err("Database feature is disabled".into()); }
+    DB_POOL.get().ok_or_else(|| "Database pool not initialized. Check DATABASE_URL.".into())
+}
+
+fn resolve_driver(url: &str) -> String {
+    if let Ok(d) = std::env::var("DB_DRIVER") { let t = d.trim().to_lowercase(); if !t.is_empty() { return t; } }
+    let lower = url.trim().to_lowercase();
+    if lower.starts_with("postgres://") || lower.starts_with("postgresql://") { return "postgres".into(); }
+    if lower.starts_with("mysql://") { return "mysql".into(); }
+    "sqlite".into()
+}
+
+// ===========================================================================
+// 3. ROW TO JSON MACRO
+// ===========================================================================
 macro_rules! convert_row_to_json {
     ($row:expr) => {{
         let mut map = serde_json::Map::new();
         for (i, column) in $row.columns().iter().enumerate() {
             let name = column.name().to_string();
             let is_null = $row.try_get_raw(i).map(|r| r.is_null()).unwrap_or(true);
-            
-            let val: serde_json::Value = if is_null {
-                serde_json::Value::Null
-            } else {
-                // Try types in order of likelihood. We ignore column.type_info()
-                // because SQLite dynamically reports 'null' for things like COUNT(*).
-                if let Ok(v) = $row.try_get::<i64, _>(i) {
-                    serde_json::Value::Number(v.into())
-                } else if let Ok(v) = $row.try_get::<i32, _>(i) {
-                    serde_json::Value::Number((v as i64).into())
-                } else if let Ok(v) = $row.try_get::<f64, _>(i) {
-                    serde_json::Number::from_f64(v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null)
-                } else if let Ok(v) = $row.try_get::<bool, _>(i) {
-                    serde_json::Value::Bool(v)
-                } else if let Ok(v) = $row.try_get::<String, _>(i) {
-                    if let Ok(n) = v.parse::<i64>() {
-                        serde_json::Value::Number(n.into())
-                    } else if let Ok(n) = v.parse::<f64>() {
-                        serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(v))
-                    } else {
-                        serde_json::Value::String(v)
-                    }
-                } else if let Ok(v) = $row.try_get::<Vec<u8>, _>(i) {
-                    serde_json::Value::String(format!("blob {}b", v.len()))
-                } else {
-                    serde_json::Value::Null
-                }
-            };
+            let val: serde_json::Value = if is_null { serde_json::Value::Null }
+            else if let Ok(v) = $row.try_get::<i64, _>(i) { serde_json::Value::Number(v.into()) }
+            else if let Ok(v) = $row.try_get::<i32, _>(i) { serde_json::Value::Number((v as i64).into()) }
+            else if let Ok(v) = $row.try_get::<f64, _>(i) { serde_json::Number::from_f64(v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null) }
+            else if let Ok(v) = $row.try_get::<bool, _>(i) { serde_json::Value::Bool(v) }
+            else if let Ok(v) = $row.try_get::<String, _>(i) {
+                if let Ok(n) = v.parse::<i64>() { serde_json::Value::Number(n.into()) }
+                else if let Ok(n) = v.parse::<f64>() { serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(v)) }
+                else { serde_json::Value::String(v) }
+            }
+            else if let Ok(v) = $row.try_get::<Vec<u8>, _>(i) { serde_json::Value::String(format!("blob {}b", v.len())) }
+            else { serde_json::Value::Null };
             map.insert(name, val);
         }
         serde_json::Value::Object(map)
     }};
 }
 
-// ---------------------------------------------------------------------------
-// DbPool Helper Methods
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 4. DbPool IMPLEMENTATION
+// ===========================================================================
 impl DbPool {
-    /// Connects to the database based on the driver string
     pub async fn connect(driver: &str, url: &str, root: &Path) -> Result<Self, String> {
         match driver {
-            "postgres" | "postgresql" => {
-                sqlx::PgPool::connect(url).await
-                    .map(DbPool::Postgres)
-                    .map_err(|e| format!("Failed to connect to PostgreSQL: {}", e))
-            }
-            "mysql" => {
-                sqlx::MySqlPool::connect(url).await
-                    .map(DbPool::MySql)
-                    .map_err(|e| format!("Failed to connect to MySQL: {}", e))
-            }
+            "postgres" | "postgresql" => sqlx::PgPool::connect(url).await.map(DbPool::Postgres).map_err(|e| format!("PostgreSQL connection failed: {e}")),
+            "mysql" => sqlx::MySqlPool::connect(url).await.map(DbPool::MySql).map_err(|e| format!("MySQL connection failed: {e}")),
             _ => {
-                let db_path = url.strip_prefix("sqlite://").unwrap_or(url);
-                let path = Path::new(db_path);
-                let absolute_path = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
-                
-                let options = sqlx::sqlite::SqliteConnectOptions::new()
-                    .filename(&absolute_path)
-                    .create_if_missing(true);
-                    
-                sqlx::SqlitePool::connect_with(options).await
-                    .map(DbPool::Sqlite)
-                    .map_err(|e| format!("Failed to connect to SQLite: {}", e))
+                let path = url.strip_prefix("sqlite://").or_else(|| url.strip_prefix("sqlite:")).unwrap_or(url);
+                let abs = if Path::new(path).is_absolute() { Path::new(path).to_path_buf() } else { root.join(path) };
+                let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&abs).create_if_missing(true);
+                sqlx::SqlitePool::connect_with(opts).await.map(DbPool::Sqlite).map_err(|e| format!("SQLite connection failed: {e}"))
             }
         }
     }
 
-    /// Executes a SQL statement (DDL, INSERT, UPDATE, DELETE) without returning rows
     pub async fn execute(&self, sql: &str) -> Result<u64, sqlx::Error> {
-        match self {
-            DbPool::Sqlite(p) => sqlx::query(sql).execute(p).await.map(|r| r.rows_affected()),
-            DbPool::Postgres(p) => sqlx::query(sql).execute(p).await.map(|r| r.rows_affected()),
-            DbPool::MySql(p) => sqlx::query(sql).execute(p).await.map(|r| r.rows_affected()),
-        }
+        for_each_db!(self, |c| sqlx::query(sql).execute(c).await.map(|r| r.rows_affected()))
     }
 
-    /// Fetches all rows and converts them to a JSON array
     pub async fn fetch_all_json(&self, sql: &str) -> Result<Vec<Value>, sqlx::Error> {
+        for_each_db!(self, |c| {
+            let rows = sqlx::query(sql).fetch_all(c).await?;
+            Ok(rows.iter().map(|row| convert_row_to_json!(row)).collect())
+        })
+    }
+
+    pub fn placeholder(&self, n: usize) -> String {
+        match self { DbPool::Postgres(_) => format!("${n}"), _ => "?".into() }
+    }
+
+    pub fn date_add_seconds_sql(&self, param_idx: usize) -> String {
+        let p = self.placeholder(param_idx);
         match self {
-            DbPool::Sqlite(p) => {
-                let rows = sqlx::query(sql).fetch_all(p).await?;
-                Ok(rows.iter().map(|row| convert_row_to_json!(row)).collect())
-            }
-            DbPool::Postgres(p) => {
-                let rows = sqlx::query(sql).fetch_all(p).await?;
-                Ok(rows.iter().map(|row| convert_row_to_json!(row)).collect())
-            }
-            DbPool::MySql(p) => {
-                let rows = sqlx::query(sql).fetch_all(p).await?;
-                Ok(rows.iter().map(|row| convert_row_to_json!(row)).collect())
-            }
+            DbPool::Postgres(_) => format!("CURRENT_TIMESTAMP + ({} || ' seconds')::interval", p),
+            DbPool::MySql(_) => format!("DATE_ADD(NOW(), INTERVAL {} SECOND)", p),
+            DbPool::Sqlite(_) => format!("datetime('now', '+' || {} || ' seconds')", p),
         }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Initialization
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 5. CROSS-DB MACROS
+// ===========================================================================
+#[macro_export]
+macro_rules! db_execute {
+    ($pool:expr, $sql:expr $(, $bind:expr)*) => {
+        $crate::for_each_db!($pool, |c| ::sqlx::query($sql) $(.bind($bind))*.execute(c).await.map(|r| r.rows_affected()))
+    };
+}
+
+#[macro_export]
+macro_rules! db_fetch_optional_as {
+    ($pool:expr, $type:ty, $sql:expr $(, $bind:expr)*) => {
+        $crate::for_each_db!($pool, |c| ::sqlx::query_as::<_, $type>($sql) $(.bind($bind))*.fetch_optional(c).await)
+    };
+}
+
+#[macro_export]
+macro_rules! db_fetch_optional_scalar_string {
+    ($pool:expr, $sql:expr $(, $bind:expr)*) => {
+        $crate::for_each_db!($pool, |c| ::sqlx::query_scalar::<_, String>($sql) $(.bind($bind))*.fetch_optional(c).await)
+    };
+}
+
+#[macro_export]
+macro_rules! db_fetch_optional_scalar_i64 {
+    ($pool:expr, $sql:expr $(, $bind:expr)*) => {
+        $crate::for_each_db!($pool, |c| ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_optional(c).await)
+    };
+}
+
+#[macro_export]
+macro_rules! db_fetch_one_scalar_i64 {
+    ($pool:expr, $sql:expr $(, $bind:expr)*) => {
+        $crate::for_each_db!($pool, |c| ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_one(c).await)
+    };
+}
+
+// ===========================================================================
+// 6. INITIALIZATION
+// ===========================================================================
 pub async fn init_db() -> Result<(), String> {
-    // 🔥 REMOVED: dotenvy::from_path is no longer needed here. 
-    // main.rs already loads the .env file before init_db() is called.
-
     let root = get_project_root();
-
     let db_url = match std::env::var("DATABASE_URL") {
         Ok(url) if !url.is_empty() => url,
-        _ => {
-            eprintln!("⚠️ DATABASE_URL not set. DB features disabled.");
-            return Ok(());
-        }
+        _ => { eprintln!("⚠️ DATABASE_URL not set. DB features disabled."); return Ok(()); }
     };
 
-    let driver = std::env::var("DB_DRIVER")
-        .unwrap_or_else(|_| "sqlite".to_string())
-        .to_lowercase();
-
-    // Use the new helper method
+    let driver = resolve_driver(&db_url);
+    crate::vlo_debug!("🔧 Database driver resolved to '{}'", driver);
     let pool = DbPool::connect(&driver, &db_url, &root).await?;
 
-    // Load schema filename from DB_SCHEMA env var, defaulting to "schema.sql"
-    let schema_filename = std::env::var("DB_SCHEMA")
-        .unwrap_or_else(|_| "schema.sql".to_string());
-
-    let schema_path = root.join(&schema_filename);
+    let schema_file = std::env::var("DB_SCHEMA").unwrap_or_else(|_| "schema.sql".into());
+    let schema_path = root.join(&schema_file);
 
     if schema_path.exists() {
-        let sql = fs::read_to_string(&schema_path)
-            .map_err(|err| format!("Failed to read {}: {}", schema_filename, err))?;
-
-        let mut statement_count = 0usize;
-
-        for statement in sql.split(';') {
-            let stmt = statement.trim();
-            if stmt.is_empty() || stmt.to_uppercase().starts_with("INSERT") {
-                continue;
-            }
-
-            statement_count += 1;
-            
-            // Use the new helper method
-            if let Err(err) = pool.execute(stmt).await {
-                crate::vlo_debug!("⚠️ Schema statement failed: {}", err);
-            }
+        let sql = fs::read_to_string(&schema_path).map_err(|e| format!("Failed to read {}: {}", schema_file, e))?;
+        let mut count = 0;
+        for stmt in sql.split(';').map(str::trim).filter(|s| !s.is_empty() && !s.to_uppercase().starts_with("INSERT")) {
+            count += 1;
+            if let Err(err) = pool.execute(stmt).await { crate::vlo_debug!("⚠️ Schema statement failed: {}", err); }
         }
-
-        crate::vlo_debug!("✅ {} processed ({} statements)", schema_filename, statement_count);
+        crate::vlo_debug!("✅ {} processed ({} statements)", schema_file, count);
     }
 
-    if DB_POOL.set(pool).is_ok() {
-        crate::vlo_debug!("✅ Database pool initialized");
-    }
-
+    if DB_POOL.set(pool).is_ok() { crate::vlo_debug!("✅ Database pool initialized"); }
     Ok(())
 }
-
-    // ---------------------------------------------------------------------------
-    // Database Execution Macros (Zero-Boilerplate Query Execution)
-    // ---------------------------------------------------------------------------
-    // If you add a new DB (e.g., Oracle), just add one line to each macro below!
-
-    #[macro_export]
-    macro_rules! db_execute {
-        ($pool:expr, $sql:expr $(, $bind:expr)*) => {
-            match $pool {
-                $crate::database::DbPool::Sqlite(c) => ::sqlx::query($sql) $(.bind($bind))*.execute(c).await.map(|r| r.rows_affected()),
-                $crate::database::DbPool::Postgres(c) => ::sqlx::query($sql) $(.bind($bind))*.execute(c).await.map(|r| r.rows_affected()),
-                $crate::database::DbPool::MySql(c) => ::sqlx::query($sql) $(.bind($bind))*.execute(c).await.map(|r| r.rows_affected()),
-            }
-        };
-    }
-
-    #[macro_export]
-    macro_rules! db_fetch_optional_as {
-        ($pool:expr, $type:ty, $sql:expr $(, $bind:expr)*) => {
-            match $pool {
-                $crate::database::DbPool::Sqlite(c) => ::sqlx::query_as::<_, $type>($sql) $(.bind($bind))*.fetch_optional(c).await,
-                $crate::database::DbPool::Postgres(c) => ::sqlx::query_as::<_, $type>($sql) $(.bind($bind))*.fetch_optional(c).await,
-                $crate::database::DbPool::MySql(c) => ::sqlx::query_as::<_, $type>($sql) $(.bind($bind))*.fetch_optional(c).await,
-            }
-        };
-    }
-
-    #[macro_export]
-    macro_rules! db_fetch_optional_scalar_string {
-        ($pool:expr, $sql:expr $(, $bind:expr)*) => {
-            match $pool {
-                $crate::database::DbPool::Sqlite(c) => ::sqlx::query_scalar::<_, String>($sql) $(.bind($bind))*.fetch_optional(c).await,
-                $crate::database::DbPool::Postgres(c) => ::sqlx::query_scalar::<_, String>($sql) $(.bind($bind))*.fetch_optional(c).await,
-                $crate::database::DbPool::MySql(c) => ::sqlx::query_scalar::<_, String>($sql) $(.bind($bind))*.fetch_optional(c).await,
-            }
-        };
-    }
-
-    #[macro_export]
-    macro_rules! db_fetch_optional_scalar_i64 {
-        ($pool:expr, $sql:expr $(, $bind:expr)*) => {
-            match $pool {
-                $crate::database::DbPool::Sqlite(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_optional(c).await,
-                $crate::database::DbPool::Postgres(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_optional(c).await,
-                $crate::database::DbPool::MySql(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_optional(c).await,
-            }
-        };
-    }
-
-    #[macro_export]
-    macro_rules! db_fetch_one_scalar_i64 {
-        ($pool:expr, $sql:expr $(, $bind:expr)*) => {
-            match $pool {
-                $crate::database::DbPool::Sqlite(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_one(c).await,
-                $crate::database::DbPool::Postgres(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_one(c).await,
-                $crate::database::DbPool::MySql(c) => ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_one(c).await,
-            }
-        };
-    }

@@ -98,6 +98,21 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_token ON auth_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id);
 
+-- VLO Background Jobs Table
+CREATE TABLE IF NOT EXISTS vlo_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    attempts INTEGER DEFAULT 0,
+    max_attempts INTEGER DEFAULT 3,
+    run_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for fast polling of pending jobs
+CREATE INDEX IF NOT EXISTS idx_vlo_jobs_status_run_at ON vlo_jobs(status, run_at);
 -- ============================================================
 -- 2. PRODUCTS TABLE
 -- ============================================================

@@ -316,24 +316,22 @@ fn apply_common_layers(app: Router) -> Router {
     // AUTH FEATURE: Session and authentication middleware
     // Order matters: session → api_auth → csrf (inside-out)
     // ═══════════════════════════════════════════════════════════
+    // 🔥 CRITICAL FIX: Axum applies layers outside-in (last added = first executed).
+    // Execution order must be: Session -> API Auth -> CSRF -> Handler
+    
     if is_enabled(Feature::Auth) {
-        crate::vlo_debug!("🔐 [FEATURE] Auth enabled - applying session/auth middleware");
-        app = app
-            .layer(axum::middleware::from_fn(auth::session_middleware));
+        crate::vlo_debug!(" [FEATURE] Auth enabled - applying middleware (Session -> API Auth -> CSRF)");
         
-        // API auth middleware only if both auth and api are enabled
+        // 1. Add CSRF last (so it runs right before the handler)
+        app = app.layer(axum::middleware::from_fn(auth::csrf_middleware));
+        
+        // 2. Add API Auth middle (runs after Session)
         if is_enabled(Feature::Api) {
             app = app.layer(axum::middleware::from_fn(auth::api_auth_middleware));
         }
-    }
-
-    // ═══════════════════════════════════════════════════════════
-    // CSRF MIDDLEWARE: Only if auth is enabled
-    // Applied last (outermost layer) so it wraps all state-changing routes
-    // ═══════════════════════════════════════════════════════════
-    if is_enabled(Feature::Auth) {
-        crate::vlo_debug!("🛡️ [FEATURE] Auth enabled - applying CSRF middleware");
-        app = app.layer(axum::middleware::from_fn(auth::csrf_middleware));
+        
+        // 3. Add Session FIRST (so it runs first and populates AuthUser)
+        app = app.layer(axum::middleware::from_fn(auth::session_middleware));
     }
 
     crate::vlo_debug!("🚀 [MIDDLEWARE] Applied with {} features enabled", crate::features::enabled_features().len());
@@ -757,18 +755,34 @@ async fn serve_build_page(
             final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", "");
         }
         
-        // Flash placeholder replacement
+        // 🔥 FIX: Flash placeholder replacement (This is the line that was accidentally deleted!)
         if is_enabled(Feature::Flash) {
             final_html = final_html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, &flash_html);
         }
 
-        // SSE script injection
+        // SSE script injection + Broadcast helper
         if is_enabled(Feature::Sse) {
             if final_html.contains("class=\"vlo-sync\"") || final_html.contains("data-channel=") {
-                if !final_html.contains("__VLO_SSE__") {
-                    let sse_script = r#"<script id="__VLO_SSE__">
+                let csrf_token = if is_enabled(Feature::Auth) {
+                    auth.as_ref().and_then(|a| a.csrf_token.clone()).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                let mut sse_script = r#"<script id="__VLO_SSE__">
 (function(){
-  if(window.__VLO_SSE__) return;
+  window.__VLO_BROADCAST__ = function(channel, value) {
+    var csrfToken = '__CSRF_TOKEN__';
+    if (csrfToken === '__VLO_CSRF_PLACEHOLDER__') {
+        csrfToken = document.querySelector('meta[name="csrf-token"]').content || '';
+    }
+    fetch('/api/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      credentials: 'same-origin',
+      body: JSON.stringify({ channel: channel, value: value })
+    }).catch(function(e) { console.error('[VLO Broadcast]', e); });
+  };
   window.__VLO_SSE__ = new EventSource("/__vlo_sse");
   window.__VLO_SSE__.onmessage = function(e) {
     try {
@@ -780,17 +794,24 @@ async fn serve_build_page(
         } else {
           els[i].innerHTML = data.value;
           els[i].classList.add('vlo-sync-updated');
-          (function(el){ setTimeout(function(){ el.classList.remove('vlo-sync-updated'); }, 600); })(els[i]);
+          setTimeout((function(el){ return function(){ el.classList.remove('vlo-sync-updated'); }; })(els[i]), 600);
         }
       }
     } catch(err) { console.error('VLO SSE Error:', err); }
   };
-  window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error:', e); };
+  window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error', e); };
 })();
-</script>"#;
-                    if let Some(i) = final_html.rfind("</body>") {
-                        final_html.insert_str(i, &format!("{}\n", sse_script));
+</script>"#.to_string();
+
+                sse_script = sse_script.replace("__CSRF_TOKEN__", &csrf_token);
+
+                if let Some(start) = final_html.find(r#"<script id="__VLO_SSE__">"#) {
+                    if let Some(end) = final_html[start..].find("</script>") {
+                        let end_idx = start + end + 9;
+                        final_html.replace_range(start..end_idx, &sse_script);
                     }
+                } else if let Some(i) = final_html.rfind("</body>") {
+                    final_html.insert_str(i, &format!("{}\n", sse_script));
                 }
             }
         }
