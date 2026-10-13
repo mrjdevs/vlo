@@ -320,7 +320,7 @@ fn apply_common_layers(app: Router) -> Router {
     // Execution order must be: Session -> API Auth -> CSRF -> Handler
     
     if is_enabled(Feature::Auth) {
-        crate::vlo_debug!(" [FEATURE] Auth enabled - applying middleware (Session -> API Auth -> CSRF)");
+        crate::vlo_debug!("🔐 [FEATURE] Auth enabled - applying middleware (Session -> API Auth -> CSRF)");
         
         // 1. Add CSRF last (so it runs right before the handler)
         app = app.layer(axum::middleware::from_fn(auth::csrf_middleware));
@@ -332,6 +332,17 @@ fn apply_common_layers(app: Router) -> Router {
         
         // 3. Add Session FIRST (so it runs first and populates AuthUser)
         app = app.layer(axum::middleware::from_fn(auth::session_middleware));
+    } else {
+        // 🔥 CRITICAL FIX: Inject empty AuthUser when Auth is disabled.
+        // This prevents Axum from throwing "Missing request extension: AuthUser" on page handlers.
+        app = app.layer(axum::middleware::from_fn(|mut req: Request, next: Next| async move {
+            req.extensions_mut().insert(crate::auth::AuthUser { 
+                user: None, 
+                csrf_token: None, 
+                session_token: None 
+            });
+            next.run(req).await
+        }));
     }
 
     crate::vlo_debug!("🚀 [MIDDLEWARE] Applied with {} features enabled", crate::features::enabled_features().len());
@@ -645,6 +656,17 @@ async fn serve_build_page(
                         }
                     }
                     return response;
+                }
+            }
+        }
+    } else {
+        // 🔥 FIX: If Auth is disabled, block pages that explicitly require auth
+        if let Some(routes) = cache.manifest.as_object() {
+            if let Some(route_config) = routes.get(path) {
+                let requires_auth = route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false);
+                if requires_auth {
+                    crate::vlo_debug!("⚠️ Page {} requires auth, but Auth feature is disabled", path);
+                    return (StatusCode::NOT_FOUND, axum::response::Html("404 - Page Not Found".to_string())).into_response();
                 }
             }
         }

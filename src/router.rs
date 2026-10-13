@@ -600,14 +600,19 @@ pub async fn render_page(
 
         // ─── PAGE GUARD CHECK (RESTORED) ────────────────────
         if let Some(guard) = crate::auth::extract_page_guard(&content) {
-            let current_url = if page_path == "home" { "/".to_string() } else { format!("/{}", page_path) };
-            let next = query.get("next").cloned();
-            if let Some(response) = crate::auth::check_page_guard(&guard, &auth.user, &current_url, next.as_deref()) {
-                return Some(response);
+            if crate::features::is_enabled(crate::features::Feature::Auth) {
+                let current_url = if page_path == "home" { "/".to_string() } else { format!("/{}", page_path) };
+                let next = query.get("next").cloned();
+                if let Some(response) = crate::auth::check_page_guard(&guard, &auth.user, &current_url, next.as_deref()) {
+                    return Some(response);
+                }
+            } else if guard.auth {
+                // 🔥 FIX: Auth disabled but page requires it
+                crate::vlo_debug!("⚠️ Page {} requires auth, but Auth feature is disabled", page_path);
+                return Some((StatusCode::NOT_FOUND, Html("404 - Page Not Found")).into_response());
             }
         }
         // ────────────────────────────────────────────────────
-
         // ─── AUTH & CSRF INJECTION (CONDITIONAL) ───────────────
         if crate::features::is_enabled(crate::features::Feature::Auth) {
             let cfg = crate::auth::auth_config();
