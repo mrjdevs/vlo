@@ -12,6 +12,7 @@
     <a href="/about">About</a>
     <a href="/docs">Docs</a>
     {if logged_in}
+        <a href="/products">Products</a>
         <a href="/dashboard">Dashboard</a>
         <a href="/api/auth/logout">Logout ({{user_name}})</a>
     {else}

@@ -1,3 +1,6 @@
+// ─────────────────────────────────────────────────────────────
+// main.rs — VLO CLI entry point
+// ─────────────────────────────────────────────────────────────
 #[macro_use]
 mod state;
 mod database;
@@ -19,6 +22,8 @@ mod jobs;
 
 use clap::Parser;
 
+use crate::features::{init_features, is_enabled, Feature};
+
 #[derive(Parser)]
 #[command(
     name = "vlo",
@@ -34,102 +39,91 @@ struct Cli {
 
 #[tokio::main]
 async fn main() {
-    // 🔥 CRITICAL FIX: Load .env file BEFORE anything else!
-    // This ensures VLO_DEBUG and other env vars are available for LazyLock evaluation.
-    // (If you use `dotenvy` instead of `dotenv`, change this to `dotenvy::dotenv().ok();`)
+    // Load .env BEFORE anything else so LazyLock statics (VLO_DEBUG, etc.)
+    // see the final environment on first access.
     dotenvy::dotenv().ok();
 
     crate::state::init_start_time();
+
     if let Err(error) = run().await {
         eprintln!("❌ {}", error);
         std::process::exit(1);
     }
 }
+
+/// Enable feature-gated subsystems. `is_build` suppresses long-lived
+/// background workers (Jobs, SSE) that would otherwise linger during
+/// one-shot commands.
 async fn init_enabled_features(is_build: bool) -> Result<(), String> {
-    if is_enabled(Feature::Database) { 
-        database::init_db().await?; 
+    // Canonical root URL is needed by mailer templates + API handlers.
+    state::init_root_url();
+
+    if is_enabled(Feature::Database) {
+        database::init_db()
+            .await
+            .map_err(|e| format!("Database init failed: {}", e))?;
     }
-    if is_enabled(Feature::Auth) { 
-        auth::init_auth_config(); 
-        auth::init_session_secret(); 
+    if is_enabled(Feature::Auth) {
+        auth::init_auth_config();
+        auth::init_session_secret();
     }
-    if is_enabled(Feature::Modules) { 
-        modules::init_modules()?; 
-    }
-    
-    // 🔥 START THE JOBS WORKER (Only in dev/serve, not build)
-    if !is_build && is_enabled(Feature::Jobs) {
-        tokio::spawn(crate::jobs::start_worker());
+    if is_enabled(Feature::Modules) {
+        modules::init_modules().map_err(|e| format!("Modules init failed: {}", e))?;
     }
 
-    if !is_build && is_enabled(Feature::Sse) { 
-        crate::router::init_live_broadcast(); 
+    // Long-lived background workers: only spawn when a server actually runs.
+    if !is_build {
+        if is_enabled(Feature::Jobs) {
+            tokio::spawn(crate::jobs::start_worker());
+        }
+        if is_enabled(Feature::Sse) {
+            crate::router::init_live_broadcast();
+        }
     }
+
     Ok(())
 }
 
-
-use crate::features::{Feature, init_features, is_enabled};
-
 async fn run() -> Result<(), String> {
-    // 1. Initialize feature flags FIRST (now safe because .env is loaded in main)
     init_features();
 
     let cli = Cli::parse();
-    
+
     match cli.command {
         server::Commands::Init { ref name, ref db, ref db_name, no_db } => {
             utils::init_project(name, db, db_name.as_deref(), no_db)?;
         }
-        
+
         server::Commands::Dev { port, ref host } => {
             state::set_app_mode(state::AppMode::Development);
-            state::init_root_url();
-            
-            // 🔥 Use conditional initialization instead of hardcoding
             init_enabled_features(false).await?;
-            
-            let port = port.map(|value| value.parse::<u16>().map_err(|_| format!("Invalid port '{}'.", value))).transpose()?;
             server::dev(host.as_deref(), port).await?;
         }
-        
+
         server::Commands::Build { release } => {
             state::set_app_mode(state::AppMode::Production);
-            state::init_root_url();
-            
-            // Build only needs DB (for schema/data if required) and Modules (to bundle them)
             init_enabled_features(true).await?;
-            
             server::build(release)?;
         }
-        
+
         server::Commands::Serve { port, ref host } => {
             state::set_app_mode(state::AppMode::Production);
-            state::init_root_url();
-            
             init_enabled_features(false).await?;
-            
-            let port = port.map(|value| value.parse::<u16>().map_err(|_| format!("Invalid port '{}'.", value))).transpose()?;
             server::serve(host.as_deref(), port).await?;
         }
-        
+
         server::Commands::Deploy { ref provider } => {
             state::set_app_mode(state::AppMode::Production);
-            state::init_root_url();
-            
             init_enabled_features(false).await?;
-            
             server::deploy(provider).await?;
         }
-        
+
         server::Commands::Cgi => {
             state::set_app_mode(state::AppMode::Production);
-            state::init_root_url();
-            
             init_enabled_features(false).await?;
-            
             server::cgi().await?;
         }
     }
+
     Ok(())
 }

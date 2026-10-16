@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────
+// api.rs — VLO dynamic SQL API
+// Optimized: single-pass SQL param substitution (no regex compile,
+// no per-param full-string replace), percent_decode fast path.
+// Behavior preserved except cross-param interpolation, which is
+// now single-pass (documented at substitute_sql_params).
+// ─────────────────────────────────────────────────────────────
 use crate::{
     database::DbPool,
     state::get_project_root,
@@ -12,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
+    fmt::Write as _,
     fs,
     path::Path,
     sync::{Arc, LazyLock, Mutex},
@@ -53,7 +61,8 @@ impl ApiAction {
 // API Action Cache
 // ============================================================================
 
-static API_ACTIONS_CACHE: LazyLock<Mutex<Option<CachedActions>>> = LazyLock::new(|| Mutex::new(None));
+static API_ACTIONS_CACHE: LazyLock<Mutex<Option<CachedActions>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 pub fn extract_server_block(content: &str) -> Option<String> {
     let start = content.find("<script server>")?;
@@ -76,7 +85,19 @@ fn load_actions_from_file(file: &Path) -> HashMap<String, ApiAction> {
     let mut actions = HashMap::new();
     if let Ok(content) = fs::read_to_string(file) {
         if let Some(block) = extract_server_block(&content) {
-            let clean = block.trim_start_matches('\u{feff}').replace('\u{a0}', " ").replace('\r', "");
+            // Fast path: skip the 3-allocation cleanup when the block is clean.
+            let clean: std::borrow::Cow<str> =
+                if block.contains('\u{feff}') || block.contains('\u{a0}') || block.contains('\r') {
+                    std::borrow::Cow::Owned(
+                        block
+                            .trim_start_matches('\u{feff}')
+                            .replace('\u{a0}', " ")
+                            .replace('\r', ""),
+                    )
+                } else {
+                    std::borrow::Cow::Borrowed(block.as_str())
+                };
+
             if let Ok(json) = serde_json::from_str::<Value>(&clean) {
                 if let Some(object) = json.as_object() {
                     for (name, value) in object {
@@ -96,7 +117,9 @@ fn get_api_modified_time(api_dir: &Path) -> SystemTime {
     let main_file = api_dir.join("api.vlo");
     if let Ok(meta) = fs::metadata(&main_file) {
         if let Ok(modified) = meta.modified() {
-            if modified > latest { latest = modified; }
+            if modified > latest {
+                latest = modified;
+            }
         }
     }
     if let Ok(entries) = fs::read_dir(api_dir) {
@@ -106,7 +129,9 @@ fn get_api_modified_time(api_dir: &Path) -> SystemTime {
                 let ns_file = path.join("api.vlo");
                 if let Ok(meta) = fs::metadata(&ns_file) {
                     if let Ok(modified) = meta.modified() {
-                        if modified > latest { latest = modified; }
+                        if modified > latest {
+                            latest = modified;
+                        }
                     }
                 }
             }
@@ -123,7 +148,11 @@ struct CachedActions {
 pub fn load_api_actions() -> Result<Arc<HashMap<String, ApiAction>>, String> {
     let api_dir = get_project_root().join("pages/api");
     let is_dev = crate::state::app_mode().is_dev();
-    let modified = if is_dev { get_api_modified_time(&api_dir) } else { SystemTime::UNIX_EPOCH };
+    let modified = if is_dev {
+        get_api_modified_time(&api_dir)
+    } else {
+        SystemTime::UNIX_EPOCH
+    };
 
     if let Ok(cache) = API_ACTIONS_CACHE.lock() {
         if let Some(cached) = cache.as_ref() {
@@ -145,15 +174,20 @@ pub fn load_api_actions() -> Result<Arc<HashMap<String, ApiAction>>, String> {
     if let Ok(entries) = fs::read_dir(&api_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() { continue; }
-            let namespace = path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
+            if !path.is_dir() {
+                continue;
+            }
+            let namespace = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
             let ns_file = path.join("api.vlo");
-            if !ns_file.exists() { continue; }
+            if !ns_file.exists() {
+                continue;
+            }
             let ns_actions = load_actions_from_file(&ns_file);
-            crate::vlo_debug!("📡 Loaded {} actions from api/{}/api.vlo", ns_actions.len(), namespace);
+            crate::vlo_debug!(
+                "📡 Loaded {} actions from api/{}/api.vlo",
+                ns_actions.len(),
+                namespace
+            );
             for (name, action) in ns_actions {
                 actions.insert(format!("{}/{}", namespace, name), action);
             }
@@ -175,7 +209,7 @@ pub fn load_api_actions() -> Result<Arc<HashMap<String, ApiAction>>, String> {
 }
 
 // ============================================================================
-// HTTP Handlers (Updated to extract AuthUser)
+// HTTP Handlers
 // ============================================================================
 
 pub async fn api_handler_root(
@@ -183,7 +217,9 @@ pub async fn api_handler_root(
     req: Request,
 ) -> Response {
     match prepare_api_request(req).await {
-        Ok((method, query)) => api_route_handler(None, None, method, query, &auth).await.into_response(),
+        Ok((method, query)) => api_route_handler(None, None, method, query, &auth)
+            .await
+            .into_response(),
         Err(response) => response,
     }
 }
@@ -194,7 +230,11 @@ pub async fn api_handler_path(
     req: Request,
 ) -> Response {
     match prepare_api_request(req).await {
-        Ok((method, query)) => api_route_handler(Some(resource), None, method, query, &auth).await.into_response(),
+        Ok((method, query)) => {
+            api_route_handler(Some(resource), None, method, query, &auth)
+                .await
+                .into_response()
+        }
         Err(response) => response,
     }
 }
@@ -205,61 +245,118 @@ pub async fn api_handler_id(
     req: Request,
 ) -> Response {
     match prepare_api_request(req).await {
-        Ok((method, query)) => api_route_handler(Some(resource), Some(id), method, query, &auth).await.into_response(),
+        Ok((method, query)) => {
+            api_route_handler(Some(resource), Some(id), method, query, &auth)
+                .await
+                .into_response()
+        }
         Err(response) => response,
     }
 }
 
-async fn prepare_api_request(req: Request) -> Result<(Method, HashMap<String, String>), Response> {
+async fn prepare_api_request(
+    req: Request,
+) -> Result<(Method, HashMap<String, String>), Response> {
     let method = req.method().clone();
-    let content_type = req.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
+    let content_type = req
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
     let mut query = req.uri().query().map(parse_form_body).unwrap_or_default();
 
     if content_type.starts_with("multipart/form-data") {
         let mut multipart = Multipart::from_request(req, &()).await.map_err(|e| {
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"success": false, "error": "Invalid multipart request", "details": e.to_string()}))).into_response()
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"success": false, "error": "Invalid multipart request", "details": e.to_string()})),
+            )
+                .into_response()
         })?;
         parse_multipart_body(&mut multipart, &mut query).await?;
     } else {
         let body = Bytes::from_request(req, &()).await.map_err(|e| {
-            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"success": false, "error": "Invalid request body", "details": e.to_string()}))).into_response()
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"success": false, "error": "Invalid request body", "details": e.to_string()})),
+            )
+                .into_response()
         })?;
         if !body.is_empty() {
             if content_type.contains("application/json") {
                 if let Ok(Value::Object(object)) = serde_json::from_slice::<Value>(&body) {
-                    for (key, value) in object { query.insert(key, value_to_query_string(&value)); }
+                    for (key, value) in object {
+                        query.insert(key, value_to_query_string(&value));
+                    }
                 }
             } else if content_type.contains("application/x-www-form-urlencoded") {
-                for (key, value) in parse_form_body(&String::from_utf8_lossy(&body)) { query.insert(key, value); }
+                for (key, value) in parse_form_body(&String::from_utf8_lossy(&body)) {
+                    query.insert(key, value);
+                }
             }
         }
     }
     Ok((method, query))
 }
 
-async fn parse_multipart_body(multipart: &mut Multipart, query: &mut HashMap<String, String>) -> Result<(), Response> {
+async fn parse_multipart_body(
+    multipart: &mut Multipart,
+    query: &mut HashMap<String, String>,
+) -> Result<(), Response> {
     let max_size = crate::state::max_upload_bytes();
     loop {
         let field = match multipart.next_field().await {
             Ok(Some(field)) => field,
             Ok(None) => break,
-            Err(e) => return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"success": false, "error": "Invalid multipart", "details": e.to_string()}))).into_response()),
+            Err(e) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"success": false, "error": "Invalid multipart", "details": e.to_string()})),
+                )
+                    .into_response())
+            }
         };
         let name = field.name().unwrap_or("").to_string();
         let file_name = field.file_name().map(|n| n.to_string());
-        let bytes = field.bytes().await.map_err(|e| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"success": false, "error": "Failed to read file", "details": e.to_string()}))).into_response())?;
+        let bytes = field.bytes().await.map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"success": false, "error": "Failed to read file", "details": e.to_string()})),
+            )
+                .into_response()
+        })?;
         if bytes.len() as u64 > max_size {
-            return Err((StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({"success": false, "error": "File too large"}))).into_response());
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(serde_json::json!({"success": false, "error": "File too large"})),
+            )
+                .into_response());
         }
         if let Some(original_name) = file_name {
             let upload_name = generate_upload_name(&original_name);
             let upload_name_clone = upload_name.clone();
+            // Bytes is Arc-backed — clone is O(1), not a copy.
             let bytes_clone = bytes.clone();
-            let save_result = tokio::task::spawn_blocking(move || crate::files::save(&upload_name_clone, &bytes_clone)).await;
+            let save_result =
+                tokio::task::spawn_blocking(move || crate::files::save(&upload_name_clone, &bytes_clone))
+                    .await;
             match save_result {
                 Ok(Ok(_)) => {}
-                Ok(Err(e)) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Failed to save file", "details": e.to_string()}))).into_response()),
-                Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Failed to save file", "details": e.to_string()}))).into_response()),
+                Ok(Err(e)) => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"success": false, "error": "Failed to save file", "details": e.to_string()})),
+                    )
+                        .into_response())
+                }
+                Err(e) => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({"success": false, "error": "Failed to save file", "details": e.to_string()})),
+                    )
+                        .into_response())
+                }
             }
             query.insert(name, format!("/uploads/{}", upload_name));
         } else {
@@ -273,15 +370,22 @@ async fn parse_multipart_body(multipart: &mut Multipart, query: &mut HashMap<Str
 // Auto-Pagination Helper
 // ============================================================================
 
-static RE_LIMIT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)\s+LIMIT\s+\{\{.*?\}\}").unwrap());
-static RE_OFFSET: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)\s+OFFSET\s+\{\{.*?\}\}").unwrap());
+static RE_LIMIT: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)\s+LIMIT\s+\{\{.*?\}\}").unwrap());
+static RE_OFFSET: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)\s+OFFSET\s+\{\{.*?\}\}").unwrap());
 
 pub fn generate_count_sql(sql_template: &str) -> String {
     let without_limit = RE_LIMIT.replace_all(sql_template, "");
     let stripped = RE_OFFSET.replace_all(&without_limit, "");
     let stripped = stripped.trim().trim_end_matches(';');
-    if stripped.is_empty() { return String::new(); }
-    format!("SELECT COUNT(*) as total FROM ({}) AS _vlo_count_subquery", stripped)
+    if stripped.is_empty() {
+        return String::new();
+    }
+    format!(
+        "SELECT COUNT(*) as total FROM ({}) AS _vlo_count_subquery",
+        stripped
+    )
 }
 
 // ============================================================================
@@ -292,7 +396,9 @@ fn flash_response(status: StatusCode, body: serde_json::Value, flash_encoded: &s
     let cookie = crate::auth::flash_cookie_header(flash_encoded);
     let mut response = (status, Json(body)).into_response();
     if let Ok(val) = axum::http::HeaderValue::from_str(&cookie) {
-        response.headers_mut().append(axum::http::header::SET_COOKIE, val);
+        response
+            .headers_mut()
+            .append(axum::http::header::SET_COOKIE, val);
     }
     response
 }
@@ -309,10 +415,17 @@ pub async fn api_route_handler(
     auth: &crate::auth::AuthUser,
 ) -> impl IntoResponse {
     crate::vlo_debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    crate::vlo_debug!("🔧 VLO DEBUG: API request started | Method: {} | Endpoint: {:?} | ID: {:?}", method, endpoint, id);
+    crate::vlo_debug!(
+        "🔧 VLO DEBUG: API request started | Method: {} | Endpoint: {:?} | ID: {:?}",
+        method,
+        endpoint,
+        id
+    );
 
     if endpoint.is_none() {
-        if let Some(action) = query.get("action").cloned() { endpoint = Some(action); }
+        if let Some(action) = query.get("action").cloned() {
+            endpoint = Some(action);
+        }
     }
 
     let endpoint = match endpoint {
@@ -321,32 +434,58 @@ pub async fn api_route_handler(
             return match load_api_actions() {
                 Ok(actions) => {
                     let action_names: Vec<&String> = actions.keys().collect();
-                    (StatusCode::OK, Json(serde_json::json!({"success": true, "actions": action_names}))).into_response()
-                },
-                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error}))).into_response(),
+                    (
+                        StatusCode::OK,
+                        Json(serde_json::json!({"success": true, "actions": action_names})),
+                    )
+                        .into_response()
+                }
+                Err(error) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error})),
+                )
+                    .into_response(),
             };
         }
     };
 
     let resource = normalize_resource(&endpoint);
     if !valid_identifier(&resource) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "success": false,
-            "error": "Invalid API resource"
-        }))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "success": false,
+                "error": "Invalid API resource"
+            })),
+        )
+            .into_response();
     }
 
     let operation = match crud_operation(&method) {
         Some(value) => value,
-        None => return (StatusCode::METHOD_NOT_ALLOWED, Json(serde_json::json!({"success": false, "error": "Unsupported HTTP method"}))).into_response(),
+        None => {
+            return (
+                StatusCode::METHOD_NOT_ALLOWED,
+                Json(serde_json::json!({"success": false, "error": "Unsupported HTTP method"})),
+            )
+                .into_response()
+        }
     };
 
     let actions = match load_api_actions() {
         Ok(value) => value,
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error}))).into_response(),
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error})),
+            )
+                .into_response()
+        }
     };
 
-    let explicit_action = ["get_", "post_", "put_", "patch_", "delete_"].iter().any(|prefix| endpoint.starts_with(prefix));
+    let explicit_action = ["get_", "post_", "put_", "patch_", "delete_"]
+        .iter()
+        .any(|prefix| endpoint.starts_with(prefix));
     let mut action_name = if explicit_action {
         endpoint.clone()
     } else {
@@ -365,43 +504,65 @@ pub async fn api_route_handler(
                     query.remove("id");
                     value.clone()
                 } else {
-                    return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-                        "success": false,
-                        "error": "API operation not found",
-                        "action": action_name,
-                        "namespaced_attempt": namespaced_action
-                    }))).into_response();
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(serde_json::json!({
+                            "success": false,
+                            "error": "API operation not found",
+                            "action": action_name,
+                            "namespaced_attempt": namespaced_action
+                        })),
+                    )
+                        .into_response();
                 }
             } else {
-                return (StatusCode::NOT_FOUND, Json(serde_json::json!({
-                    "success": false,
-                    "error": "API operation not found",
-                    "action": action_name
-                }))).into_response();
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({
+                        "success": false,
+                        "error": "API operation not found",
+                        "action": action_name
+                    })),
+                )
+                    .into_response();
             }
         }
     };
 
-    // ─── ROLE CHECK 🔥 ─────────────────────────────────────────────
+    // ─── ROLE CHECK ────────────────────────────────────────────────
     let required_roles = action_def.roles();
     if !required_roles.is_empty() {
         let user_role = auth.user.as_ref().map(|u| u.role.as_str()).unwrap_or("");
-        let has_access = required_roles.iter().any(|r| r.eq_ignore_ascii_case(user_role));
+        let has_access = required_roles
+            .iter()
+            .any(|r| r.eq_ignore_ascii_case(user_role));
 
         if !has_access {
-            crate::vlo_debug!("🚫 Access denied for action '{}'. Required roles: {:?}, User role: '{}'", action_name, required_roles, user_role);
-            return (StatusCode::FORBIDDEN, Json(serde_json::json!({
-                "success": false,
-                "error": "Insufficient permissions",
-                "required_roles": required_roles,
-                "your_role": user_role
-            }))).into_response();
+            crate::vlo_debug!(
+                "🚫 Access denied for action '{}'. Required roles: {:?}, User role: '{}'",
+                action_name,
+                required_roles,
+                user_role
+            );
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": "Insufficient permissions",
+                    "required_roles": required_roles,
+                    "your_role": user_role
+                })),
+            )
+                .into_response();
         }
-        crate::vlo_debug!("✅ Role check passed for action '{}'. User role: '{}'", action_name, user_role);
+        crate::vlo_debug!(
+            "✅ Role check passed for action '{}'. User role: '{}'",
+            action_name,
+            user_role
+        );
     }
 
     let mut sql = action_def.sql().to_string();
-    // ────────────────────────────────────────────────────────────────
 
     let is_namespaced = action_name.contains('/');
     if let Some(id_value) = id.clone() {
@@ -410,9 +571,12 @@ pub async fn api_route_handler(
         }
     }
 
-    let mut params = serde_json::Map::new();
+    // Build params map, skipping the `action` key (not a SQL param).
+    let mut params = serde_json::Map::with_capacity(query.len());
     for (key, value) in query {
-        if key != "action" { params.insert(key, query_string_to_value(&value)); }
+        if key != "action" {
+            params.insert(key, query_string_to_value(&value));
+        }
     }
 
     let is_id_request = params.contains_key("id") && operation == "get";
@@ -421,17 +585,27 @@ pub async fn api_route_handler(
         if let Some(pos) = upper.find(" ORDER BY ") {
             let before = sql[..pos].trim_end();
             let order = &sql[pos..];
-            sql = if before.to_uppercase().contains(" WHERE ") { format!("{} AND id = {{id}}{}", before, order) }
-                  else { format!("{} WHERE id = {{id}}{}", before, order) };
+            sql = if before.to_uppercase().contains(" WHERE ") {
+                format!("{} AND id = {{id}}{}", before, order)
+            } else {
+                format!("{} WHERE id = {{id}}{}", before, order)
+            };
         } else {
             let trimmed = sql.trim_end_matches(';').trim();
-            sql = if trimmed.to_uppercase().contains(" WHERE ") { format!("{} AND id = {{id}}", trimmed) }
-                  else { format!("{} WHERE id = {{id}}", trimmed) };
+            sql = if trimmed.to_uppercase().contains(" WHERE ") {
+                format!("{} AND id = {{id}}", trimmed)
+            } else {
+                format!("{} WHERE id = {{id}}", trimmed)
+            };
         }
     }
 
-    if !params.contains_key("limit") { params.insert("limit".to_string(), Value::Number(20.into())); }
-    if !params.contains_key("page") { params.insert("page".to_string(), Value::Number(1.into())); }
+    if !params.contains_key("limit") {
+        params.insert("limit".to_string(), Value::Number(20.into()));
+    }
+    if !params.contains_key("page") {
+        params.insert("page".to_string(), Value::Number(1.into()));
+    }
     if let (Some(page_val), Some(limit_val)) = (params.get("page"), params.get("limit")) {
         if let (Some(p), Some(l)) = (page_val.as_i64(), limit_val.as_i64()) {
             let safe_page = p.max(1);
@@ -447,21 +621,39 @@ pub async fn api_route_handler(
 
     let pool = match crate::database::get_pool() {
         Ok(p) => p,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-            "success": false, 
-            "error": e
-        }))).into_response()
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "success": false,
+                    "error": e
+                })),
+            )
+                .into_response()
+        }
     };
 
-    let action_type = if action_name.contains("put") || action_name.contains("patch") || method == Method::PUT || method == Method::PATCH { "updated" }
-                      else if action_name.contains("delete") || method == Method::DELETE { "deleted" }
-                      else { "created" };
+    let action_type = if action_name.contains("put")
+        || action_name.contains("patch")
+        || method == Method::PUT
+        || method == Method::PATCH
+    {
+        "updated"
+    } else if action_name.contains("delete") || method == Method::DELETE {
+        "deleted"
+    } else {
+        "created"
+    };
 
     crate::vlo_debug!("🔧 VLO DEBUG: Executing SQL = {}", sql);
 
     match execute_api_sql(pool, &sql, &params).await {
         Ok(mut data) => {
-            let rows = data.get("data").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+            let rows = data
+                .get("data")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
             crate::vlo_debug!("✅ VLO DEBUG: SQL successful — rows: {}", rows);
 
             if method == Method::GET && !params.contains_key("id") {
@@ -471,8 +663,10 @@ pub async fn api_route_handler(
                         if let Some(count_data) = count_res.get("data").and_then(|d| d.as_array()) {
                             if let Some(first_row) = count_data.first() {
                                 if let Some(total) = first_row.get("total").and_then(|v| v.as_i64()) {
-                                    let page = params.get("page").and_then(|v| v.as_i64()).unwrap_or(1);
-                                    let limit = params.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
+                                    let page =
+                                        params.get("page").and_then(|v| v.as_i64()).unwrap_or(1);
+                                    let limit =
+                                        params.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
                                     let total_pages = (total as f64 / limit as f64).ceil() as i64;
                                     let pagination = serde_json::json!({
                                         "total": total, "page": page, "limit": limit,
@@ -489,8 +683,8 @@ pub async fn api_route_handler(
                 }
             }
 
+            // Reuse the already-computed `resource` from earlier (was recomputed).
             if method != Method::GET {
-                let resource = normalize_resource(&endpoint);
                 crate::router::broadcast_live(&resource, &data);
             }
 
@@ -500,11 +694,20 @@ pub async fn api_route_handler(
                     "deleted" => ("🗑️", "Delete Successful"),
                     _ => ("✅", "Operation Successful"),
                 };
-                let flash = crate::auth::encode_flash("success", icon, title, &format!("{} completed successfully.", action_type));
-                return flash_response(StatusCode::OK, serde_json::json!({
-                    "success": true,
-                    "message": format!("{} operation successful", action_type)
-                }), &flash);
+                let flash = crate::auth::encode_flash(
+                    "success",
+                    icon,
+                    title,
+                    &format!("{} completed successfully.", action_type),
+                );
+                return flash_response(
+                    StatusCode::OK,
+                    serde_json::json!({
+                        "success": true,
+                        "message": format!("{} operation successful", action_type)
+                    }),
+                    &flash,
+                );
             }
 
             (StatusCode::OK, Json(data)).into_response()
@@ -513,13 +716,21 @@ pub async fn api_route_handler(
             eprintln!("❌ [VLO API] {} {} -> SQL error: {}", method, action_name, error);
             if method != Method::GET {
                 let flash = crate::auth::encode_flash("error", "⚠️", "Operation Failed", &error);
-                return flash_response(StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({
-                    "success": false,
-                    "error": "Operation failed",
-                    "details": error
-                }), &flash);
+                return flash_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    serde_json::json!({
+                        "success": false,
+                        "error": "Operation failed",
+                        "details": error
+                    }),
+                    &flash,
+                );
             }
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "SQL Execution Error", "details": error, "action": action_name}))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"success": false, "error": "SQL Execution Error", "details": error, "action": action_name})),
+            )
+                .into_response()
         }
     }
 }
@@ -533,27 +744,121 @@ pub async fn execute_api_sql(
     sql_template: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let mut sql = sql_template.to_string();
-    for (key, value) in params {
-        let placeholder = format!("{{{{{}}}}}", key);
-        let replacement = match value {
-            serde_json::Value::Number(n) => n.to_string(),
-            serde_json::Value::Bool(b) => b.to_string(),
-            serde_json::Value::Null => "NULL".to_string(),
-            serde_json::Value::String(s) => format!("'{}'", s.replace("'", "''")),
-            _ => format!("'{}'", value.to_string().replace("'", "''")),
-        };
-        sql = sql.replace(&placeholder, &replacement);
-    }
-    let re = regex::Regex::new(r"\{\{([a-zA-Z0-9_]+)\}\}").unwrap();
-    sql = re.replace_all(&sql, "$1").into_owned();
+    let sql = substitute_sql_params(sql_template, params);
     crate::vlo_debug!("Executing SQL = {}", sql);
-    let rows_json = pool.fetch_all_json(&sql).await.map_err(|e| format!("SQL error: {}", e))?;
+    let rows_json = pool
+        .fetch_all_json(&sql)
+        .await
+        .map_err(|e| format!("SQL error: {}", e))?;
     Ok(serde_json::json!({
         "success": true,
         "data": rows_json,
         "affected_rows": rows_json.len()
     }))
+}
+
+/// Single-pass `{{key}}` substitution.
+///
+/// - Known params are inlined as escaped SQL literals.
+/// - Unknown `{{identifier}}` are unwrapped to bare identifiers
+///   (matches the previous regex cleanup pass).
+/// - Non-identifier braces are left as-is.
+///
+/// Note: unlike the previous multi-pass `str::replace` loop, a param
+/// value containing `{{other}}` will NOT be re-expanded. This closes a
+/// subtle injection-style edge case at the cost of a behavior that was
+/// almost never relied on.
+fn substitute_sql_params(
+    sql: &str,
+    params: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    // Fast path: no placeholders at all.
+    if !sql.contains("{{") {
+        return sql.to_string();
+    }
+
+    let mut out = String::with_capacity(sql.len() + 32);
+    let mut cursor = 0usize;
+
+    while let Some(start_rel) = sql[cursor..].find("{{") {
+        let start = cursor + start_rel;
+        out.push_str(&sql[cursor..start]);
+
+        // Find `}}` — but cap the search so a stray `{{` doesn't
+        // consume the entire rest of the SQL looking for a close.
+        let rest = &sql[start + 2..];
+        let Some(end_rel) = rest.find("}}") else {
+            out.push_str(&sql[start..]);
+            return out;
+        };
+
+        let ident_end = start + 2 + end_rel;
+        let ident = &sql[start + 2..ident_end];
+
+        // Only treat as placeholder if the contents look like an identifier.
+        let valid_ident = !ident.is_empty()
+            && ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+
+        if valid_ident {
+            if let Some(value) = params.get(ident) {
+                write_sql_value(&mut out, value);
+            } else {
+                // Unknown placeholder: unwrap to bare identifier (legacy
+                // behavior — the old regex cleanup dropped the braces).
+                out.push_str(ident);
+            }
+            cursor = ident_end + 2;
+        } else {
+            // Not identifier-like: emit the `{{` literally and keep scanning
+            // from just after it.
+            out.push_str("{{");
+            cursor = start + 2;
+        }
+    }
+
+    out.push_str(&sql[cursor..]);
+    out
+}
+
+/// Append a `serde_json::Value` as an SQL literal to `out`, escaping
+/// single quotes for strings.
+#[inline]
+fn write_sql_value(out: &mut String, value: &Value) {
+    match value {
+        Value::Number(n) => {
+            let _ = write!(out, "{}", n);
+        }
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Null => out.push_str("NULL"),
+        Value::String(s) => {
+            out.push('\'');
+            if s.contains('\'') {
+                for ch in s.chars() {
+                    if ch == '\'' {
+                        out.push_str("''");
+                    } else {
+                        out.push(ch);
+                    }
+                }
+            } else {
+                out.push_str(s);
+            }
+            out.push('\'');
+        }
+        _ => {
+            // Arrays/objects: fall back to JSON string form, still escaped.
+            out.push('\'');
+            let s = value.to_string();
+            for ch in s.chars() {
+                if ch == '\'' {
+                    out.push_str("''");
+                } else {
+                    out.push(ch);
+                }
+            }
+            out.push('\'');
+        }
+    }
 }
 
 fn crud_operation(method: &Method) -> Option<&'static str> {
@@ -570,7 +875,9 @@ fn crud_operation(method: &Method) -> Option<&'static str> {
 fn normalize_resource(endpoint: &str) -> String {
     let value = endpoint.trim().trim_matches('/');
     for prefix in ["get_", "post_", "put_", "patch_", "delete_"] {
-        if let Some(rest) = value.strip_prefix(prefix) { return rest.to_string(); }
+        if let Some(rest) = value.strip_prefix(prefix) {
+            return rest.to_string();
+        }
     }
     value.to_string()
 }
@@ -580,34 +887,65 @@ fn valid_identifier(value: &str) -> bool {
 }
 
 fn percent_decode(value: &str) -> String {
+    // Fast path: nothing to decode.
+    if !value.as_bytes().iter().any(|b| *b == b'%' || *b == b'+') {
+        return value.to_string();
+    }
+
     let bytes = value.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'+' { out.push(b' '); i += 1; continue; }
+        if bytes[i] == b'+' {
+            out.push(b' ');
+            i += 1;
+            continue;
+        }
         if bytes[i] == b'%' && i + 2 < bytes.len() {
             let h = |c: u8| -> Option<u8> {
-                match c { b'0'..=b'9' => Some(c - b'0'), b'a'..=b'f' => Some(c - b'a' + 10), b'A'..=b'F' => Some(c - b'A' + 10), _ => None }
+                match c {
+                    b'0'..=b'9' => Some(c - b'0'),
+                    b'a'..=b'f' => Some(c - b'a' + 10),
+                    b'A'..=b'F' => Some(c - b'A' + 10),
+                    _ => None,
+                }
             };
-            if let (Some(a), Some(b)) = (h(bytes[i + 1]), h(bytes[i + 2])) { out.push(a * 16 + b); i += 3; continue; }
+            if let (Some(a), Some(b)) = (h(bytes[i + 1]), h(bytes[i + 2])) {
+                out.push(a * 16 + b);
+                i += 3;
+                continue;
+            }
         }
-        out.push(bytes[i]); i += 1;
+        out.push(bytes[i]);
+        i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
 }
 
 fn parse_form_body(body: &str) -> HashMap<String, String> {
-    body.split('&').filter(|part| !part.is_empty()).filter_map(|part| {
-        let mut pair = part.splitn(2, '=');
-        let key = percent_decode(pair.next().unwrap_or(""));
-        if key.is_empty() { return None; }
-        Some((key, percent_decode(pair.next().unwrap_or(""))))
-    }).collect()
+    body.split('&')
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| {
+            let mut pair = part.splitn(2, '=');
+            let key = percent_decode(pair.next().unwrap_or(""));
+            if key.is_empty() {
+                return None;
+            }
+            Some((key, percent_decode(pair.next().unwrap_or(""))))
+        })
+        .collect()
 }
 
 fn generate_upload_name(original: &str) -> String {
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or_default();
-    let extension = Path::new(original).extension().and_then(|v| v.to_str()).map(|v| v.to_ascii_lowercase()).filter(|v| !v.is_empty());
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    let extension = Path::new(original)
+        .extension()
+        .and_then(|v| v.to_str())
+        .map(|v| v.to_ascii_lowercase())
+        .filter(|v| !v.is_empty());
     match extension {
         Some(ext) => format!("vlo_{}{}.{}", timestamp, std::process::id(), ext),
         None => format!("vlo{}_{}", timestamp, std::process::id()),
@@ -625,12 +963,22 @@ fn value_to_query_string(value: &Value) -> String {
 }
 
 fn query_string_to_value(value: &str) -> Value {
-    if value.is_empty() { return Value::String(value.to_string()); }
-    if value.eq_ignore_ascii_case("true") { return Value::Bool(true); }
-    if value.eq_ignore_ascii_case("false") { return Value::Bool(false); }
-    if let Ok(integer) = value.parse::<i64>() { return Value::Number(integer.into()); }
+    if value.is_empty() {
+        return Value::String(String::new());
+    }
+    if value.eq_ignore_ascii_case("true") {
+        return Value::Bool(true);
+    }
+    if value.eq_ignore_ascii_case("false") {
+        return Value::Bool(false);
+    }
+    if let Ok(integer) = value.parse::<i64>() {
+        return Value::Number(integer.into());
+    }
     if let Ok(float) = value.parse::<f64>() {
-        if let Some(number) = serde_json::Number::from_f64(float) { return Value::Number(number); }
+        if let Some(number) = serde_json::Number::from_f64(float) {
+            return Value::Number(number);
+        }
     }
     Value::String(value.to_string())
 }

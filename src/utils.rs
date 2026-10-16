@@ -2,8 +2,6 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-use regex::Regex;
-use std::sync::LazyLock;
 
 pub fn init_project(
     name: &str,
@@ -164,36 +162,61 @@ INSERT INTO items (title) VALUES ('⚡ Learn VLO v0.7 Architecture'), ('🛠️ 
     Ok(())
 }
 
-// Add this to the bottom of src/utils.rs
-
-static CSS_COMMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/").unwrap()
-});
-
-static CSS_WS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\s+").unwrap()
-});
-
+// ─────────────────────────────────────────────────────────────
+// CSS minifier — single-pass, allocation-light.
+// ─────────────────────────────────────────────────────────────
 pub fn minify_css(css: &str) -> String {
-    // 1. Remove multi-line comments
-    let no_comments = CSS_COMMENT_RE.replace_all(css, "");
+    if css.is_empty() {
+        return String::new();
+    }
 
-    // 2. Collapse all whitespace to single spaces
-    let mut minified = CSS_WS_RE.replace_all(&no_comments, " ").to_string();
+    let bytes = css.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len);
+    let mut i = 0usize;
+    let mut pending_space = false;
+    let mut last_emitted: char = '\0';
 
-    // 3. Remove unnecessary spaces around syntax characters to save bytes
-    minified = minified.replace(" {", "{");
-    minified = minified.replace("{ ", "{");
-    minified = minified.replace(" }", "}");
-    minified = minified.replace(": ", ":");
-    minified = minified.replace("; ", ";");
-    minified = minified.replace(", ", ",");
-    minified = minified.replace("> ", ">");
-    minified = minified.replace(" +", "+");
-    minified = minified.replace("+ ", "+");
-    minified = minified.replace(" >", ">");
-    minified = minified.replace("[ ", "[");
-    minified = minified.replace(" ]", "]");
-
-    minified.trim().to_string()
+    while i < len {
+        let b = bytes[i];
+        if b == b'/' && i + 1 < len && bytes[i + 1] == b'*' {
+            let mut j = i + 2;
+            while j + 1 < len && !(bytes[j] == b'*' && bytes[j + 1] == b'/') {
+                j += 1;
+            }
+            if j + 1 < len {
+                i = j + 2;
+                continue;
+            }
+        }
+        // Decode the current char (ASCII fast path).
+        let (c, clen): (char, usize) = if b < 0x80 {
+            (b as char, 1)
+        } else {
+            match css[i..].chars().next() {
+                Some(ch) => (ch, ch.len_utf8()),
+                None => break,
+            }
+        };
+        // Whitespace: remember, don't emit yet.
+        if c.is_whitespace() {
+            pending_space = true;
+            i += clen;
+            continue;
+        }
+        // Emit the pending space only when the surrounding chars require it.
+        if pending_space {
+            let prev_removes_after =
+                matches!(last_emitted, '{' | ':' | ';' | ',' | '>' | '+' | '[');
+            let curr_removes_before = matches!(c, '{' | '}' | '>' | '+' | ']');
+            if !(prev_removes_after || curr_removes_before) && last_emitted != '\0' {
+                out.push(' ');
+            }
+            pending_space = false;
+        }
+        out.push(c);
+        last_emitted = c;
+        i += clen;
+    }
+    out
 }
