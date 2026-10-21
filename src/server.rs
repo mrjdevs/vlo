@@ -8,10 +8,12 @@ use crate::{
     api::{api_handler_id, api_handler_path, api_handler_root},
     auth,
     features::{is_enabled, Feature},
-    files_api::{delete_file, download_file, get_file, serve_file, upload_file},
+    files_api::serve_file,
     router::{hmr_handler, home_handler, not_found_handler, page_handler, watch_files},
     state::{self, get_project_root},
     template::escape_html_attribute,
+    component::parse_props_v7,
+    auth::LAYOUT_TAG_RE,
 };
 
 use axum::{
@@ -234,7 +236,9 @@ fn has_immutable_extension(path: &str) -> bool {
 async fn cache_middleware(req: Request, next: Next) -> Response {
     let path = req.uri().path();
     let is_sse = path.starts_with("/__vlo_sse");
-    let is_static = path.starts_with("/static/") || path.starts_with("/uploads/");
+    let is_static = path.starts_with("/static/")
+        || path.starts_with("/uploads/")
+        || path.starts_with("/storage/");
     let is_immutable_ext = !is_static && has_immutable_extension(path);
 
     let mut response = next.run(req).await;
@@ -290,17 +294,23 @@ async fn session_cleanup_task() {
 // ─────────────────────────────────────────────────────────────
 fn build_common_routes() -> Router {
     let mut app = Router::new()
+        // 🔥 MUST BE BEFORE GENERIC API ROUTES
+        .route("/__vlo/image", get(crate::files_api::optimize_image))
         .route("/uploads/*path", get(serve_file))
         .route("/healthz", get(healthz_handler))
         .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler));
 
     if is_enabled(Feature::Files) {
         app = app
-            .route("/api/files/upload", axum::routing::post(upload_file))
-            .route("/api/files/:id/download", get(download_file))
-            .route("/api/files/:id", get(get_file).delete(delete_file));
+            .route("/api/files/upload", axum::routing::post(crate::files_api::upload_file))
+            .route("/api/files/:id/download", get(crate::files_api::download_file))
+            .route("/api/files/:id", get(crate::files_api::get_file).delete(crate::files_api::delete_file))
+            .nest_service(
+                "/storage",
+                tower_http::services::ServeDir::new(get_project_root().join("storage"))
+                    .append_index_html_on_directories(false),
+            );
     }
-
     if is_enabled(Feature::Auth) {
         app = app
             .route("/api/auth/login", axum::routing::post(auth::login_handler))
@@ -511,7 +521,7 @@ pub async fn cgi() -> Result<(), String> {
     }
 
     let page_name = if path.is_empty() {
-        "home".to_string()
+        "index".to_string()
     } else {
         path.to_string()
     };
@@ -660,37 +670,24 @@ fn extract_flash(cookie_header: Option<&str>) -> (Option<serde_json::Value>, Str
 }
 
 fn check_guard(
-    cache: &BuildCache,
-    path: &str,
-    auth: &Option<crate::auth::AuthUser>,
-    next: Option<&str>,
+    cache: &BuildCache, path: &str, auth: &Option<crate::auth::AuthUser>, next: Option<&str>,
 ) -> Option<Response> {
-    let routes = cache.manifest.as_object()?;
-    let route_config = routes.get(path)?;
-
-    let requires_auth = route_config.get("auth").and_then(|v| v.as_bool()).unwrap_or(false);
+    let cfg = cache.manifest.as_object()?.get(path)?;
+    let req_auth = cfg.get("auth").and_then(|v| v.as_bool()).unwrap_or(false);
 
     if !is_enabled(Feature::Auth) {
-        return if requires_auth {
-            crate::vlo_debug!("⚠️ Page {} requires auth but Auth is disabled", path);
-            Some((StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response())
-        } else {
-            None
-        };
+        return req_auth.then(|| (StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response());
     }
 
     let guard = crate::auth::PageGuard {
-        auth: requires_auth,
-        guest: route_config.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
-        roles: route_config
-            .get("roles")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        auth: req_auth,
+        guest: cfg.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
+        roles: cfg.get("roles").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
             .unwrap_or_default(),
     };
-
-    let user = auth.as_ref().and_then(|a| a.user.clone());
-    crate::auth::check_page_guard(&guard, &user, path, next)
+    
+    crate::auth::check_page_guard(&guard, &auth.as_ref().and_then(|a| a.user.clone()), path, next)
 }
 
 fn inject_auth_context(
@@ -706,6 +703,7 @@ fn inject_auth_context(
 
     if let Some(user) = auth.as_ref().and_then(|a| a.user.as_ref()) {
         ctx.insert("logged_in".into(), serde_json::Value::Bool(true));
+        ctx.insert("user_id".into(), serde_json::Value::Number(user.id.into()));
         ctx.insert("user_name".into(), serde_json::Value::String(user.name.clone()));
         ctx.insert("user_role".into(), serde_json::Value::String(user.role.clone()));
         ctx.insert("user_email".into(), serde_json::Value::String(user.email.clone()));
@@ -792,8 +790,106 @@ fn inject_sse_script(final_html: &mut String, auth: &Option<crate::auth::AuthUse
     }
 }
 
+// ---------------------------------------------------------------------------
+// Cache Policy Parsing & Helpers
+// ---------------------------------------------------------------------------
+#[derive(Debug, Clone, PartialEq)]
+struct CachePolicy {
+    tier: CacheTier,
+    browser_ttl: u64, // Seconds
+    server_ttl: u64,  // Seconds
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CacheTier {
+    Static, // Truly static pages (About, Pricing)
+    User,   // User-specific pages (Dashboard, Profile)
+    Live,   // Live DB data (Products, Orders)
+    Auto,   // Auto-detect from content
+}
+
+/// Parses strings like "static", "user:7200", or "static:7200:86400"
+fn parse_cache_policy(raw: &str) -> CachePolicy {
+    let parts: Vec<&str> = raw.split(':').collect();
+    let tier_str = parts.get(0).map(|s| *s).unwrap_or("auto");
+    
+    let tier = match tier_str.trim() {
+        "static" => CacheTier::Static,
+        "user" => CacheTier::User,
+        "live" => CacheTier::Live,
+        _ => CacheTier::Auto,
+    };
+
+    let default_browser = match tier {
+        CacheTier::Static => 3600, // 1 hour default
+        CacheTier::User => 0,      // no browser cache default
+        CacheTier::Live => 0,
+        CacheTier::Auto => 0,
+    };
+    
+    let default_server = if matches!(tier, CacheTier::Live) { 0 } else { 60 }; // 60s default
+
+    let browser_ttl = parts.get(1)
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(default_browser);
+
+    let server_ttl = parts.get(2)
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(default_server);
+
+    CachePolicy { tier, browser_ttl, server_ttl }
+}
+
+fn apply_cache_headers(response: &mut Response, policy: &CachePolicy) {
+    let cache_control = match policy.tier {
+        CacheTier::Static => {
+            if policy.browser_ttl > 0 {
+                format!("public, max-age={}, stale-while-revalidate=86400", policy.browser_ttl)
+            } else {
+                "public, no-cache".to_string()
+            }
+        }
+        CacheTier::User => {
+            if policy.browser_ttl > 0 {
+                format!("private, max-age={}, must-revalidate", policy.browser_ttl)
+            } else {
+                "private, no-cache, must-revalidate".to_string()
+            }
+        }
+        CacheTier::Live => "no-store, private".to_string(),
+        CacheTier::Auto => "private, no-store".to_string(),
+    };
+
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_str(&cache_control).unwrap(),
+    );
+}
+
+fn inject_per_request_dynamic(html: &mut String, auth: &Option<crate::auth::AuthUser>, flash_html: &str) {
+    // 1. CSRF
+    if html.contains("__VLO_CSRF_PLACEHOLDER__") {
+        let csrf = if is_enabled(Feature::Auth) {
+            auth.as_ref().and_then(|a| a.csrf_token.as_deref()).unwrap_or("")
+        } else {
+            ""
+        };
+        *html = html.replace("__VLO_CSRF_PLACEHOLDER__", csrf);
+    }
+
+    // 2. Flash
+    if is_enabled(Feature::Flash)
+        && !flash_html.is_empty()
+        && html.contains(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#)
+    {
+        *html = html.replace(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#, flash_html);
+    }
+
+    // 3. SSE
+    inject_sse_script(html, auth);
+}
 // ─────────────────────────────────────────────────────────────
-// serve_build_page — production page renderer
+// serve_build_page — production page renderer with HTML caching
 // ─────────────────────────────────────────────────────────────
 async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Response {
     let cache = ensure_build_cache(&build_dir);
@@ -801,8 +897,6 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
 
     let (query, next_decoded) = parse_query(&uri);
 
-    // Extract everything we need from `req` up front so no borrow
-    // crosses an `.await` (Request<Body> is !Sync → &Request is !Send).
     let existing_auth = req.extensions().get::<crate::auth::AuthUser>().cloned();
     let cookie_header = req
         .headers()
@@ -813,7 +907,6 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
     let auth = resolve_auth(existing_auth, cookie_header.as_deref()).await;
     let (flash_value, flash_html, expire_cookie) = extract_flash(cookie_header.as_deref());
 
-    // Guard check.
     if let Some(mut resp) = check_guard(&cache, path, &auth, next_decoded.as_deref()) {
         if expire_cookie {
             if let Ok(v) = HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
@@ -823,21 +916,59 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
         return resp;
     }
 
-    // Zero-copy page lookup.
     let lookup = if path == "/" { "/" } else { path };
     let Some(page_html) = cache.pages.get(lookup).cloned() else {
         let not_found = build_dir.join("404.html");
         return match fs::read_to_string(not_found) {
             Ok(html) => (StatusCode::NOT_FOUND, Html(html)).into_response(),
-            Err(_) => (
-                StatusCode::NOT_FOUND,
-                Html("404 - Page Not Found".to_string()),
-            )
-                .into_response(),
+            Err(_) => (StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response(),
         };
     };
 
-    // Build template context from query params.
+    // ─── 1. Determine Cache Policy from Manifest ───
+    let cache_policy = cache.manifest.as_object()
+        .and_then(|routes| routes.get(lookup))
+        .and_then(|cfg| cfg.get("cache"))
+        .and_then(|v| v.as_str())
+        .map(parse_cache_policy)
+        .unwrap_or_else(|| {
+            // Fallback: auto-detect from content
+            if page_html.contains("data-source") {
+                CachePolicy { tier: CacheTier::Live, browser_ttl: 0, server_ttl: 0 }
+            } else {
+                CachePolicy { tier: CacheTier::Static, browser_ttl: 3600, server_ttl: 60 }
+            }
+        });
+
+    // Cache key includes user role to prevent cross-user cache poisoning
+    let user_role = auth.as_ref()
+        .and_then(|a| a.user.as_ref().map(|u| u.role.as_str()))
+        .unwrap_or("guest");
+    let cache_key = format!("{}|{}", lookup, user_role);
+
+    // ─── 2. Try Server Cache ───
+    if cache_policy.server_ttl > 0 {
+        if let Ok(cache_guard) = crate::state::HTML_RENDER_CACHE.lock() {
+            if let Some(entry) = cache_guard.get(&cache_key) {
+                if entry.created_at.elapsed() < entry.ttl {
+                    let mut cached_html = entry.html.clone();
+                    inject_per_request_dynamic(&mut cached_html, &auth, &flash_html);
+                    
+                    let mut response = (StatusCode::OK, Html(cached_html)).into_response();
+                    apply_cache_headers(&mut response, &cache_policy);
+                    
+                    if expire_cookie && is_enabled(Feature::Flash) {
+                        if let Ok(v) = HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
+                            response.headers_mut().append(axum::http::header::SET_COOKIE, v);
+                        }
+                    }
+                    return response;
+                }
+            }
+        }
+    }
+
+    // ─── 3. Full Render Pipeline (Cache Miss or Non-Cacheable) ───
     let mut context: HashMap<String, serde_json::Value> = HashMap::with_capacity(query.len() + 12);
     for (k, v) in &query {
         let value = match v.parse::<i64>() {
@@ -851,17 +982,13 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
     inject_flash_context(&mut context, &flash_value);
     inject_pagination_context(&mut context);
 
-    // Data source resolution — fast path skips the entire pass when the
-    // page contains no `data-source` markers (most static pages).
-    let (html_with_data, computed) =
-        if is_enabled(Feature::Database) && page_html.contains("data-source") {
-            crate::router::resolve_data_sources(&page_html, &context)
-        } else {
-            (page_html.to_string(), HashMap::new())
-        };
+    let (html_with_data, computed) = if is_enabled(Feature::Database) && page_html.contains("data-source") {
+        crate::router::resolve_data_sources(&page_html, &context)
+    } else {
+        (page_html.to_string(), HashMap::new())
+    };
     context.extend(computed);
 
-    // Component rendering loop — moves context into RenderedPage, no clone.
     let mut page = crate::state::RenderedPage {
         html: html_with_data,
         styles: Vec::new(),
@@ -874,48 +1001,39 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
         let current = previous.clone();
         page.html = crate::component::render_components(&current, &mut page);
         if page.html == previous {
-            if page.html.is_empty() {
-                page.html = previous;
-            }
+            if page.html.is_empty() { page.html = previous; }
             break;
         }
     }
 
-    // Final control-flow pass.
-    let mut final_html = crate::template::render_control_flow(&page.html, &page.template_context);
+    let mut pre_injection_html = crate::template::render_control_flow(&page.html, &page.template_context);
 
-    // CSRF placeholder replacement (guarded).
-    if final_html.contains("__VLO_CSRF_PLACEHOLDER__") {
-        let csrf = if is_enabled(Feature::Auth) {
-            auth.as_ref().and_then(|a| a.csrf_token.as_deref()).unwrap_or("")
-        } else {
-            ""
-        };
-        final_html = final_html.replace("__VLO_CSRF_PLACEHOLDER__", csrf);
+    // ─── 4. Write to Server Cache ───
+    if cache_policy.server_ttl > 0 {
+        if let Ok(mut cache_guard) = crate::state::HTML_RENDER_CACHE.lock() {
+            cache_guard.insert(cache_key, crate::state::CachedHtml {
+                html: pre_injection_html.clone(),
+                created_at: std::time::Instant::now(),
+                ttl: std::time::Duration::from_secs(cache_policy.server_ttl),
+            });
+        }
     }
 
-    // Flash placeholder replacement (guarded).
-    if is_enabled(Feature::Flash)
-        && !flash_html.is_empty()
-        && final_html.contains(r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#)
-    {
-        final_html = final_html.replace(
-            r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#,
-            &flash_html,
-        );
-    }
+    // ─── 5. Inject Dynamic Parts & Return ───
+    inject_per_request_dynamic(&mut pre_injection_html, &auth, &flash_html);
+    
+    let mut response = (StatusCode::OK, Html(pre_injection_html)).into_response();
+    apply_cache_headers(&mut response, &cache_policy);
 
-    // SSE script injection (no-op if no markers).
-    inject_sse_script(&mut final_html, &auth);
-
-    let mut response = (StatusCode::OK, Html(final_html)).into_response();
     if expire_cookie && is_enabled(Feature::Flash) {
         if let Ok(v) = HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
             response.headers_mut().append(axum::http::header::SET_COOKIE, v);
         }
     }
+    
     response
 }
+
 
 async fn shutdown_signal() {
     tokio::signal::ctrl_c()
@@ -982,67 +1100,38 @@ pub fn build(release: bool) -> Result<(), String> {
 }
 
 fn build_pages_recursive(
-    dir: &Path,
-    pages_root: &Path,
-    build_dir: &Path,
-    manifest: &mut serde_json::Map<String, serde_json::Value>,
+    dir: &Path, pages_root: &Path, build_dir: &Path, manifest: &mut serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
-    let entries = fs::read_dir(dir)
-        .map_err(|e| format!("Failed to read pages dir: {}", e))?;
+    for entry in fs::read_dir(dir).map_err(|e| format!("Failed to read dir: {}", e))?.flatten() {
+        let path = entry.path();
+        if path.is_dir() { build_pages_recursive(&path, pages_root, build_dir, manifest)?; continue; }
+        if path.extension().and_then(|e| e.to_str()) != Some("vlo") { continue; }
 
-    for entry in entries.flatten() {
-        let file_path = entry.path();
-        if file_path.is_dir() {
-            build_pages_recursive(&file_path, pages_root, build_dir, manifest)?;
-            continue;
+        let rel = path.strip_prefix(pages_root).map_err(|e| format!("Path error: {}", e))?
+            .with_extension("").to_string_lossy().replace('\\', "/");
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let guard = crate::auth::extract_page_guard(&content);
+        
+        // Extract cache prop using the same layout regex and props parser
+        let cache = LAYOUT_TAG_RE.captures(&content)
+            .and_then(|c| parse_props_v7(c.get(2)?.as_str()).get("cache").cloned())
+            .and_then(|v| v.as_str().map(String::from));
+
+        let html = crate::router::wrap_html(&rel, &crate::router::render_vlo_for_build_at(&rel, content), true);
+        let out = if rel == "index" { build_dir.join("index.html") } else { build_dir.join(format!("{}.html", rel)) };
+        
+        if let Some(p) = out.parent() { fs::create_dir_all(p).map_err(|e| format!("Dir error: {}", e))?; }
+        fs::write(&out, html).map_err(|e| format!("Write error: {}", e))?;
+
+        let route = if rel == "index" { "/" } else { &format!("/{}", rel) };
+        let mut cfg = serde_json::Map::new();
+        if let Some(g) = guard { 
+            cfg.extend([("auth".into(), g.auth.into()), ("guest".into(), g.guest.into()), ("roles".into(), g.roles.into())]); 
         }
-        if file_path.extension().and_then(|e| e.to_str()) != Some("vlo") {
-            continue;
-        }
+        if let Some(c) = cache { cfg.insert("cache".into(), c.into()); }
+        if !cfg.is_empty() { manifest.insert(route.to_string(), cfg.into()); }
 
-        let relative = file_path
-            .strip_prefix(pages_root)
-            .map_err(|e| format!("Failed to resolve page path: {}", e))?
-            .with_extension("")
-            .to_string_lossy()
-            .replace('\\', "/");
-
-        let content = fs::read_to_string(&file_path).unwrap_or_default();
-        let page_guard = crate::auth::extract_page_guard(&content);
-
-        let rendered = crate::router::render_vlo_for_build_at(&relative, content);
-        let html = crate::router::wrap_html(&relative, &rendered, true);
-
-        let output = if relative == "home" || relative == "index" {
-            build_dir.join("index.html")
-        } else {
-            build_dir.join(format!("{}.html", relative))
-        };
-
-        if let Some(parent) = output.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create build dir: {}", e))?;
-        }
-        fs::write(&output, html)
-            .map_err(|e| format!("Failed to write HTML: {}", e))?;
-
-        if let Some(guard) = page_guard {
-            let route_path = if relative == "home" || relative == "index" {
-                "/".to_string()
-            } else {
-                format!("/{}", relative)
-            };
-            manifest.insert(
-                route_path,
-                serde_json::json!({
-                    "auth": guard.auth,
-                    "guest": guard.guest,
-                    "roles": guard.roles
-                }),
-            );
-        }
-
-        println!("  ├─ Generated: {}", output.display());
+        println!("  ├─ Generated: {}", out.display());
     }
     Ok(())
 }
@@ -1354,6 +1443,11 @@ function vloHandleResponse(r, form) {
                 throw new Error("warning");
             }
             throw new Error(d.error || d.details || d.message || 'Request failed');
+        }
+                // In vloHandleResponse, look for this line:
+        if (d.redirect || (d.data && d.data.length > 0 && d.data[0].redirect)) {
+            window.location.href = d.redirect || d.data[0].redirect;
+            return;
         }
         if (d.redirect) { window.location.href = d.redirect; return; }
         if (form) {

@@ -243,6 +243,26 @@ pub fn is_building() -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// HTML Render Cache (Server-side memory cache)
+// ---------------------------------------------------------------------------
+use std::time::{Duration, Instant};
+
+pub struct CachedHtml {
+    pub html: String,
+    pub created_at: Instant,
+    pub ttl: Duration, // Per-entry TTL override
+}
+
+pub static HTML_RENDER_CACHE: LazyLock<Mutex<HashMap<String, CachedHtml>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[allow(dead_code)]
+pub fn clear_html_render_cache() {
+    if let Ok(mut cache) = HTML_RENDER_CACHE.lock() {
+        cache.clear();
+    }
+}
+// ---------------------------------------------------------------------------
 // Module System State
 // ---------------------------------------------------------------------------
 use serde::{Deserialize, Serialize};

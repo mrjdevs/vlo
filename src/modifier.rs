@@ -235,15 +235,24 @@ fn m_hash(v: String, arg: Option<String>) -> String {
     }
 }
 
-// ── JSON / URL ───────────────────────────────────────────────────────
-fn m_json(v: String, _: Option<String>) -> String {
+// ── JSON ─────────────────────────────────────────────────────────────
+fn m_json_encode(v: String, _: Option<String>) -> String {
     serde_json::to_string(&v).unwrap_or_default()
 }
-fn m_json_path(v: String, arg: Option<String>) -> String {
+
+fn m_json_decode(v: String, _: Option<String>) -> String {
+    match serde_json::from_str::<Value>(v.trim()) {
+        Ok(parsed) => serde_json::to_string(&parsed).unwrap_or(v),
+        Err(_) => v,
+    }
+}
+
+fn m_json_get(v: String, arg: Option<String>) -> String {
     let Some(path) = arg else { return v };
     let Ok(json) = serde_json::from_str::<Value>(&v) else { return String::new() };
     json_path(&json, &path).map(value_to_string).unwrap_or_default()
 }
+
 fn json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
     let mut current = value;
     let path = path.trim().strip_prefix('$').unwrap_or(path.trim()).trim_start_matches('.');
@@ -261,17 +270,200 @@ fn json_path<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
     }
     Some(current)
 }
+
+fn m_json_pretty(v: String, _: Option<String>) -> String {
+    serde_json::from_str::<Value>(v.trim())
+        .ok()
+        .and_then(|p| serde_json::to_string_pretty(&p).ok())
+        .unwrap_or(v)
+}
+
+fn m_json_keys(v: String, _: Option<String>) -> String {
+    let Ok(parsed) = serde_json::from_str::<Value>(v.trim()) else { return "[]".into() };
+    let keys: Vec<String> = match parsed {
+        Value::Object(o) => o.keys().cloned().collect(),
+        Value::Array(a) => (0..a.len()).map(|i| i.to_string()).collect(),
+        _ => Vec::new(),
+    };
+    serde_json::to_string(&keys).unwrap_or_else(|_| "[]".into())
+}
+
+fn m_json_values(v: String, _: Option<String>) -> String {
+    let Ok(parsed) = serde_json::from_str::<Value>(v.trim()) else { return "[]".into() };
+    let values: Vec<Value> = match parsed {
+        Value::Object(o) => o.values().cloned().collect(),
+        Value::Array(a) => a,
+        _ => Vec::new(),
+    };
+    serde_json::to_string(&values).unwrap_or_else(|_| "[]".into())
+}
+
+fn m_json_has(v: String, arg: Option<String>) -> String {
+    let Some(path) = arg else { return "false".into() };
+    let Ok(json) = serde_json::from_str::<Value>(v.trim()) else { return "false".into() };
+    if json_path(&json, &path).is_some() { "true".into() } else { "false".into() }
+}
+
+// ── Array ────────────────────────────────────────────────────────────
+
+fn m_split(v: String, arg: Option<String>) -> String {
+    let delimiter = arg.as_deref().unwrap_or(",");
+    let parts: Vec<&str> = v.split(delimiter).collect();
+    serde_json::to_string(&parts).unwrap_or_else(|_| "[]".into())
+}
+
+fn m_join(v: String, arg: Option<String>) -> String {
+    let delimiter = arg.as_deref().unwrap_or(",");
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(v.trim()) else { return v };
+    items.iter().map(value_to_string).collect::<Vec<_>>().join(delimiter)
+}
+
+fn m_pluck(v: String, arg: Option<String>) -> String {
+    let Some(field) = arg else { return "[]".into() };
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(v.trim()) else { return "[]".into() };
+    let values: Vec<Value> = items.iter()
+        .filter_map(|item| json_path(item, &field).cloned())
+        .collect();
+    serde_json::to_string(&values).unwrap_or_else(|_| "[]".into())
+}
+
+fn m_first(v: String, _: Option<String>) -> String {
+    let Ok(parsed) = serde_json::from_str::<Value>(v.trim()) else { return String::new() };
+    match parsed {
+        Value::Array(a) => a.first().map(value_to_string).unwrap_or_default(),
+        Value::Object(o) => o.values().next().map(value_to_string).unwrap_or_default(),
+        other => value_to_string(&other),
+    }
+}
+
+fn m_last(v: String, _: Option<String>) -> String {
+    let Ok(parsed) = serde_json::from_str::<Value>(v.trim()) else { return String::new() };
+    match parsed {
+        Value::Array(a) => a.last().map(value_to_string).unwrap_or_default(),
+        Value::Object(o) => o.values().last().map(value_to_string).unwrap_or_default(),
+        other => value_to_string(&other),
+    }
+}
+
+fn m_nth(v: String, arg: Option<String>) -> String {
+    let n: usize = arg.as_deref().unwrap_or("0").parse().unwrap_or(0);
+    let Ok(Value::Array(a)) = serde_json::from_str::<Value>(v.trim()) else { return String::new() };
+    a.get(n).map(value_to_string).unwrap_or_default()
+}
+
+fn m_unique(v: String, _: Option<String>) -> String {
+    let Ok(Value::Array(a)) = serde_json::from_str::<Value>(v.trim()) else { return v };
+    let mut seen = std::collections::HashSet::new();
+    let uniq: Vec<Value> = a.into_iter()
+        .filter(|item| seen.insert(item.to_string()))
+        .collect();
+    serde_json::to_string(&uniq).unwrap_or_else(|_| "[]".into())
+}
+
+fn m_sort(v: String, arg: Option<String>) -> String {
+    let Ok(Value::Array(mut items)) = serde_json::from_str::<Value>(v.trim()) else { return v };
+    let mut parts = arg.as_deref().unwrap_or("").split(':');
+    let field = parts.next().filter(|s| !s.is_empty());
+    let desc = parts.next().map(|d| d.eq_ignore_ascii_case("desc")).unwrap_or(false);
+    items.sort_by(|a, b| {
+        let va = field.and_then(|f| json_path(a, f)).unwrap_or(a);
+        let vb = field.and_then(|f| json_path(b, f)).unwrap_or(b);
+        match (va, vb) {
+            (Value::Number(x), Value::Number(y)) => x.as_f64().unwrap_or(0.0)
+                .partial_cmp(&y.as_f64().unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal),
+            (Value::String(x), Value::String(y)) => x.cmp(y),
+            (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+            _ => std::cmp::Ordering::Equal,
+        }
+    });
+    if desc { items.reverse(); }
+    serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
+}
+
+fn m_where(v: String, arg: Option<String>) -> String {
+    let Some(arg) = arg else { return "[]".into() };
+    let mut parts = arg.splitn(2, ':');
+    let field = parts.next().unwrap_or("");
+    let expected = parts.next().unwrap_or("");
+    if field.is_empty() { return "[]".into(); }
+    let Ok(Value::Array(items)) = serde_json::from_str::<Value>(v.trim()) else { return "[]".into() };
+    let filtered: Vec<Value> = items.into_iter()
+        .filter(|item| {
+            json_path(item, field)
+                .map(|val| value_to_string(val) == expected)
+                .unwrap_or(false)
+        })
+        .collect();
+    serde_json::to_string(&filtered).unwrap_or_else(|_| "[]".into())
+}
+
+fn m_count(v: String, _: Option<String>) -> String {
+    match serde_json::from_str::<Value>(v.trim()) {
+        Ok(Value::Array(a)) => a.len().to_string(),
+        Ok(Value::Object(o)) => o.len().to_string(),
+        _ => v.chars().count().to_string(),
+    }
+}
+
+// ── URL ──────────────────────────────────────────────────────────────
+
 fn m_query(v: String, arg: Option<String>) -> String {
     let key = arg.unwrap_or_default();
-    let query = v.split_once('?').map(|(_, q)| q.split('#').next().unwrap_or(q)).unwrap_or("");
+    // Accept full URLs (`https://x/y?a=1`) and bare query strings (`a=1&b=2`).
+    let query = if let Some((_, q)) = v.split_once('?') {
+        q.split('#').next().unwrap_or(q)
+    } else if v.contains('=') {
+        v.split('#').next().unwrap_or(&v)
+    } else {
+        return String::new();
+    };
     query.split('&')
         .filter_map(|p| p.split_once('='))
-        .find(|(k, _)| urlencoding::decode(k).map(|x| x == key).unwrap_or(false))
+        .find(|(k, _)| urlencoding::decode(k).map(|d| d == key).unwrap_or(false))
         .and_then(|(_, val)| urlencoding::decode(val).ok())
-        .map(|x| x.into_owned())
+        .map(|c| c.into_owned())
         .unwrap_or_default()
 }
 
+fn m_url_encode(v: String, _: Option<String>) -> String {
+    urlencoding::encode(&v).into_owned()
+}
+
+fn m_url_decode(v: String, _: Option<String>) -> String {
+    urlencoding::decode(&v).map(|c| c.into_owned()).unwrap_or(v)
+}
+
+fn m_url_path(v: String, _: Option<String>) -> String {
+    let after_scheme = v.split_once("://").map(|(_, r)| r).unwrap_or(&v);
+    let with_slash = if after_scheme.contains('/') {
+        format!("/{}", after_scheme.split_once('/').unwrap().1)
+    } else {
+        "/".to_string()
+    };
+    with_slash.split(['?', '#']).next().unwrap_or("/").to_string()
+}
+
+fn m_url_host(v: String, _: Option<String>) -> String {
+    let after_scheme = v.split_once("://").map(|(_, r)| r).unwrap_or(&v);
+    after_scheme.split(['/', '?', '#']).next().unwrap_or("")
+        .split(':').next().unwrap_or("").to_string()
+}
+
+fn m_url_origin(v: String, _: Option<String>) -> String {
+    let scheme = v.split_once("://").map(|(s, _)| s).unwrap_or("https").to_string();
+    let host = m_url_host(v, None);
+    format!("{}://{}", scheme, host)
+}
+
+fn m_basename(v: String, _: Option<String>) -> String {
+    m_url_path(v, None).rsplit('/').next().unwrap_or("").to_string()
+}
+
+fn m_extname(v: String, _: Option<String>) -> String {
+    m_basename(v, None).rsplit_once('.')
+        .map(|(_, ext)| format!(".{}", ext)).unwrap_or_default()
+}
 // ── HTML / Content ──────────────────────────────────────────────────
 fn m_strip_tags(v: String, _: Option<String>) -> String {
     let mut out = String::with_capacity(v.len());
@@ -298,111 +490,125 @@ fn m_excerpt(v: String, arg: Option<String>) -> String {
 // ── Image Optimization ──────────────────────────────────────────────────
 fn m_image(v: String, arg: Option<String>) -> String {
     let url = v.trim().trim_matches('"').trim_matches('\'');
-    if url.is_empty() { return String::new(); }
+    if url.is_empty() {
+        return String::new();
+    }
 
-    let mut width = 800;
-    let mut height = 600;
-    let mut format = String::from("webp");
+    // ── Defaults ─────────────────────────────────────────────
+    let mut width: u32 = 800;
+    let mut height: u32 = 600;
+    let mut quality: u8 = 80;
+    let mut format: String = "webp".to_string();
+    let mut sizes: String = "100vw".to_string();
     let mut blur = false;
-    let mut quality = 80;
-    let mut sizes = String::from("100vw");
+    let mut retina = true;
+    let mut fit: String = "exact".to_string();   // ← was &str
 
+    // ── Parse arguments ──────────────────────────────────────
     if let Some(options) = arg {
         for opt in options.split(',') {
             let opt = opt.trim();
+            if opt.is_empty() {
+                continue;
+            }
 
-            if opt.starts_with("w=") {
-                width = opt[2..].parse().unwrap_or(width);
-            } else if opt.starts_with("h=") {
-                height = opt[2..].parse().unwrap_or(height);
-            } else if opt.starts_with("q=") {
-                quality = opt[2..].parse().unwrap_or(quality);
-            } else if opt.starts_with("sizes=") {
-                sizes = opt[6..].to_string();
+            if let Some(val) = opt.strip_prefix("w=") {
+                width = val.parse::<u32>().unwrap_or(width).clamp(1, 4096);
+            } else if let Some(val) = opt.strip_prefix("h=") {
+                height = val.parse::<u32>().unwrap_or(height).clamp(1, 4096);
+            } else if let Some(val) = opt.strip_prefix("q=") {
+                quality = val.parse::<u8>().unwrap_or(quality).clamp(1, 100);
+            } else if let Some(val) = opt.strip_prefix("sizes=") {
+                sizes = val.to_string();
             } else if opt == "webp" || opt == "avif" || opt == "jpg" || opt == "png" {
                 format = opt.to_string();
             } else if opt == "blur" {
                 blur = true;
+            } else if opt == "retina" {
+                retina = true;
+            } else if opt == "no-retina" {
+                retina = false;
+            } else if opt == "exact" || opt == "cover" || opt == "contain" {
+                fit = opt.to_string();   // ← was `fit = opt;`
             }
         }
     }
 
-    let encoded_url = urlencoding::encode(url);
-    let opt_base = "/api/vlo/optimize";
+    // ── Resolve URL ──────────────────────────────────────────
+    let full_url = if url.starts_with("http://") || url.starts_with("https://") {
+        url.to_string()
+    } else {
+        format!("/storage/uploads/{}", url)
+    };
 
-    let src_1x = format!(
-        "{}?src={}&w={}&h={}&f={}&q={}",
-        opt_base, encoded_url, width, height, format, quality
-    );
+    let encoded = urlencoding::encode(&full_url);
+    let base = "/__vlo/image";
 
-    let src_2x = format!(
-        "{}?src={}&w={}&h={}&f={}&q={}",
-        opt_base, encoded_url, width * 2, height * 2, format, quality
-    );
+    // ── URL factory (captures owned `fit` by reference — fine)
+    let make_url = |w: u32, h: u32, f: &str, q: u8| {
+        format!("{base}?src={encoded}&w={w}&h={h}&f={f}&q={q}&fit={fit}")
+    };
 
-    let mut picture = String::new();
+    let src_1x = make_url(width, height, &format, quality);
+    let src_2x = make_url(width * 2, height * 2, &format, quality);
 
-    // 1. AVIF Source
+    // ── Build <picture> ──────────────────────────────────────
+    let mut out = String::with_capacity(1024);
+
+    // AVIF source (unless the requested format IS avif)
     if format != "avif" {
-        let avif_src = format!(
-            "{}?src={}&w={}&h={}&f=avif&q={}",
-            opt_base, encoded_url, width, height, quality
-        );
-
-        let avif_srcset = format!(
-            "{} 1x, {}?src={}&w={}&h={}&f=avif&q={} 2x",
-            avif_src, opt_base, encoded_url, width * 2, height * 2, quality
-        );
-
-        picture.push_str(&format!(
-            r#"<source type="image/avif" srcset="{}" sizes="{}">"#,
-            avif_srcset, sizes
-        ));
+        let avif_1x = make_url(width, height, "avif", quality);
+        let avif_2x = make_url(width * 2, height * 2, "avif", quality);
+        if retina {
+            out.push_str(&format!(
+                r#"<source type="image/avif" srcset="{avif_1x} 1x, {avif_2x} 2x" sizes="{sizes}">"#
+            ));
+        } else {
+            out.push_str(&format!(
+                r#"<source type="image/avif" srcset="{avif_1x}" sizes="{sizes}">"#
+            ));
+        }
     }
 
-    // 2. WebP Source
+    // WebP source (unless the requested format IS webp)
     if format != "webp" {
-        let webp_src = format!(
-            "{}?src={}&w={}&h={}&f=webp&q={}",
-            opt_base, encoded_url, width, height, quality
-        );
-
-        let webp_srcset = format!(
-            "{} 1x, {}?src={}&w={}&h={}&f=webp&q={} 2x",
-            webp_src, opt_base, encoded_url, width * 2, height * 2, quality
-        );
-
-        picture.push_str(&format!(
-            r#"<source type="image/webp" srcset="{}" sizes="{}">"#,
-            webp_srcset, sizes
-        ));
+        let webp_1x = make_url(width, height, "webp", quality);
+        let webp_2x = make_url(width * 2, height * 2, "webp", quality);
+        if retina {
+            out.push_str(&format!(
+                r#"<source type="image/webp" srcset="{webp_1x} 1x, {webp_2x} 2x" sizes="{sizes}">"#
+            ));
+        } else {
+            out.push_str(&format!(
+                r#"<source type="image/webp" srcset="{webp_1x}" sizes="{sizes}">"#
+            ));
+        }
     }
 
-    // 3. Fallback Img
-    let img_srcset = format!("{} 1x, {} 2x", src_1x, src_2x);
+    // Blur placeholder style
+    let style = if blur {
+        // Use a tiny 10×7 jpg for the placeholder — 20 bytes vs the full original
+        let blur_src = format!("{base}?src={encoded}&w=10&h=7&f=jpg&q=30");
+        let blur_encoded = urlencoding::encode(&blur_src);
+        format!(
+            r#" style="background:url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 {width} {height}%27%3E%3Cfilter id=%27b%27%3E%3CfeGaussianBlur stdDeviation=%2710%27/%3E%3C/filter%3E%3Cimage width=%27100%25%27 height=%27100%25%27 filter=%27url(%23b)%27 href=%27{blur_encoded}%27/%3E%3C/svg%3E') no-repeat center/cover;opacity:0;transition:opacity .4s ease-in-out;" onload="this.style.opacity=1" onerror="this.style.opacity=1""#
+        )
+    } else {
+        String::new()
+    };
 
-    picture.push_str(&format!(
-        r#"<img src="{}" srcset="{}" width="{}" height="{}" sizes="{}" loading="lazy" decoding="async" alt="Optimized Image""#,
-        src_1x, img_srcset, width, height, sizes
+    // Fallback <img>
+    let srcset = if retina {
+        format!(r#" srcset="{src_1x} 1x, {src_2x} 2x""#)
+    } else {
+        String::new()
+    };
+
+    out.push_str(&format!(
+        r#"<img src="{src_1x}"{srcset} width="{width}" height="{height}" sizes="{sizes}" loading="lazy" decoding="async" alt=""{style} /></picture>"#
     ));
 
-    // 4. Dependency-free inline SVG blur placeholder
-    if blur {
-        let blur_svg = format!(
-            r#"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {} {}'%3E%3Cfilter id='b'%3E%3CfeGaussianBlur stdDeviation='10'/%3E%3C/filter%3E%3Cimage width='100%25' height='100%25' filter='url(%23b)' href='{}'/%3E%3C/svg%3E"#,
-            width, height, encoded_url
-        );
-
-        picture.push_str(&format!(
-            r#" style="background: url('{}') no-repeat center / cover; opacity: 0; transition: opacity 0.4s ease-in-out;" onload="this.style.opacity=1" onerror="this.style.opacity=1""#,
-            blur_svg
-        ));
-    } else {
-        picture.push_str(r#" style="opacity: 1;""#);
-    }
-
-    picture.push_str(" /></picture>");
-    picture
+    out
 }
 // ── Real-time / Live Updates ─────────────────────────────────────────────
 fn m_sync(v: String, arg: Option<String>) -> String {
@@ -676,8 +882,6 @@ fn m_log(v: String, arg: Option<String>) -> String {
 
 // ── Registry ─────────────────────────────────────────────────────────
 pub fn registry() -> HashMap<&'static str, ModifierFn> {
-    // Explicitly typing the HashMap forces all inserted functions to 
-    // be coerced into the `ModifierFn` function pointer type.
     let mut m: HashMap<&'static str, ModifierFn> = HashMap::new();
 
     // Text
@@ -754,25 +958,50 @@ pub fn registry() -> HashMap<&'static str, ModifierFn> {
     m.insert("mask", m_mask);
     m.insert("hash", m_hash);
 
-    // JSON / URL
-    m.insert("json", m_json);
-    m.insert("json_path", m_json_path);
-    m.insert("query", m_query);
+    // JSON
+    m.insert("json_encode", m_json_encode);
+    m.insert("json_decode", m_json_decode);
+    m.insert("json_get",    m_json_get);
+    m.insert("json_pretty", m_json_pretty);
+    m.insert("json_keys",   m_json_keys);
+    m.insert("json_values", m_json_values);
+    m.insert("json_has",    m_json_has);
+
+    // Array
+    m.insert("split",  m_split);
+    m.insert("join",   m_join);
+    m.insert("pluck",  m_pluck);
+    m.insert("first",  m_first);
+    m.insert("last",   m_last);
+    m.insert("nth",    m_nth);
+    m.insert("unique", m_unique);
+    m.insert("sort",   m_sort);
+    m.insert("where",  m_where);
+    m.insert("count",  m_count);
+
+    // URL
+    m.insert("query",      m_query);
+    m.insert("url_encode", m_url_encode);
+    m.insert("url_decode", m_url_decode);
+    m.insert("path",       m_url_path);
+    m.insert("host",       m_url_host);
+    m.insert("origin",     m_url_origin);
+    m.insert("basename",   m_basename);
+    m.insert("extname",    m_extname);
 
     // HTML / content
     m.insert("strip_tags", m_strip_tags);
-    m.insert("excerpt", m_excerpt);
-    m.insert("image", m_image);       // ← Added in Priority 2
-    m.insert("sync", m_sync);         // 🔥 NEW: Real-time SSE updates
-    m.insert("ajax", m_ajax);
+    m.insert("excerpt",    m_excerpt);
+    m.insert("image",      m_image);
+    m.insert("sync",       m_sync);
+    m.insert("ajax",       m_ajax);
 
     // Developer tools
     m.insert("debug", m_debug);
-    m.insert("log", m_log);
+    m.insert("log",   m_log);
 
     m
 }
-
 pub static REG: LazyLock<HashMap<&'static str, ModifierFn>> = LazyLock::new(registry);
 
 // ── Public entry point ───────────────────────────────────────────────

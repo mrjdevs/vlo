@@ -5,6 +5,7 @@
     size="{{size}}" 
     shadow="{{shadow}}"
     class="sticky collapse {{class}}"
+    subtitle="{{subtitle}}"
 >
     <a href="/">Home</a>
     <a href="/components">Components</a>
@@ -14,6 +15,10 @@
     {if logged_in}
         <a href="/products">Products</a>
         <a href="/dashboard">Dashboard</a>
+        <a href="/shop" class="cart-link">🛒 Cart - 
+            <span class="cart-count">
+                {{ "" | ajax:"/api/cart_count,0,data.0.total,json" }}
+            </span>
         <a href="/api/auth/logout">Logout ({{user_name}})</a>
     {else}
         <a href="/login">Login</a>

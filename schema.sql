@@ -124,6 +124,7 @@ CREATE TABLE products (
     category TEXT,
     price REAL NOT NULL,
     stock INTEGER DEFAULT 0,
+    image TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -561,84 +562,151 @@ WHERE NOT EXISTS (SELECT 1 FROM logs WHERE id = 10);
 -- 5. CART TABLE
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS cart (
+--CREATE TABLE IF NOT EXISTS cart_items (
+  --  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  --  user_id INTEGER NOT NULL,
+    --  product_id INTEGER NOT NULL,
+    --  quantity INTEGER DEFAULT 1,
+    --  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    --  UNIQUE(user_id, product_id)
+--  );
+
+
+
+
+
+PRAGMA foreign_keys = ON;
+
+-- =========================================================
+-- CARTS
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS carts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_name TEXT NOT NULL,
-    price REAL NOT NULL,
-    quantity INTEGER DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    user_id INTEGER,
+    session_id TEXT,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'converted', 'abandoned')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (
+        (user_id IS NOT NULL AND session_id IS NULL)
+        OR
+        (user_id IS NULL AND session_id IS NOT NULL)
+    )
 );
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 1,
-       'Mechanical Keyboard',
-       89.99,
-       1
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 1);
+CREATE INDEX IF NOT EXISTS idx_carts_user
+ON carts(user_id, status);
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 2,
-       'Ergonomic Mouse',
-       49.50,
-       2
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 2);
+CREATE INDEX IF NOT EXISTS idx_carts_session
+ON carts(session_id, status);
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 3,
-       'Curved Monitor 34"',
-       399.00,
-       1
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 3);
+-- =========================================================
+-- CART ITEMS
+-- =========================================================
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 4,
-       'USB-C Hub',
-       39.99,
-       2
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 4);
+CREATE TABLE IF NOT EXISTS cart_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cart_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (cart_id) REFERENCES carts(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT,
+    UNIQUE(cart_id, product_id)
+);
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 5,
-       'Laptop Stand',
-       59.95,
-       1
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 5);
+CREATE INDEX IF NOT EXISTS idx_cart_items_cart
+ON cart_items(cart_id);
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 6,
-       'Webcam HD',
-       69.00,
-       1
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 6);
+-- =========================================================
+-- ORDERS / CHECKOUT
+-- =========================================================
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 7,
-       'Desk Mat',
-       24.99,
-       3
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 7);
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_number TEXT NOT NULL UNIQUE,
+    user_id INTEGER,
+    session_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN (
+            'pending', 'confirmed', 'processing',
+            'shipped', 'completed', 'cancelled', 'refunded'
+        )),
+    payment_method TEXT NOT NULL DEFAULT 'cod',
+    payment_status TEXT NOT NULL DEFAULT 'unpaid'
+        CHECK (payment_status IN (
+            'unpaid', 'pending', 'paid', 'failed', 'refunded'
+        )),
+    currency TEXT NOT NULL DEFAULT 'PKR',
+    subtotal NUMERIC NOT NULL DEFAULT 0 CHECK (subtotal >= 0),
+    tax NUMERIC NOT NULL DEFAULT 0 CHECK (tax >= 0),
+    shipping NUMERIC NOT NULL DEFAULT 0 CHECK (shipping >= 0),
+    discount NUMERIC NOT NULL DEFAULT 0 CHECK (discount >= 0),
+    total NUMERIC NOT NULL DEFAULT 0 CHECK (total >= 0),
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 8,
-       'Bluetooth Speaker',
-       79.50,
-       1
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 8);
+    customer_name TEXT NOT NULL,
+    customer_email TEXT NOT NULL,
+    customer_phone TEXT,
+    billing_address TEXT NOT NULL,
+    shipping_address TEXT,
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 9,
-       'Noise Cancelling Headphones',
-       149.99,
-       1
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 9);
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-INSERT INTO cart (id, product_name, price, quantity)
-SELECT 10,
-       'Portable SSD 1TB',
-       109.99,
-       2
-WHERE NOT EXISTS (SELECT 1 FROM cart WHERE id = 10);
+    CHECK (user_id IS NOT NULL OR session_id IS NOT NULL)
+);
 
+CREATE INDEX IF NOT EXISTS idx_orders_user
+ON orders(user_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_orders_status
+ON orders(status);
+
+-- =========================================================
+-- ORDER ITEMS
+-- Preserve product details and prices at purchase time.
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    product_id INTEGER,
+    product_name TEXT NOT NULL,
+    unit_price NUMERIC NOT NULL CHECK (unit_price >= 0),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    line_total NUMERIC NOT NULL CHECK (line_total >= 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_items_order
+ON order_items(order_id);
+
+-- =========================================================
+-- INVOICES
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_number TEXT NOT NULL UNIQUE,
+    order_id INTEGER NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'issued'
+        CHECK (status IN ('draft', 'issued', 'void')),
+    issued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    due_at TEXT,
+    notes TEXT,
+
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoices_order
+ON invoices(order_id);
 
 
 

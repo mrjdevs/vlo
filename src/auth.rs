@@ -720,8 +720,8 @@ pub async fn resend_activation_handler(req: Request) -> impl IntoResponse {
     (StatusCode::OK, Json(json!({"success": true, "message": "Activation link sent successfully. Please check your email."}))).into_response()
 }
 
-static LAYOUT_TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)<([A-Za-z][A-Za-z0-9_-]*)Layout\s+([^>]*)>"#).unwrap());
-pub struct PageGuard { pub auth: bool, pub roles: Vec<String>, pub guest: bool }
+pub(crate) static LAYOUT_TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)<([A-Za-z][A-Za-z0-9_-]*)Layout\s+([^>]*)>"#).unwrap());
+pub struct PageGuard { pub auth: bool, pub roles: Vec<String>, pub guest: bool}
 pub fn extract_page_guard(source: &str) -> Option<PageGuard> {
     let caps = LAYOUT_TAG_RE.captures(source)?;
     let props = parse_props_v7(caps.get(2)?.as_str());

@@ -14,8 +14,12 @@
 <body>
  <!-- The global navbar, automatically active on all pages -->
     <BaseNav brand="VLO" subtitle="Ship faster." />
-    {{hero}}
+    <Hero
+            badge="VLO DASHBOARD"
+            title="Everything you need, in one place."
+            subtitle="A practical dashboard demonstrating VLO components, configurable sidebars, reusable layouts, and server-side rendering."
+        />
     {{children}}
-    {{footer}}
+    <Footer />
 </body>
 </html>

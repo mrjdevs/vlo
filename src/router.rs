@@ -191,14 +191,16 @@ pub fn resolve_data_sources(
 
         let tag = cap.get(1).unwrap().as_str();
         let before = cap.get(2).unwrap().as_str();
-        let action_path = cap
-            .get(3)
-            .unwrap()
-            .as_str()
-            .trim_start_matches("/api/")
-            .trim_matches('/')
-            .to_string();
         let after = cap.get(4).unwrap().as_str();
+
+        // ── Split the data-source URL into path + inline query ──
+        //
+        // `data-source="/api/product?id=240"` must resolve the action
+        // as `product`, not `product?id=240`. The inline query params
+        // (`id=240`) are merged into the per-block context so the SQL
+        // template can reference them via `{{id}}`.
+        let raw_url = cap.get(3).unwrap().as_str();
+        let (action_path, inline_params) = split_action_url(raw_url);
 
         let variable_name = action_path
             .split('/')
@@ -248,8 +250,22 @@ pub fn resolve_data_sources(
 
         result.push_str(&source[last_end..full.start()]);
         let inner = &source[full.end()..close_pos];
+
+        // ── Build a per-block context ─────────────────────────
+        // Page-level params (from the URL query) are the base.
+        // Inline `?k=v` from the data-source URL override them.
+        let block_context = if inline_params.is_empty() {
+            page_context.clone()
+        } else {
+            let mut ctx = page_context.clone();
+            for (k, v) in &inline_params {
+                ctx.insert(k.clone(), string_to_value(v));
+            }
+            ctx
+        };
+
         let (rendered, computed) =
-            evaluate_data_source_block(inner, &action_path, &variable_name, page_context);
+            evaluate_data_source_block(inner, &action_path, &variable_name, &block_context);
 
         for (key, value) in computed {
             all_computed.insert(key, value);
@@ -277,6 +293,56 @@ pub fn resolve_data_sources(
     (result, all_computed)
 }
 
+/// Split `/api/product?id=240` into `("product", {"id": "240"})`.
+/// Strips the `/api/` prefix, splits on `?`, URL-decodes each inline param.
+fn split_action_url(raw: &str) -> (String, HashMap<String, String>) {
+    let stripped = raw.trim_start_matches("/api/").trim_matches('/');
+
+    let (path_part, query_part) = match stripped.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (stripped, ""),
+    };
+
+    let mut params = HashMap::new();
+    if !query_part.is_empty() {
+        for pair in query_part.split('&') {
+            if pair.is_empty() {
+                continue;
+            }
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            let v = urlencoding::decode(v)
+                .map(|c| c.into_owned())
+                .unwrap_or_else(|_| v.to_string());
+            params.insert(k.to_string(), v);
+        }
+    }
+
+    (path_part.to_string(), params)
+}
+
+/// Coerce a query-string value to a JSON value.
+/// Numbers become Number, "true"/"false" become Bool, everything else stays String.
+#[inline]
+fn string_to_value(value: &str) -> Value {
+    if value.is_empty() {
+        return Value::String(String::new());
+    }
+    if value.eq_ignore_ascii_case("true") {
+        return Value::Bool(true);
+    }
+    if value.eq_ignore_ascii_case("false") {
+        return Value::Bool(false);
+    }
+    if let Ok(n) = value.parse::<i64>() {
+        return Value::Number(n.into());
+    }
+    if let Ok(n) = value.parse::<f64>() {
+        if let Some(num) = serde_json::Number::from_f64(n) {
+            return Value::Number(num);
+        }
+    }
+    Value::String(value.to_string())
+}
 pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Value {
     let action = action.to_string();
     let params = params.clone();
@@ -444,6 +510,14 @@ pub fn evaluate_data_source_block(
     variable_name: &str,
     page_context: &HashMap<String, Value>,
 ) -> (String, HashMap<String, Value>) {
+        // ─── TEMP DEBUG ───
+    eprintln!(
+        "🔍 [DS] action_path={:?} variable_name={:?} context_keys={:?}",
+        action_path,
+        variable_name,
+        page_context.keys().collect::<Vec<_>>()
+    );
+    // ──────────────────
     // Infer action name if given a RESTful path.
     let action_name = if action_path.contains('/')
         || action_path.starts_with("get_")
@@ -577,7 +651,7 @@ pub fn render_vlo_for_build(source: String) -> RenderedPage {
 
 pub fn render_vlo_for_build_at(page_path: &str, source: String) -> RenderedPage {
     let mut context = RenderedPage::default();
-    let url_path = if page_path.is_empty() || page_path == "home" || page_path == "index" {
+    let url_path = if page_path.is_empty() || page_path == "index" {
         "/".to_string()
     } else {
         format!("/{}", page_path.trim_matches('/'))
@@ -676,7 +750,7 @@ pub fn render_vlo_with_query_at(
         }
     }
 
-    let url_path = if page_path.is_empty() || page_path == "home" || page_path == "index" {
+    let url_path = if page_path.is_empty() || page_path == "index" {
         "/".to_string()
     } else {
         format!("/{}", page_path.trim_matches('/'))
@@ -744,7 +818,7 @@ pub async fn home_handler(
     Query(query): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let flash_encoded = extract_flash_cookie(&headers);
-    render_page("home".to_string(), query, auth, flash_encoded).await
+    render_page("index".to_string(), query, auth, flash_encoded).await
 }
 
 pub async fn page_handler(
@@ -840,7 +914,7 @@ pub async fn render_page(
         // Page guard check.
         if let Some(guard) = crate::auth::extract_page_guard(&content) {
             if crate::features::is_enabled(crate::features::Feature::Auth) {
-                let current_url = if page_path == "home" {
+                let current_url = if page_path == "index" {
                     "/".to_string()
                 } else {
                     format!("/{}", page_path)
@@ -871,6 +945,8 @@ pub async fn render_page(
             match &auth.user {
                 Some(user) => {
                     query.insert("logged_in".to_string(), "true".to_string());
+                    // 🔥 FIX: Convert the i64 to a String
+                    query.insert("user_id".to_string(), user.id.to_string()); 
                     query.insert("user_name".to_string(), user.name.clone());
                     query.insert("user_role".to_string(), user.role.clone());
                     query.insert("user_email".to_string(), user.email.clone());
@@ -1041,37 +1117,10 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
     };
 
     // ─── FLASH ─────────────────────────────────────────────
-    let flash_html = if dev && auto_flash {
-        if let Some(flashes) = rendered.template_context.get("flash_messages") {
-            if let Some(arr) = flashes.as_array() {
-                let mut html = String::new();
-                for flash in arr {
-                    let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
-                    let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
-                    let t = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                    let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
-                    let border_color = match variant {
-                        "success" => "#00ff88",
-                        "error" => "#ff4444",
-                        "warning" => "#ffaa00",
-                        _ => "#00f5ff",
-                    };
-                    html.push_str(&format!(
-                        r#"<div class="vlo-flash" style="position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid {};color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease"><span style="font-size:1.4rem">{}</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">{}</strong><span style="color:#aaa;font-size:0.78rem">{}</span></div></div>"#,
-                        border_color, icon, t, description
-                    ));
-                }
-                if !html.is_empty() {
-                    html.push_str(r#"<style>@keyframes vloFlashIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}</style><script>setTimeout(function(){document.querySelectorAll('.vlo-flash').forEach(function(el){el.style.transition='opacity 0.4s';el.style.opacity='0';setTimeout(function(){el.remove()},400)})},4000)</script>"#);
-                }
-                html
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        }
-    } else if !dev {
+    // 🔥 FIX: Removed the hardcoded top-right toast generation.
+    // We now rely solely on the placeholder, allowing the <Toast /> 
+    // component or serve_build_page to handle rendering cleanly.
+    let flash_html = if auto_flash {
         r#"<div id="__VLO_FLASH_PLACEHOLDER__"></div>"#.to_string()
     } else {
         String::new()

@@ -21,12 +21,13 @@ pub fn init_modules() -> Result<(), String> {
             match load_module(&path, &manifest_path) {
                 Ok(module) => {
                     crate::vlo_debug!(
-                        "📦 Loaded module: {} v{} ({} components, {} api, {} styles)",
+                        "📦 Loaded module: {} v{} ({} components, {} api, {} styles, {} scripts)",
                         module.manifest.name,
                         module.manifest.version,
                         module.components.len(),
                         module.api_sql.len(),
-                        module.styles.len()
+                        module.styles.len(),
+                        module.scripts.len()
                     );
                     modules.push(module);
                 }

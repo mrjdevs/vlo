@@ -461,62 +461,40 @@ pub fn is_truthy(val: &Value) -> bool {
 // Token scanner — single-brace blocks only [G1]
 // ═════════════════════════════════════════════════════════════
 pub fn find_next_token(template: &str, from: usize) -> Option<(usize, &'static str)> {
-    let mut best: Option<(usize, &'static str)> = None;
-
-    // [B2] Real element openers only. `<pre` matches `<presto>` otherwise.
-    const TOKENS: &[&str] = &[
-        // Blocks.
-        "{if ",
-        "{for ",
-        "{unless ",
-        "{switch ",
-        "{with ",
-        "{capture ",
-        "{capture}",
-        "{assign ",
-        "{firstof ",
-        "{include ",
-        "{raw}",
-        "{comment}",
-        "{break}",
-        "{continue}",
-        "{else if ",
-        "{else}",
-        "{/if}",
-        "{/for}",
-        "{/unless}",
-        "{/switch}",
-        "{/with}",
-        "{/capture}",
-        "{/raw}",
-        "{/comment}",
-        "{case ",
-        "{default}",
-        // Interpolation.
-        "{{",
-        // Script boundary.
-        "<script",
-        "</script>",
-        // [B2] Literal-content regions — real openers only.
-        "<pre>",
-        "<pre ",
-        "<code>",
-        "<code ",
-        "<textarea>",
-        "<textarea ",
+    const BRACE_TOKENS: &[&str] = &[
+        "{{", "{if ", "{for ", "{unless ", "{switch ", "{with ",
+        "{capture ", "{capture}", "{assign ", "{firstof ", "{include ",
+        "{raw}", "{comment}", "{break}", "{continue}", "{else if ", "{else}",
+        "{/if}", "{/for}", "{/unless}", "{/switch}", "{/with}", "{/capture}",
+        "{/raw}", "{/comment}", "{case ", "{default}",
+    ];
+    const ANGLE_TOKENS: &[&str] = &[
+        "<script", "</script>", "<pre>", "<pre ", "<code>", "<code ",
+        "<textarea>", "<textarea ",
     ];
 
-    for token in TOKENS {
-        if let Some(pos) = template[from..].find(token) {
-            let absolute = from + pos;
-            if best.map(|(p, _)| absolute < p).unwrap_or(true) {
-                best = Some((absolute, token));
+    let bytes = template.as_bytes();
+    let mut i = from;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => {
+                let rest = &template[i..];
+                for &tok in BRACE_TOKENS {
+                    if rest.starts_with(tok) { return Some((i, tok)); }
+                }
             }
+            b'<' => {
+                let rest = &template[i..];
+                for &tok in ANGLE_TOKENS {
+                    if rest.starts_with(tok) { return Some((i, tok)); }
+                }
+            }
+            _ => {}
         }
+        i += 1;
     }
-    best
+    None
 }
-
 // ═════════════════════════════════════════════════════════════
 // Block end finder
 // ═════════════════════════════════════════════════════════════
@@ -811,13 +789,32 @@ pub fn evaluate_for_block(
     }
 
     let array_expr = array_expr_parts.join(" ");
-    let array = get_nested_value(&array_expr, context);
+    let mut array = get_nested_value(&array_expr, context);
+
+    // 🔥 BULLETPROOF AUTO-PARSE: Strip quotes and parse JSON arrays
+    if let Value::String(s) = &array {
+        let trimmed = s.trim();
+        let clean_s = if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2) || 
+                      (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2) {
+            &trimmed[1..trimmed.len()-1]
+        } else {
+            trimmed
+        };
+        
+        if clean_s.starts_with('[') {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(clean_s) {
+                array = parsed;
+            }
+        }
+    }
+
     let (body, else_part) = split_else_branches(inner);
 
     let Value::Array(items) = array else {
         let mut fallback_ctx = context.clone();
         return render_else(else_part, &mut fallback_ctx, preserve_unresolved);
     };
+    
     if items.is_empty() {
         let mut fallback_ctx = context.clone();
         return render_else(else_part, &mut fallback_ctx, preserve_unresolved);

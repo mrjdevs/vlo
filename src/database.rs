@@ -1,7 +1,7 @@
 use crate::features::{Feature, is_enabled};
 use crate::state::get_project_root;
 use serde_json::Value;
-use sqlx::{Column, Row, ValueRef};
+use sqlx::{Column, Row, ValueRef, TypeInfo};
 use std::{fs, path::Path, sync::OnceLock};
 
 // ===========================================================================
@@ -44,26 +44,113 @@ fn resolve_driver(url: &str) -> String {
 }
 
 // ===========================================================================
-// 3. ROW TO JSON MACRO
+// 3. ROW TO JSON MACRO (Type-hint optimized & edge-case hardened)
 // ===========================================================================
 macro_rules! convert_row_to_json {
     ($row:expr) => {{
-        let mut map = serde_json::Map::new();
-        for (i, column) in $row.columns().iter().enumerate() {
+        
+        let columns = $row.columns();
+        let mut map = serde_json::Map::with_capacity(columns.len());
+        
+        for (i, column) in columns.iter().enumerate() {
             let name = column.name().to_string();
+            
+            // Fast path: check if null first
             let is_null = $row.try_get_raw(i).map(|r| r.is_null()).unwrap_or(true);
-            let val: serde_json::Value = if is_null { serde_json::Value::Null }
-            else if let Ok(v) = $row.try_get::<i64, _>(i) { serde_json::Value::Number(v.into()) }
-            else if let Ok(v) = $row.try_get::<i32, _>(i) { serde_json::Value::Number((v as i64).into()) }
-            else if let Ok(v) = $row.try_get::<f64, _>(i) { serde_json::Number::from_f64(v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null) }
-            else if let Ok(v) = $row.try_get::<bool, _>(i) { serde_json::Value::Bool(v) }
-            else if let Ok(v) = $row.try_get::<String, _>(i) {
-                if let Ok(n) = v.parse::<i64>() { serde_json::Value::Number(n.into()) }
-                else if let Ok(n) = v.parse::<f64>() { serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(v)) }
-                else { serde_json::Value::String(v) }
+            if is_null {
+                map.insert(name, serde_json::Value::Null);
+                continue;
             }
-            else if let Ok(v) = $row.try_get::<Vec<u8>, _>(i) { serde_json::Value::String(format!("blob {}b", v.len())) }
-            else { serde_json::Value::Null };
+            
+            // Get type hint from column metadata to avoid blind try_get chain
+            let type_name = column.type_info().name();
+            let type_lower = type_name.to_lowercase();
+            
+            let val: serde_json::Value = if type_lower.contains("int") || type_lower.contains("serial") {
+                // Integer types (INT, INTEGER, BIGINT, SERIAL, etc.)
+                if let Ok(v) = $row.try_get::<i64, _>(i) {
+                    serde_json::Value::Number(v.into())
+                } else if let Ok(v) = $row.try_get::<i32, _>(i) {
+                    serde_json::Value::Number((v as i64).into())
+                } else {
+                    serde_json::Value::Null
+                }
+            } else if type_lower.contains("timestamp") || type_lower.contains("date") || type_lower.contains("time") {
+                // 🚀 OPTIMIZATION: Timestamps/Dates. 
+                // sqlx returns these as formatted strings when cast to String.
+                // This avoids the 4 failing numeric/bool attempts in the fallback.
+                if let Ok(v) = $row.try_get::<String, _>(i) {
+                    serde_json::Value::String(v)
+                } else {
+                    serde_json::Value::Null
+                }
+            } else if type_lower.contains("float") || type_lower.contains("double") || type_lower.contains("real") {
+                // Float types (FLOAT, DOUBLE, REAL)
+                if let Ok(v) = $row.try_get::<f64, _>(i) {
+                    serde_json::Number::from_f64(v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null)
+                } else {
+                    serde_json::Value::Null
+                }
+            } else if type_lower.contains("numeric") || type_lower.contains("decimal") {
+                // 🚀 OPTIMIZATION: Safer NUMERIC/DECIMAL handling.
+                // Postgres NUMERIC may not decode directly to f64 without specific sqlx features.
+                // Try i64 first (for integer-like numerics), then fall back to String parsing.
+                if let Ok(v) = $row.try_get::<i64, _>(i) {
+                    serde_json::Value::Number(v.into())
+                } else if let Ok(v) = $row.try_get::<String, _>(i) {
+                    if let Ok(n) = v.parse::<i64>() {
+                        serde_json::Value::Number(n.into())
+                    } else if let Ok(n) = v.parse::<f64>() {
+                        serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(v))
+                    } else {
+                        serde_json::Value::String(v)
+                    }
+                } else {
+                    serde_json::Value::Null
+                }
+            } else if type_lower.contains("bool") {
+                // Boolean types (BOOL, BOOLEAN)
+                if let Ok(v) = $row.try_get::<bool, _>(i) {
+                    serde_json::Value::Bool(v)
+                } else {
+                    serde_json::Value::Null
+                }
+            } else if type_lower.contains("text") || type_lower.contains("char") || type_lower.contains("varchar") || type_lower.contains("string") || type_lower.contains("clob") || type_lower.contains("json") || type_lower.contains("uuid") {
+                // String-like types (TEXT, VARCHAR, CHAR, JSON, UUID, etc.)
+                if let Ok(v) = $row.try_get::<String, _>(i) {
+                    // Some DBs return numbers as strings, try to parse
+                    if let Ok(n) = v.parse::<i64>() {
+                        serde_json::Value::Number(n.into())
+                    } else if let Ok(n) = v.parse::<f64>() {
+                        serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(v))
+                    } else {
+                        serde_json::Value::String(v)
+                    }
+                } else {
+                    serde_json::Value::Null
+                }
+            } else if type_lower.contains("blob") || type_lower.contains("bytea") || type_lower.contains("binary") {
+                // Binary types (BLOB, BYTEA, BINARY)
+                if let Ok(v) = $row.try_get::<Vec<u8>, _>(i) {
+                    serde_json::Value::String(format!("blob {}b", v.len()))
+                } else {
+                    serde_json::Value::Null
+                }
+            } else {
+                // Fallback: try the original chain for unknown/custom types (e.g., PostGIS POINT)
+                if let Ok(v) = $row.try_get::<i64, _>(i) { serde_json::Value::Number(v.into()) }
+                else if let Ok(v) = $row.try_get::<i32, _>(i) { serde_json::Value::Number((v as i64).into()) }
+                else if let Ok(v) = $row.try_get::<f64, _>(i) { serde_json::Number::from_f64(v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null) }
+                else if let Ok(v) = $row.try_get::<bool, _>(i) { serde_json::Value::Bool(v) }
+                else if let Ok(v) = $row.try_get::<String, _>(i) {
+                    if let Ok(n) = v.parse::<i64>() { serde_json::Value::Number(n.into()) }
+                    else if let Ok(n) = v.parse::<f64>() { serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(v)) }
+                    else { serde_json::Value::String(v) }
+                }
+                else if let Ok(v) = $row.try_get::<Vec<u8>, _>(i) { serde_json::Value::String(format!("blob {}b", v.len())) }
+                else { serde_json::Value::Null }
+            };
+            
             map.insert(name, val);
         }
         serde_json::Value::Object(map)

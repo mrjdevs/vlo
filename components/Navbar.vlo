@@ -1,8 +1,8 @@
-<nav class="navbar {{variant}} {{class}} {{size}} {{shadow}}">
+<nav class="navbar {{variant | default:'default'}} {{class}} {{size}} {{shadow}}" subtitle="{{subtitle}}">
     <input class="navbar-toggle-input" type="checkbox" id="navbar-toggle">
 
     <div class="navbar-inner">
-        <a class="brand" href="{{brandHref}}">{{brand}}</a>
+        <a class="brand" href="{{brandHref | default:'/'}}" title="{{title}}">{{brand}}</a>
 
         <label class="navbar-toggle" for="navbar-toggle" aria-label="Toggle navigation">
             <span></span>
@@ -15,6 +15,7 @@
         </div>
     </div>
 </nav>
+
 <style>
 /* ========================================================= BASE ========================================================= */
 

@@ -38,6 +38,8 @@ pub enum ApiAction {
         sql: String,
         #[serde(default)]
         roles: Vec<String>,
+        #[serde(default)]
+        paginate: Option<bool>, // 🔥 NEW
     },
 }
 
@@ -53,6 +55,12 @@ impl ApiAction {
         match self {
             ApiAction::Simple(_) => &[],
             ApiAction::Protected { roles, .. } => roles,
+        }
+    }
+    pub fn paginate(&self) -> Option<bool> {
+        match self {
+            ApiAction::Simple(_) => None,
+            ApiAction::Protected { paginate, .. } => *paginate,
         }
     }
 }
@@ -307,65 +315,57 @@ async fn parse_multipart_body(
     let max_size = crate::state::max_upload_bytes();
     loop {
         let field = match multipart.next_field().await {
-            Ok(Some(field)) => field,
+            Ok(Some(f)) => f,
             Ok(None) => break,
-            Err(e) => {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({"success": false, "error": "Invalid multipart", "details": e.to_string()})),
-                )
-                    .into_response())
-            }
+            Err(e) => return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid multipart", "details": e.to_string()}))).into_response()),
         };
+        
         let name = field.name().unwrap_or("").to_string();
         let file_name = field.file_name().map(|n| n.to_string());
-        let bytes = field.bytes().await.map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"success": false, "error": "Failed to read file", "details": e.to_string()})),
-            )
-                .into_response()
-        })?;
-        if bytes.len() as u64 > max_size {
-            return Err((
-                StatusCode::PAYLOAD_TOO_LARGE,
-                Json(serde_json::json!({"success": false, "error": "File too large"})),
-            )
-                .into_response());
-        }
-        if let Some(original_name) = file_name {
-            let upload_name = generate_upload_name(&original_name);
-            let upload_name_clone = upload_name.clone();
-            // Bytes is Arc-backed — clone is O(1), not a copy.
-            let bytes_clone = bytes.clone();
-            let save_result =
-                tokio::task::spawn_blocking(move || crate::files::save(&upload_name_clone, &bytes_clone))
-                    .await;
-            match save_result {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => {
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"success": false, "error": "Failed to save file", "details": e.to_string()})),
-                    )
-                        .into_response())
-                }
-                Err(e) => {
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"success": false, "error": "Failed to save file", "details": e.to_string()})),
-                    )
-                        .into_response())
-                }
+        
+        // 🔥 FIX: Strictly skip empty file inputs so they don't generate ghost files
+        if let Some(ref orig_name) = file_name {
+            if orig_name.trim().is_empty() {
+                continue;
             }
-            query.insert(name, format!("/uploads/{}", upload_name));
+        }
+        
+        let is_file = file_name.is_some();
+        let bytes = field.bytes().await.map_err(|e| (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Failed to read body", "details": e.to_string()}))).into_response())?;
+
+        if bytes.len() as u64 > max_size {
+            return Err((StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({"error": "File too large"}))).into_response());
+        }
+
+        let val = if let Some(orig_name) = file_name {
+            let upload_name = generate_upload_name(&orig_name);
+            let (u_name, b_clone) = (upload_name.clone(), bytes.clone());
+            let res = tokio::task::spawn_blocking(move || crate::files::save(&u_name, &b_clone)).await;
+            match res {
+                Ok(Ok(_)) => upload_name,
+                Ok(Err(_)) | Err(_) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Failed to save file"}))).into_response()),
+            }
         } else {
-            query.insert(name, String::from_utf8_lossy(&bytes).to_string());
+            String::from_utf8_lossy(&bytes).to_string()
+        };
+
+        if is_file || name == "images" || name.ends_with("[]") {
+            let entry = query.entry(name).or_insert_with(|| "[]".to_string());
+            
+            // Ignore empty strings
+            if !val.is_empty() { 
+                let mut arr: Vec<String> = serde_json::from_str(entry).unwrap_or_else(|_| {
+                    if entry.is_empty() || entry == "[]" { vec![] } else { vec![entry.clone()] }
+                });
+                arr.push(val);
+                *entry = serde_json::to_string(&arr).unwrap_or_default();
+            }
+        } else {
+            query.insert(name, val);
         }
     }
     Ok(())
 }
-
 // ============================================================================
 // Auto-Pagination Helper
 // ============================================================================
@@ -376,7 +376,11 @@ static RE_OFFSET: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?i)\s+OFFSET\s+\{\{.*?\}\}").unwrap());
 
 pub fn generate_count_sql(sql_template: &str) -> String {
-    let without_limit = RE_LIMIT.replace_all(sql_template, "");
+    // 🔥 FIX: Only process the FIRST statement to avoid syntax errors
+    // when wrapping in SELECT COUNT(*)
+    let first_stmt = sql_template.split(';').next().unwrap_or(sql_template);
+
+    let without_limit = RE_LIMIT.replace_all(first_stmt, "");
     let stripped = RE_OFFSET.replace_all(&without_limit, "");
     let stripped = stripped.trim().trim_end_matches(';');
     if stripped.is_empty() {
@@ -579,6 +583,18 @@ pub async fn api_route_handler(
         }
     }
 
+    // 🔒 SECURITY: session injection must come AFTER form params
+    // so a malicious form cannot spoof user_id.
+    if let Some(user) = auth.user.as_ref() {
+        params.insert("user_id".to_string(), serde_json::Value::Number(user.id.into()));
+    }
+    // 🔒 Only inject session_id when the SQL template actually references it.
+    // Prevents the session token from leaking into debug logs on every request.
+    if sql.contains("{{session_id}}") {
+        if let Some(token) = auth.session_token.as_ref() {
+            params.insert("session_id".to_string(), serde_json::Value::String(token.clone()));
+        }
+    }
     let is_id_request = params.contains_key("id") && operation == "get";
     if is_id_request && !sql.contains("{{id}}") && !sql.contains("{id}") {
         let upper = sql.to_uppercase();
@@ -628,10 +644,42 @@ pub async fn api_route_handler(
                     "success": false,
                     "error": e
                 })),
-            )
-                .into_response()
+            ).into_response()
         }
     };
+
+    // 🔥 FIX: Delete orphaned files from storage
+    if (method == Method::PUT || method == Method::PATCH) && params.contains_key("images") {
+        // 1. Get new images from the request
+        let new_arr: Vec<String> = match params.get("images") {
+            Some(Value::String(s)) => serde_json::from_str(s).unwrap_or_default(),
+            Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+            _ => vec![],
+        };
+
+        // 2. Fetch old images from the database
+        let select_sql = format!("SELECT images FROM {} WHERE id = {{{{id}}}}", resource);
+        let select_sql = substitute_sql_params(&select_sql, &params);
+        
+        if let Ok(rows) = pool.fetch_all_json(&select_sql).await {
+            if let Some(row) = rows.first() {
+                if let Some(Value::String(old_json)) = row.get("images") {
+                    if let Ok(old_arr) = serde_json::from_str::<Vec<String>>(old_json) {
+                        // 3. Diff and delete physical files that are no longer in the new array
+                        for old_file in old_arr {
+                            if !new_arr.contains(&old_file) && !old_file.is_empty() {
+                                let f = old_file.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    let _ = crate::files::delete(&f);
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
 
     let action_type = if action_name.contains("put")
         || action_name.contains("patch")
@@ -656,8 +704,17 @@ pub async fn api_route_handler(
                 .unwrap_or(0);
             crate::vlo_debug!("✅ VLO DEBUG: SQL successful — rows: {}", rows);
 
-            if method == Method::GET && !params.contains_key("id") {
+            // 🔥 PAGINATION CONFIGURATION
+            // 1. Check if explicitly set in api.vlo
+            // 2. Fallback to auto-detecting if the SQL uses LIMIT
+            let should_paginate = action_def.paginate().unwrap_or_else(|| {
+                sql.to_lowercase().contains("limit")
+            });
+
+            if method == Method::GET && !params.contains_key("id") && should_paginate {
                 let count_sql = generate_count_sql(&sql);
+                
+                // ... the rest of your existing count query logic ...
                 if !count_sql.is_empty() {
                     if let Ok(count_res) = execute_api_sql(pool, &count_sql, &params).await {
                         if let Some(count_data) = count_res.get("data").and_then(|d| d.as_array()) {
@@ -758,16 +815,6 @@ pub async fn execute_api_sql(
 }
 
 /// Single-pass `{{key}}` substitution.
-///
-/// - Known params are inlined as escaped SQL literals.
-/// - Unknown `{{identifier}}` are unwrapped to bare identifiers
-///   (matches the previous regex cleanup pass).
-/// - Non-identifier braces are left as-is.
-///
-/// Note: unlike the previous multi-pass `str::replace` loop, a param
-/// value containing `{{other}}` will NOT be re-expanded. This closes a
-/// subtle injection-style edge case at the cost of a behavior that was
-/// almost never relied on.
 fn substitute_sql_params(
     sql: &str,
     params: &serde_json::Map<String, serde_json::Value>,
@@ -820,7 +867,6 @@ fn substitute_sql_params(
     out
 }
 
-/// Append a `serde_json::Value` as an SQL literal to `out`, escaping
 /// single quotes for strings.
 #[inline]
 fn write_sql_value(out: &mut String, value: &Value) {
@@ -939,16 +985,18 @@ fn parse_form_body(body: &str) -> HashMap<String, String> {
 fn generate_upload_name(original: &str) -> String {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
+        .map(|d| d.as_nanos())
         .unwrap_or_default();
+    
     let extension = Path::new(original)
         .extension()
         .and_then(|v| v.to_str())
         .map(|v| v.to_ascii_lowercase())
         .filter(|v| !v.is_empty());
+
     match extension {
-        Some(ext) => format!("vlo_{}{}.{}", timestamp, std::process::id(), ext),
-        None => format!("vlo{}_{}", timestamp, std::process::id()),
+        Some(ext) => format!("vlo_{timestamp}_{}.{}", std::process::id(), ext),
+        None => format!("vlo_{timestamp}_{}", std::process::id()),
     }
 }
 

@@ -1,183 +1,373 @@
 <BaseLayout title="Product Management" roles="Admin, Editor">
-  <div class="products-page">
-    <div class="products-header">
-      <div>
-        <div class="products-eyebrow">VLO / API</div>
+  <div class="dashboard-wrap">
+    
+    <!-- ══════════ HEADER ══════════ -->
+    <header class="dashboard-header">
+      <div class="header-info">
+        <div class="header-eyebrow">
+          <span class="pulse-dot"></span> VLO REST API
+        </div>
         <h1>Product Management</h1>
-        <p>Manage your product catalog using the VLO REST CRUD API.</p>
+        <p>Manage your catalog, inventory, and product assets.</p>
       </div>
       <div class="header-actions">
-        <Badge variant="success" text="REST API" />
-        <button type="button" class="vlo-btn vlo-btn-primary" data-modal-open="add-product-modal">+ Add Product</button>
+        <Badge variant="success" text="API Connected" />
+        <button type="button" class="btn btn-primary" data-modal-open="add-product-modal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Add Product
+        </button>
       </div>
-    </div>
+    </header>
 
-    <Modal id="add-product-modal" title="Add New Product">
-      <form v-post="/api/products|ajax" class="modal-form" enctype="multipart/form-data">
-        <div class="form-grid">
-          <div class="form-field">
-            <label>Product Title</label>
-            <input type="text" name="title" placeholder="e.g. Mechanical Keyboard" required />
-          </div>
-          <div class="form-field">
-            <label>Description</label>
-            <input type="text" name="description" placeholder="Product description" />
-          </div>
-          <div class="form-field">
-            <label>Price</label>
-            <input type="number" name="price" placeholder="0.00" step="0.01" min="0" required />
-          </div>
-          <div class="form-field">
-            <label>Stock</label>
-            <input type="number" name="stock" placeholder="0" min="0" required />
-          </div>
-        </div>
-        <div class="form-field">
-          <label>Product Image</label>
-          <FileInput name="image" accept="image/*" variant="primary" button="Choose Image" />
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="vlo-btn vlo-btn-secondary" data-modal-close="add-product-modal">Cancel</button>
-          <button type="submit" class="vlo-btn vlo-btn-primary">Add Product</button>
-        </div>
-      </form>
-    </Modal>
-
+    <!-- ══════════ AJAX WRAPPER ══════════ -->
     <div id="products-ajax-wrapper">
       {{ "" | ajax:",0,#products-ajax-wrapper,html" }}
 
       {if flash_messages}
-        <Toast duration="long"/>
+        <Toast duration="short"/>
       {/if}
 
-      <div class="products-list-card">
-        <Card title="Products" description="{{total}} products found.">
+      <div class="table-card">
+        <div class="table-header-toolbar">
+          <div class="table-title-row">
+            <h2>Product Catalog</h2>
+            <span class="count-badge">{{total}} items</span>
+          </div>
           <DataTableToolbar _columns="title,description" />
-          <div class="products-table-wrap">
-            <table class="products-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Image</th>
-                  <th>Product</th>
-                  <th>Description</th>
-                  <th>Price</th>
-                  <th>Stock</th>
-                  <th>Created</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody data-source="/api/products" data-append>
-                {for product in products}
-                {assign is_low = product.stock > 0 && product.stock < 5}
+        </div>
 
-                <tr>
-                  <td>#{{product.id}}</td>
-                  <td>
-                    {if product.image}
-                      {{product.image | image:"w=88,h=88,webp,blur,sizes=88px"}}
-                    {else}
-                      <div class="product-image-placeholder">📦</div>
-                    {/if}
-                  </td>
-                  <td>
-                    <div class="product-title {if product.price > 500}product-premium{/if}">{{product.title}}</div>
-                  </td>
-                  <td>
-                    <div class="product-description">{firstof product.description "—"}</div>
-                  </td>
-                  <td>
-                    {capture price_display}
-                      {if product.price > 500}
-                        <span class="product-price product-expensive">${{product.price}}</span>
-                      {else}
-                        <span class="product-price">${{product.price}}</span>
-                      {/if}
-                    {/capture}
-                    {{price_display}}
-                  </td>
-                  <td>
-                    <span class="{if product.stock == 0}stock-empty{else if is_low}stock-low{else}stock-good{/if}">
-                      {if product.stock == 0}
-                        Out of Stock
-                      {else}
-                        {{product.stock | sync:"products"}}{if is_low} left{/if}
-                      {/if}
-                    </span>
-                  </td>
-                  <td><span>{{product.created_at|date}}</span></td>
-                  <td>
-                    <div class="product-actions">
-                      <button type="button" class="vlo-btn vlo-btn-secondary" data-modal-open="edit-{{product.id}}" title="Edit">✎</button>
-                      <button type="button" class="vlo-btn vlo-btn-danger" data-modal-open="del-{{product.id}}" title="Delete">✕</button>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 60px;">ID</th>
+                <th style="width: 70px;">Image</th>
+                <th>Product</th>
+                <th>Category</th>
+                <th>Price</th>
+                <th>Stock</th>
+                <th>Created</th>
+                <th style="width: 100px; text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody data-source="/api/products" data-append>
+              {for product in products}
+              {assign is_low = product.stock > 0 && product.stock < 5}
+              {assign is_premium = product.price > 500}
+              
+              <tr>
+                <td class="td-id">#{{product.id}}</td>
+                
+                <!-- Thumbnail -->
+                <td>
+                  {if product.images}
+                      <div class="table-thumb">
+                        {{ product.images | first | image:"w=80,h=80,webp" }}
+                      </div>
+                  {else}
+                    <div class="table-thumb-empty">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
                     </div>
+                  {/if}
+                </td>
 
-                    <Modal id="edit-{{product.id}}" title="Edit Product">
-                      <form v-put="/api/products/{{product.id}}|ajax" action="/api/products/{{product.id}}" class="modal-form" enctype="multipart/form-data">
-                        <div class="modal-product-name">Editing: <strong>{{product.title}}</strong></div>
-                        {with field="title" label="Product Title"}
-                          <div class="form-grid">
-                            <div class="form-field"><label>Title</label><input type="text" name="title" value="{{product.title}}" required /></div>
-                            <div class="form-field"><label>Description</label><input type="text" name="description" value="{{product.description}}" /></div>
-                            <div class="form-field"><label>Price</label><input type="number" name="price" value="{{product.price}}" step="0.01" min="0" required /></div>
-                            <div class="form-field"><label>Stock</label><input type="number" name="stock" value="{{product.stock}}" min="0" required /></div>
-                          </div>
-                        {/with}
-                        <div class="form-field"><label>Image</label><FileInput name="image" accept="image/*" variant="secondary" button="Replace Image" /></div>
-                        {if product.image}
-                          <div class="current-product-image"><span>Current</span>{{product.image | image:"w=100,h=100,webp"}}</div>
-                        {/if}
-                        <div class="modal-actions">
-                          <button type="button" class="vlo-btn vlo-btn-secondary" data-modal-close="edit-{{product.id}}">Cancel</button>
-                          <button type="submit" class="vlo-btn vlo-btn-primary">Save Changes</button>
-                        </div>
+                <!-- Title & Desc -->
+                <td>
+                  <a href="/product?id={{product.id}}" class="table-link no-ajax">
+                    {{product.title}}
+                  </a>
+                  <div class="table-desc">{firstof product.description "No description"}</div>
+                </td>
+
+                <!-- Category -->
+                <td>
+                  <span class="category-pill">{firstof product.category "Uncategorized"}</span>
+                </td>
+
+                <!-- Price -->
+                <td>
+                  <span class="price-tag {if is_premium}price-premium{/if}">
+                    ${{product.price | number:2}}
+                  </span>
+                </td>
+
+                <!-- Stock -->
+                <td>
+                  <span class="status-pill {if product.stock == 0}status-out{else if is_low}status-low{else}status-in{/if}">
+                    {if product.stock == 0}
+                      Out of Stock
+                    {else}
+                      <span class="vlo-live" data-channel="products">{{product.stock}} in stock </span>
+                    {/if}
+                  </span>
+                </td>
+
+                <!-- Date -->
+                <td class="td-date">{{product.created_at | date}}</td>
+
+                <!-- Actions & Modals -->
+                <!-- Actions & Modals -->
+                <td class="td-actions">
+                  <div class="action-group">
+                    
+                    <!-- 🔥 NEW: ADD TO CART BUTTON -->
+                    {if product.stock > 0}
+                      <form v-post="/api/cart_items" alert="false" style="display:inline; margin:0;">
+                        <input type="hidden" name="product_id" value="{{product.id}}">
+                        <input type="hidden" name="quantity" value="1">
+                        <button type="submit" class="icon-btn icon-btn-cart" title="Add to Cart">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="9" cy="21" r="1"></circle>
+                            <circle cx="20" cy="21" r="1"></circle>
+                            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                          </svg>
+                        </button>
                       </form>
-                    </Modal>
+                    {else}
+                      <button type="button" class="icon-btn" title="Out of Stock" disabled style="opacity: 0.3; cursor: not-allowed;">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <circle cx="9" cy="21" r="1"></circle>
+                          <circle cx="20" cy="21" r="1"></circle>
+                          <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                        </svg>
+                      </button>
+                    {/if}
 
-                    <Modal id="del-{{product.id}}" title="Delete Product">
-                      <div class="delete-confirmation">
-                        <p>Are you sure you want to delete <strong>{{product.title}}</strong>?</p>
-                        <p class="delete-warning">This action cannot be undone.</p>
-                        <div class="modal-actions">
-                          <button type="button" class="vlo-btn vlo-btn-secondary" data-modal-close="del-{{product.id}}">Cancel</button>
-                          <button type="button" class="vlo-btn vlo-btn-danger" v-delete="/api/products/{{product.id}}|ajax">Delete Product</button>
+                    <button type="button" class="icon-btn" data-modal-open="edit-{{product.id}}" title="Edit">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <button type="button" class="icon-btn icon-btn-danger" data-modal-open="del-{{product.id}}" title="Delete">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                    </button>
+                  </div>
+
+
+                  <!-- EDIT MODAL -->
+                  <Modal id="edit-{{product.id}}" title="Edit Product">
+                    <form v-put="/api/products/{{product.id}}" class="modal-form" enctype="multipart/form-data">
+                      <div class="modal-context-banner">Editing: <strong>{{product.title}}</strong></div>
+                      
+                      <div class="form-grid">
+                        <div class="form-field">
+                          <label>Product Title</label>
+                          <input type="text" name="title" value="{{product.title}}" required />
+                        </div>
+                        <div class="form-field">
+                          <label>Description</label>
+                          <input type="text" name="description" value="{{product.description}}" />
+                        </div>
+                        <div class="form-field">
+                          <label>Price</label>
+                          <input type="number" name="price" value="{{product.price}}" step="0.01" min="0" required />
+                        </div>
+                        <div class="form-field">
+                          <label>Stock</label>
+                          <input type="number" name="stock" value="{{product.stock}}" min="0" required />
                         </div>
                       </div>
-                    </Modal>
-                  </td>
-                </tr>
-                {else}
-                <tr>
-                  <td colspan="8">
-                    <div class="empty-products">
-                      <div class="empty-icon">📦</div>
-                      <h3>No Products Found</h3>
-                      <p>
-                        {if search}
-                          No results for "{{search}}". Try a different search.
-                        {else}
-                          {unless products_loaded}
-                            Loading product catalog...
-                          {else}
-                            Add your first product using the button above.
-                          {/unless}
-                        {/if}
-                      </p>
+
+                      <div class="form-field">
+                        <label>Upload New Images</label>
+                        <!-- 🔥 Empty hidden field acts as a baseline so unchecking all boxes still sends data -->
+                        <input type="hidden" name="images" value="">
+                        <FileInput name="images" accept="image/*" variant="secondary" multiple="true" button="Upload New Images" />
+                        <small style="color:#666; font-size:0.75rem; margin-top:4px;">New files will be added to the checked images below.</small>
+                      </div>
+                      
+                      {if product.images}
+                        <div class="current-images-preview">
+                          <span>Keep Existing Images (Uncheck to remove):</span>
+                          <div class="preview-thumbs">
+                            {for img in product.images}
+                              <!-- 🔥 PURE HTML CHECKBOX METHOD -->
+                              <label class="current-thumb-wrap" title="Click to toggle image">
+                                <input type="checkbox" name="images" value="{{ img }}" checked class="thumb-checkbox">
+                                {{ img | image:"w=60,h=60,webp" }}
+                                <div class="checkbox-indicator">
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                </div>
+                              </label>
+                            {/for}
+                          </div>
+                        </div>
+                      {/if}
+
+                      <div class="modal-actions">
+                        <button type="button" class="btn btn-secondary" data-modal-close="edit-{{product.id}}">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                      </div>
+                    </form>
+                  </Modal>
+
+                  <!-- DELETE MODAL -->
+                  <Modal id="del-{{product.id}}" title="Delete Product">
+                    <div class="delete-box">
+                      <div class="delete-icon-wrap">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+                      </div>
+                      <h3>Delete this product?</h3>
+                      <p>You are about to permanently delete <strong>{{product.title}}</strong>.</p>
+                      <p class="text-danger">This action cannot be undone.</p>
+                      
+                      <div class="modal-actions" style="justify-content: center;">
+                        <button type="button" class="btn btn-secondary" data-modal-close="del-{{product.id}}">Cancel</button>
+                        <button type="button" class="btn btn-danger-solid" v-delete="/api/products/{{product.id}}">Delete Product</button>
+                      </div>
                     </div>
-                  </td>
-                </tr>
-                {/for}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-        <Pagination />
+                  </Modal>
+                </td>
+              </tr>
+              
+              {else}
+              <!-- EMPTY STATE -->
+              <tr>
+                <td colspan="8">
+                  <div class="empty-state">
+                    <div class="empty-icon">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                    </div>
+                    <h3>No Products Found</h3>
+                    <p>
+                      {if search}
+                        No results for "{{search}}". Try a different keyword.
+                      {else}
+                        Get started by adding your first product to the catalog.
+                      {/if}
+                    </p>
+                  </div>
+                </td>
+              </tr>
+              {/for}
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="table-footer">
+          <Pagination />
+        </div>
       </div>
     </div>
   </div>
+
+  <!-- ADD PRODUCT MODAL -->
+  <Modal id="add-product-modal" title="Add New Product">
+    <form v-post="/api/products" class="modal-form" enctype="multipart/form-data">
+      <div class="form-grid">
+        <div class="form-field">
+          <label>Product Title</label>
+          <input type="text" name="title" placeholder="e.g. Mechanical Keyboard" required />
+        </div>
+        <div class="form-field">
+          <label>Category</label>
+          <input type="text" name="category" placeholder="e.g. Electronics" />
+        </div>
+        <div class="form-field">
+          <label>Price</label>
+          <input type="number" name="price" placeholder="0.00" step="0.01" min="0" required />
+        </div>
+        <div class="form-field">
+          <label>Stock</label>
+          <input type="number" name="stock" placeholder="0" min="0" required />
+        </div>
+      </div>
+      
+      <div class="form-field">
+        <label>Description</label>
+        <input type="text" name="description" placeholder="Short product description" />
+      </div>
+
+      <div class="form-field">
+        <label>Product Images</label>
+        <FileInput name="images" accept="image/*" variant="primary" multiple="true" button="Upload Images" />
+      </div>
+      
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-modal-close="add-product-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Product</button>
+      </div>
+    </form>
+  </Modal>
+
+  <!-- ══════════ CSS ══════════ -->
   <style>
-.vlo-live-updated{animation:vloLivePulse .6s ease}@keyframes vloLivePulse{0%{background-color:rgba(0,245,255,.3)}100%{background-color:transparent}}.vlo-error-msg{color:#ff4444;font-size:.75rem;margin-top:4px;display:flex;align-items:center;gap:4px}.vlo-error-msg::before{content:"⚠"}.products-table td picture img{width:44px!important;height:44px!important;object-fit:cover;border-radius:6px;border:1px solid #333}.products-page{max-width:1150px;margin:0 auto;padding:45px 24px 70px;color:#fff}.products-header{display:flex;align-items:flex-end;justify-content:space-between;gap:25px;margin-bottom:30px}.products-eyebrow{font-size:11px;font-weight:700;letter-spacing:1.5px;color:#00f5ff;margin-bottom:7px}.products-header h1{margin:0;font-size:34px;line-height:1.15}.products-header p{margin:9px 0 0;color:#888;font-size:15px}.header-actions{display:flex;align-items:center;gap:12px}.products-list-card{margin-top:24px}.products-table-wrap{overflow-x:auto}.products-table{width:100%;border-collapse:collapse;min-width:900px}.products-table th{padding:13px 14px;text-align:left;background:#171717;color:#777;font-size:11px;text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid #292929}.products-table td{padding:8px 5px;border-bottom:1px solid #222;color:#ccc;font-size:13px;vertical-align:middle}.products-table tbody tr:hover{background:#161616}.product-title{font-weight:600;color:#fff}.product-premium{font-weight:800}.product-description{max-width:240px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.product-price{font-weight:600;color:#00ff88}.product-expensive{font-weight:800}.stock-good{color:#00ff88;font-weight:600;padding:2px 6px;border-radius:4px}.stock-low{color:#ff6666;font-weight:700;padding:2px 6px;border-radius:4px}.stock-empty{color:#ff4444;font-weight:800;padding:2px 6px;border-radius:4px}.product-actions{display:flex;justify-content:center;gap:6px}.empty-products{text-align:center;padding:55px 20px;color:#666}.empty-icon{font-size:35px;margin-bottom:10px}.empty-products h3{margin:0 0 7px;color:#aaa}.empty-products p{margin:0;font-size:13px}.vlo-btn{padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .15s;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}.vlo-btn-primary{background:#00f5ff;color:#000}.vlo-btn-primary:hover{background:#00d4dd}.vlo-btn-secondary{background:transparent;border:1px solid #444;color:#ccc}.vlo-btn-secondary:hover{border-color:#00f5ff;color:#00f5ff}.vlo-btn-danger{background:transparent;border:1px solid #444;color:#ff6666}.vlo-btn-danger:hover{background:#351717;border-color:#ff6666}.modal-form{display:flex;flex-direction:column;gap:16px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.form-field{display:flex;flex-direction:column;gap:7px}.form-field label{font-size:12px;font-weight:600;color:#aaa}.form-field input{padding:10px 12px;background:#171717;border:1px solid #333;border-radius:6px;color:#fff;font-size:14px;outline:none;transition:border-color .2s}.form-field input:focus{border-color:#00f5ff}.modal-product-name{color:#888;font-size:13px;margin-bottom:2px}.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:8px}.delete-confirmation{color:#ccc}.delete-confirmation p{margin:0 0 12px;line-height:1.6}.delete-warning{color:#ff8888;font-size:13px}.current-product-image{display:flex;align-items:center;gap:10px}.current-product-image span{color:#777;font-size:12px}@media(max-width:700px){.products-page{padding:30px 15px 50px}.products-header{align-items:flex-start;flex-direction:column}.products-header h1{font-size:28px}.header-actions{width:100%;justify-content:flex-start}.form-grid{grid-template-columns:1fr}}
+.dashboard-wrap{max-width:1200px;margin:0 auto;padding:40px 24px 80px;color:#e5e5e5;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}
+.dashboard-header{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:32px}
+.header-info h1{margin:0 0 6px;font-size:28px;font-weight:700;color:#fff;letter-spacing:-.02em}
+.header-info p{margin:0;color:#888;font-size:14px}
+.header-eyebrow{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.06em;color:#00f5ff;text-transform:uppercase;margin-bottom:10px}
+.pulse-dot{width:6px;height:6px;border-radius:50%;background:#00f5ff;box-shadow:0 0 8px #00f5ff;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.header-actions{display:flex;align-items:center;gap:12px}
+.table-card{background:#0f0f0f;border:1px solid #232323;border-radius:16px;box-shadow:0 12px 32px -8px rgba(0,0,0,.4);overflow:hidden}
+.table-header-toolbar{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid #232323;background:#141414;flex-wrap:wrap;gap:16px}
+.table-title-row{display:flex;align-items:center;gap:12px}
+.table-title-row h2{margin:0;font-size:18px;font-weight:600;color:#fff}
+.count-badge{background:#232323;color:#aaa;font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px}
+.table-responsive{overflow-x:auto}
+.data-table{width:100%;border-collapse:collapse;text-align:left}
+.data-table th{padding:14px 24px;background:#0a0a0a;color:#666;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #232323;white-space:nowrap}
+.data-table td{padding:16px 24px;border-bottom:1px solid #1a1a1a;vertical-align:middle;color:#ccc;font-size:13px}
+.data-table tbody tr{transition:background .15s ease}
+.data-table tbody tr:hover{background:#161616}
+.data-table tbody tr:last-child td{border-bottom:none}
+.td-id{color:#666;font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px}
+.table-thumb{width:40px;height:40px;border-radius:8px;overflow:hidden;border:1px solid #333;background:#000}
+.table-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.table-thumb-empty{width:40px;height:40px;border-radius:8px;border:1px dashed #333;display:grid;place-items:center;color:#444;background:#0a0a0a}
+.table-link{color:#fff;text-decoration:none;font-weight:600;font-size:14px;transition:color .15s}
+.table-link:hover{color:#00f5ff}
+.table-desc{color:#777;font-size:12px;margin-top:4px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.category-pill{display:inline-block;padding:4px 10px;background:rgba(255,255,255,.05);border-radius:6px;font-size:11px;font-weight:600;color:#aaa}
+.price-tag{font-weight:600;font-family:ui-monospace,SFMono-Regular,monospace;color:#00ff88}
+.price-premium{color:#00f5ff}
+.status-pill{display:inline-flex;align-items:center;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.status-in{background:rgba(0,255,136,.08);color:#00ff88;border:1px solid rgba(0,255,136,.2)}
+.status-low{background:rgba(255,170,0,.08);color:#ffaa00;border:1px solid rgba(255,170,0,.2)}
+.status-out{background:rgba(255,68,68,.08);color:#ff4444;border:1px solid rgba(255,68,68,.2)}
+.td-date{color:#777;font-size:12px;white-space:nowrap}
+.td-actions{text-align:right}
+.action-group{display:inline-flex;gap:8px}
+.icon-btn{display:grid;place-items:center;width:32px;height:32px;border-radius:8px;background:transparent;border:1px solid #333;color:#888;cursor:pointer;transition:all .2s ease}
+.icon-btn:hover{border-color:#00f5ff;color:#00f5ff;background:rgba(0,245,255,.05)}
+.icon-btn-danger:hover{border-color:#ff4444;color:#ff4444;background:rgba(255,68,68,.05)}
+.empty-state{text-align:center;padding:64px 20px}
+.empty-icon{color:#333;margin-bottom:16px}
+.empty-state h3{margin:0 0 8px;color:#fff;font-size:16px}
+.empty-state p{margin:0;color:#777;font-size:13px}
+.table-footer{padding:16px 24px;border-top:1px solid #232323;background:#141414}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .2s ease;font-family:inherit}
+.btn-primary{background:#00f5ff;color:#000;box-shadow:0 4px 12px rgba(0,245,255,.15)}
+.btn-primary:hover{background:#00d8e0;transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,245,255,.25)}
+.btn-secondary{background:transparent;border:1px solid #444;color:#ccc}
+.btn-secondary:hover{border-color:#00f5ff;color:#00f5ff;background:rgba(0,245,255,.04)}
+.btn-danger-solid{background:rgba(255,68,68,.1);color:#ff4444;border:1px solid rgba(255,68,68,.3)}
+.btn-danger-solid:hover{background:rgba(255,68,68,.2);color:#fff;border-color:#ff4444}
+.icon-btn-cart:hover {border-color: #00ff88; color: #00ff88; background: rgba(0, 255, 136, 0.05)}
+.modal-form{display:flex;flex-direction:column;gap:20px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-field{display:flex;flex-direction:column;gap:8px}
+.form-field label{font-size:12px;font-weight:600;color:#aaa;letter-spacing:.02em}
+.form-field input{padding:10px 14px;background:#0a0a0a;border:1px solid #333;border-radius:8px;color:#fff;font-size:13px;outline:none;transition:border-color .2s}
+.form-field input:focus{border-color:#00f5ff;box-shadow:0 0 0 3px rgba(0,245,255,.1)}
+.modal-context-banner{padding:12px 16px;background:#0a0a0a;border:1px solid #232323;border-radius:8px;color:#888;font-size:13px;margin-bottom:4px}
+.modal-context-banner strong{color:#e5e5e5}
+.modal-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:8px;padding-top:16px;border-top:1px solid #232323}
+.current-images-preview{display:flex;flex-direction:column;gap:8px;padding:12px;background:#0a0a0a;border:1px solid #232323;border-radius:8px}
+.current-images-preview span{font-size:11px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.preview-thumbs{display:flex;gap:8px;flex-wrap:wrap}
+.current-thumb-wrap{position:relative;width:60px;height:60px;border-radius:6px;overflow:hidden;border:2px solid #333;background:#000;cursor:pointer;transition:all .2s ease;display:block}
+.current-thumb-wrap picture,.current-thumb-wrap img{width:100%;height:100%;object-fit:cover;display:block;transition:opacity .2s ease}
+.thumb-checkbox{position:absolute;opacity:0;width:0;height:0}
+.checkbox-indicator{position:absolute;top:4px;right:4px;width:16px;height:16px;border-radius:4px;background:#00f5ff;color:#000;display:grid;place-items:center;opacity:1;transition:all .2s ease;z-index:10}
+.thumb-checkbox:not(:checked) ~ picture,.thumb-checkbox:not(:checked) ~ img{opacity:.3;filter:grayscale(100%)}
+.thumb-checkbox:not(:checked) ~ .checkbox-indicator{opacity:0;transform:scale(.5)}
+.delete-box{text-align:center;padding:8px}
+.delete-icon-wrap{display:inline-grid;place-items:center;width:56px;height:56px;margin-bottom:16px;background:rgba(255,68,68,.08);border:1px solid rgba(255,68,68,.2);border-radius:14px;color:#ff4444}
+.delete-box h3{margin:0 0 8px;color:#fff;font-size:16px}
+.delete-box p{margin:0 0 8px;color:#888;font-size:13px;line-height:1.6}
+.delete-box .text-danger{color:#ff8888;font-size:12px}
+.vlo-live-updated{animation:vloLivePulse .6s ease}
+@keyframes vloLivePulse{0%{background-color:rgba(0,245,255,.3)}100%{background-color:transparent}}
+@media(max-width:768px){.dashboard-header{flex-direction:column;align-items:flex-start}.header-actions{width:100%;justify-content:flex-start}.form-grid{grid-template-columns:1fr}.data-table th,.data-table td{padding:12px 16px}.table-desc{max-width:140px}}
   </style>
-
-
 </BaseLayout>

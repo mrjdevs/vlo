@@ -1,0 +1,276 @@
+<BaseLayout title="Product Details">
+  <div class="prod-page">
+    <!-- Breadcrumb -->
+    <nav class="prod-breadcrumb" aria-label="Breadcrumb">
+      <a href="/">Home</a>
+      <span class="sep">/</span>
+      <a href="/products" class="no-ajax">Products</a>
+      {if prod.category}
+        <span class="sep">/</span>
+        <span class="current">{firstof prod.category "Uncategorized"}</span>
+      {/if}
+    </nav>
+
+    <div id="products-ajax-wrapper">
+      <!-- Initializes the AJAX swap logic for this page -->
+      {{ "" | ajax:",0,#products-ajax-wrapper,html" }}
+
+      <div data-source="/api/product">
+        {for prod in product}
+
+        <div class="prod-card">
+          <!-- ══════════ IMAGE GALLERY ══════════ -->
+          <ImageGallery images={{prod.images|json_decode}} alt="Product Image" download="true"/>
+          
+          <!-- ══════════ INFO ══════════ -->
+          <div class="prod-info">
+            <div class="prod-meta-top">
+              {if prod.category}
+                <span class="prod-category">{firstof prod.category "Uncategorized"}</span>
+              {/if}
+              <span class="prod-sku">SKU-{{prod.id}}</span>
+            </div>
+
+            <h1 class="prod-title">{firstof prod.title "Untitled Product"}</h1>
+
+            <p class="prod-description">
+              {firstof prod.description "No description provided for this product."}
+            </p>
+
+            <div class="prod-price-row">
+              <span class="prod-price {if prod.price > 500}prod-price-premium{/if}">
+                ${{prod.price | number:2}}
+              </span>
+              {if prod.price > 500}
+                <span class="prod-badge-premium">Premium</span>
+              {/if}
+              <!-- Inside product.vlo, near the price/actions -->
+            <form v-post="/api/cart_items" class="add-to-cart-form">
+                <input type="hidden" name="product_id" value="{{prod.id}}">
+                <input type="hidden" name="quantity" value="1">
+                
+                <button type="submit" class="prod-btn prod-btn-primary">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="9" cy="21" r="1"></circle>
+                        <circle cx="20" cy="21" r="1"></circle>
+                        <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+                    </svg>
+                    Add to Cart
+                </button>
+            </form>
+            </div>
+            
+            <div class="prod-stock {if prod.stock == 0}prod-stock-out{else if prod.stock < 5}prod-stock-low{else}prod-stock-in{/if}">
+              <span class="prod-stock-dot"></span>
+              {if prod.stock == 0}
+                Out of Stock
+              {else if prod.stock < 5}
+                Only <span class="vlo-live" data-channel="products">{{prod.stock}}</span> left — order soon
+              {else}
+                <span class="vlo-live" data-channel="products">{{prod.stock}}</span> in stock
+              {/if}
+            </div>
+
+            <dl class="prod-details">
+              <div>
+                <dt>Product ID</dt>
+                <dd>#{{prod.id}}</dd>
+              </div>
+              <div>
+                <dt>Added</dt>
+                <dd>{{prod.created_at | date}}</dd>
+              </div>
+              {if prod.category}
+                <div>
+                  <dt>Category</dt>
+                  <dd>{firstof prod.category "—"}</dd>
+                </div>
+              {/if}
+            </dl>
+
+            <div class="prod-actions">
+              <button type="button" class="prod-btn prod-btn-primary" data-modal-open="edit-{{prod.id}}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+                Edit Product
+              </button>
+              <button type="button" class="prod-btn prod-btn-danger" data-modal-open="del-{{prod.id}}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                </svg>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══════════ EDIT MODAL ══════════ -->
+        <Modal id="edit-{{prod.id}}" title="Edit Product">
+          <form data-vlo-put="/api/products/{{prod.id}}" class="modal-form" enctype="multipart/form-data">
+            <div class="modal-product-name">
+              Editing <strong>{{prod.title}}</strong>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-field">
+                <label>Title</label>
+                <input type="text" name="title" value="{{prod.title}}" required />
+              </div>
+              <div class="form-field">
+                <label>Description</label>
+                <input type="text" name="description" value="{{prod.description}}" />
+              </div>
+              <div class="form-field">
+                <label>Price</label>
+                <input type="number" name="price" value="{{prod.price}}" step="0.01" min="0" required />
+              </div>
+              <div class="form-field">
+                <label>Stock</label>
+                <input type="number" name="stock" value="{{prod.stock}}" min="0" required />
+              </div>
+            </div>
+
+            <div class="form-field">
+              <label>Upload New Images</label>
+              <!-- 🔥 ADD THIS HIDDEN FIELD -->
+              <input type="hidden" name="images" value="">
+              <FileInput name="images" multiple accept="image/*" variant="secondary" button="Upload New Files" />
+              <small style="color:#666; font-size:0.75rem; margin-top:4px;">New files will be added to the checked images below.</small>
+            </div>
+            
+            {if prod.images}
+              <div class="current-product-images">
+                <span>Keep Existing Images:</span>
+                <div class="current-thumbs">
+                  {for img in prod.images}
+                    <!-- 🔥 PURE HTML CHECKBOX METHOD -->
+                    <label class="current-thumb-wrap" title="Uncheck to remove">
+                      <input type="checkbox" name="images" value="{{ img }}" checked class="thumb-checkbox">
+                      {{ img | image:"w=80,h=80,webp" }}
+                      <div class="checkbox-indicator">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                      </div>
+                    </label>
+                  {/for}
+                </div>
+              </div>
+            {/if}
+
+            <div class="modal-actions">
+              <button type="button" class="prod-btn prod-btn-secondary" data-modal-close="edit-{{prod.id}}">Cancel</button>
+              <button type="submit" class="prod-btn prod-btn-primary">Save Changes</button>
+            </div>
+          </form>
+          <!-- NO JAVASCRIPT NEEDED! -->
+        </Modal>
+
+
+        <!-- ══════════ DELETE MODAL ══════════ -->
+        <Modal id="del-{{prod.id}}" title="Delete Product">
+          <div class="delete-confirmation">
+            <div class="delete-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 9v4M12 17h.01" />
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              </svg>
+            </div>
+            <h3>Delete this product?</h3>
+            <p>You're about to permanently delete <strong>{{prod.title}}</strong>.</p>
+            <p class="delete-warning">This action cannot be undone.</p>
+            <div class="modal-actions">
+              <button type="button" class="prod-btn prod-btn-secondary" data-modal-close="del-{{prod.id}}">Cancel</button>
+              <button type="button" class="prod-btn prod-btn-danger" data-vlo-delete="/api/products/{{prod.id}}" data-confirm="Are you sure?">Delete Product</button>
+            </div>
+          </div>
+        </Modal>
+
+        {else}
+        <!-- ══════════ EMPTY STATE ══════════ -->
+        <div class="prod-empty">
+          <div class="prod-empty-icon">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.35-4.35" />
+            </svg>
+          </div>
+          <h2>Product Not Found</h2>
+          <p>The product you're looking for doesn't exist or has been removed.</p>
+          <a href="/products" class="prod-btn prod-btn-primary no-ajax">Back to Products</a>
+        </div>
+        {/for}
+      </div>
+    </div>
+  </div>
+
+  <style>
+.prod-page{max-width:1180px;margin:0 auto;padding:32px 24px 96px;color:#e5e5e5}
+.prod-breadcrumb{display:flex;align-items:center;gap:8px;margin-bottom:32px;font-size:.82rem;color:#555}
+.prod-breadcrumb a{color:#666;text-decoration:none;transition:color .15s}
+.prod-breadcrumb a:hover{color:#00f5ff}
+.prod-breadcrumb .sep{color:#333}
+.prod-breadcrumb .current{color:#999}
+.prod-card{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:56px;align-items:start;background:linear-gradient(180deg,#141414 0%,#0f0f0f 100%);border:1px solid #232323;border-radius:18px;padding:40px;box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 24px 48px -12px rgba(0,0,0,.5)}
+.prod-gallery{position:sticky;top:100px}
+.prod-info{display:flex;flex-direction:column;gap:20px;padding-top:4px}
+.prod-meta-top{display:flex;align-items:center;gap:10px}
+.prod-category{display:inline-block;padding:4px 10px;background:rgba(0,245,255,.06);border:1px solid rgba(0,245,255,.2);border-radius:6px;color:#00f5ff;font-size:.72rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.prod-sku{color:#444;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.72rem;letter-spacing:.03em}
+.prod-title{margin:0;font-size:clamp(1.8rem,3vw,2.4rem);font-weight:700;letter-spacing:-.025em;line-height:1.15;color:#fff}
+.prod-description{margin:0;color:#8a8a8a;font-size:.98rem;line-height:1.75}
+.prod-price-row{display:flex;align-items:center;gap:14px;padding:20px 0;border-top:1px solid #1f1f1f;border-bottom:1px solid #1f1f1f}
+.prod-price{font-size:2.2rem;font-weight:800;letter-spacing:-.03em;color:#00ff88}
+.prod-price-premium{color:#00f5ff}
+.prod-badge-premium{padding:5px 12px;background:linear-gradient(135deg,rgba(0,245,255,.12),rgba(0,245,255,.04));border:1px solid rgba(0,245,255,.3);border-radius:8px;color:#00f5ff;font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.prod-stock{display:inline-flex;align-items:center;gap:10px;padding:12px 16px;border-radius:10px;font-size:.92rem;font-weight:600;width:fit-content}
+.prod-stock-dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 10px currentColor;flex-shrink:0}
+.prod-stock-in{background:rgba(0,255,136,.05);border:1px solid rgba(0,255,136,.2);color:#00ff88}
+.prod-stock-low{background:rgba(255,170,0,.05);border:1px solid rgba(255,170,0,.25);color:#ffaa00}
+.prod-stock-out{background:rgba(255,68,68,.05);border:1px solid rgba(255,68,68,.25);color:#ff4444}
+.prod-details{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin:0;padding:0}
+.prod-details>div{display:flex;flex-direction:column;gap:4px}
+.prod-details dt{color:#555;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.prod-details dd{margin:0;color:#ccc;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.85rem}
+.prod-actions{display:flex;gap:12px;margin-top:4px}
+.prod-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 18px;border-radius:9px;font-size:.88rem;font-weight:600;letter-spacing:.01em;text-decoration:none;border:none;cursor:pointer;transition:all .18s ease;font-family:inherit}
+.prod-btn-primary{background:#00f5ff;color:#000;box-shadow:0 4px 14px rgba(0,245,255,.15)}
+.prod-btn-primary:hover{background:#00d8e0;box-shadow:0 6px 20px rgba(0,245,255,.25);transform:translateY(-1px)}
+.prod-btn-secondary{background:transparent;border:1px solid #333;color:#ccc}
+.prod-btn-secondary:hover{border-color:#00f5ff;color:#00f5ff;background:rgba(0,245,255,.04)}
+.prod-btn-danger{background:transparent;border:1px solid #333;color:#ff6666}
+.prod-btn-danger:hover{background:rgba(255,68,68,.08);border-color:#ff6666}
+.prod-empty{text-align:center;padding:120px 20px}
+.prod-empty-icon{color:#333;margin-bottom:24px}
+.prod-empty h2{margin:0 0 10px;color:#fff;font-size:1.6rem;letter-spacing:-.02em}
+.prod-empty p{margin:0 0 28px;color:#666;font-size:.95rem;max-width:400px;margin-left:auto;margin-right:auto;line-height:1.6}
+.modal-product-name{padding:12px 16px;margin-bottom:20px;background:#0a0a0a;border:1px solid #232323;border-radius:8px;color:#888;font-size:.85rem}
+.modal-product-name strong{color:#e5e5e5}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.form-field{display:flex;flex-direction:column;gap:8px}
+.form-field label{color:#aaa;font-size:.8rem;font-weight:600;letter-spacing:.02em}
+.form-field input{padding:11px 14px;background:#0a0a0a;border:1px solid #232323;border-radius:8px;color:#fff;font-size:.9rem;font-family:inherit;outline:none;transition:border-color .15s}
+.form-field input:focus{border-color:#00f5ff;box-shadow:0 0 0 3px rgba(0,245,255,.08)}
+.current-product-images{display:flex;flex-direction:column;gap:8px;padding:14px;margin-top:8px;background:#0a0a0a;border:1px solid #232323;border-radius:10px}
+.current-product-images>span{color:#666;font-size:.82rem}
+.current-thumbs{display:flex;gap:8px;flex-wrap:wrap}
+.current-thumbs picture,.current-thumbs img{width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid #232323}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px;padding-top:20px;border-top:1px solid #232323}
+.delete-confirmation{text-align:center;padding:8px}
+.delete-icon{display:inline-grid;place-items:center;width:56px;height:56px;margin-bottom:16px;background:rgba(255,68,68,.08);border:1px solid rgba(255,68,68,.25);border-radius:14px;color:#ff6666}
+.delete-confirmation h3{margin:0 0 8px;color:#fff;font-size:1.1rem}
+.delete-confirmation p{margin:0 0 8px;color:#888;font-size:.9rem;line-height:1.6}
+.delete-confirmation .delete-warning{color:#ff8888;font-size:.82rem}
+
+.current-thumb-wrap{position:relative;width:60px;height:60px;border-radius:6px;overflow:hidden;border:2px solid #333;background:#000;cursor:pointer;transition:all .2s ease;display:block}
+.current-thumb-wrap picture,.current-thumb-wrap img{width:100%;height:100%;object-fit:cover;display:block;transition:opacity .2s ease}
+.thumb-checkbox{position:absolute;opacity:0;width:0;height:0}
+.checkbox-indicator{position:absolute;top:4px;right:4px;width:16px;height:16px;border-radius:4px;background:#00f5ff;color:#000;display:grid;place-items:center;opacity:1;transition:all .2s ease;z-index:10}
+/* When unchecked, dim the image and hide the checkmark */
+.thumb-checkbox:not(:checked) ~ picture,.thumb-checkbox:not(:checked) ~ img{opacity:.3;filter:grayscale(100%)}
+.thumb-checkbox:not(:checked) ~ .checkbox-indicator{opacity:0;transform:scale(.5)}
+@media(max-width:900px){.prod-card{grid-template-columns:1fr;gap:32px;padding:24px}.prod-gallery{position:static}}
+@media(max-width:500px){.prod-actions{flex-direction:column}.prod-actions .prod-btn{width:100%;justify-content:center}.form-grid{grid-template-columns:1fr}}
+@keyframes vloFlashIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+  </style>
+</BaseLayout>
