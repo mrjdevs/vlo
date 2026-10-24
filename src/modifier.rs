@@ -831,7 +831,7 @@ fn m_ajax(v: String, arg: Option<String>) -> String {
         );
     }
     
-    // JSON MODE (unchanged — small, per-element, no queue needed)
+    // JSON MODE (small, per-element, no queue needed)
     let safe_class = if url.is_empty() {
         "vlo-ajax-listen".to_string()
     } else {
@@ -847,7 +847,7 @@ fn m_ajax(v: String, arg: Option<String>) -> String {
                 .then(res => {{
                     let val = res;
                     if (el.dataset.field) {{
-                        val = el.dataset.field.split('.').reduce((o, k) => (o || {{}})[k], res);
+                        val = el.dataset.field.replace(/\[(\w+)\]/g, '.$1').split('.').reduce((o, k) => (o || {{}})[k], res);
                     }} else if (res.data && Array.isArray(res.data) && res.data.length > 0) {{
                         val = res.data[0];
                     }} else if (res.pagination && res.pagination.total !== undefined) {{
@@ -864,9 +864,21 @@ fn m_ajax(v: String, arg: Option<String>) -> String {
             doFetch(el);
             if (el.dataset.interval > 0) setInterval(() => doFetch(el), el.dataset.interval);
         }});
+        // 🔥 Listen for mutations and re-fetch
+        if (!window.__VLO_JSON_MUT__) window.__VLO_JSON_MUT__ = {{}};
+        if (!window.__VLO_JSON_MUT__['{}']) {{
+            window.__VLO_JSON_MUT__['{}'] = true;
+            window.addEventListener('vlo:mutation', () => {{
+                document.querySelectorAll('.{}').forEach(el => doFetch(el));
+            }});
+        }}
     }})();
     </script>"#,
-        safe_class, url, interval, target, v, safe_class
+        safe_class, url, interval, target, v, 
+        safe_class, // For document.querySelectorAll('.{}')
+        safe_class, // For window.__VLO_JSON_MUT__['{}']
+        safe_class, // For window.__VLO_JSON_MUT__['{}'] = true
+        safe_class  // For document.querySelectorAll('.{}') inside the listener
     )
 }
 // ── Developer Experience ─────────────────────────────────────────────

@@ -26,8 +26,22 @@
 .nav-links { display:flex; align-items:center; justify-content:flex-end; gap:.5rem; }
 .nav-links a { display:inline-block; color:#a0a0a0; background:transparent; border:1px solid transparent; border-radius:8px; padding:8px 16px; text-decoration:none; font-weight:600; transition:color .2s ease,background .2s ease,border-color .2s ease; }
 .nav-links a:hover { color:#fff; background:rgba(255,255,255,.06); }
-.nav-links a.active { color:var(--primary); background:rgba(0,245,255,.08); border-color:rgba(0,245,255,.4); }
-.nav-links a.active:hover { color:#fff; background:rgba(0,245,255,.14); }
+.nav-links :is(a.active, :where(.nav-item:has(.nav-sub a.active)) > a) { color:var(--primary); background:rgba(0,245,255,.08); border-color:rgba(0,245,255,.4); }
+.nav-links :is(a.active, :where(.nav-item:has(.nav-sub a.active)) > a):hover { color:#fff; background:rgba(0,245,255,.14); }
+
+/* ========================================================= SUB LEVELS ========================================================= */
+
+.nav-item { position:relative; display:flex; align-items:center; }
+.nav-item > a:has(+ .nav-sub)::after { content:""; display:inline-block; margin-left:.45em; padding:2.5px; border:solid currentColor; border-width:0 2px 2px 0; transform:rotate(45deg) translateY(-2px); }
+.nav-sub { position:absolute; top:100%; left:0; min-width:200px; display:none; flex-direction:column; align-items:stretch; gap:2px; padding:.4rem; background:var(--sub-bg,var(--background)); border:1px solid var(--border); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.18); z-index:200; }
+.nav-item:hover > .nav-sub, .nav-item:focus-within > .nav-sub { display:flex; }
+.nav-sub .nav-item { display:block; }
+.nav-sub a { display:flex; align-items:center; justify-content:space-between; white-space:nowrap; }
+.nav-sub .nav-item > a:has(+ .nav-sub)::after { margin-left:1em; transform:rotate(-45deg); }
+.nav-sub .nav-sub { top:-.4rem; left:100%; }
+/* keep the last menu inside the viewport: open leftwards */
+.nav-links > .nav-item:last-child > .nav-sub { left:auto; right:0; }
+.nav-links > .nav-item:last-child .nav-sub .nav-sub { left:auto; right:100%; }
 
 /* ========================================================= VARIANTS ========================================================= */
 
@@ -35,31 +49,31 @@
 .navbar.default { background:var(--background); }
 
 /* Light */
-.navbar.light { background:#fff; color:#374151; border-color:#e5e7eb; }
+.navbar.light { --sub-bg:#fff; background:#fff; color:#374151; border-color:#e5e7eb; }
 .navbar.light .brand { color:#111827; }
 .navbar.light .nav-links a { color:#4b5563; }
 .navbar.light .nav-links a:hover { color:#111827; background:#f3f4f6; }
-.navbar.light .nav-links a.active { color:var(--primary); background:rgba(0,0,0,.05); border-color:#d1d5db; }
+.navbar.light .nav-links :is(a.active, :where(.nav-item:has(.nav-sub a.active)) > a) { color:var(--primary); background:rgba(0,0,0,.05); border-color:#d1d5db; }
 
 /* Dark */
-.navbar.dark { background:#111827; border-color:#374151; }
+.navbar.dark { --sub-bg:#111827; background:#111827; border-color:#374151; }
 .navbar.dark .brand { color:#fff; }
 .navbar.dark .nav-links a { color:#d1d5db; }
 .navbar.dark .nav-links a:hover { color:#fff; background:#1f2937; }
-.navbar.dark .nav-links a.active { color:#fff; background:#374151; border-color:#6b7280; }
+.navbar.dark .nav-links :is(a.active, :where(.nav-item:has(.nav-sub a.active)) > a) { color:#fff; background:#374151; border-color:#6b7280; }
 
 /* Primary */
-.navbar.primary { background:var(--primary); border-color:transparent; }
+.navbar.primary { --sub-bg:var(--primary); background:var(--primary); border-color:transparent; }
 .navbar.primary .brand { color:#fff; }
 .navbar.primary .nav-links a { color:rgba(255,255,255,.85); }
 .navbar.primary .nav-links a:hover { color:#fff; background:rgba(255,255,255,.12); }
-.navbar.primary .nav-links a.active { color:var(--primary); background:#fff; border-color:#fff; }
+.navbar.primary .nav-links :is(a.active, :where(.nav-item:has(.nav-sub a.active)) > a) { color:var(--primary); background:#fff; border-color:#fff; }
 
 /* Outline */
 .navbar.outline { background:transparent; }
 .navbar.outline .nav-links a { color:var(--primary); }
 .navbar.outline .nav-links a:hover { color:var(--primary); background:rgba(0,0,0,.03); border-color:var(--primary); }
-.navbar.outline .nav-links a.active { color:var(--primary); background:transparent; border-color:var(--primary); }
+.navbar.outline .nav-links :is(a.active, :where(.nav-item:has(.nav-sub a.active)) > a) { color:var(--primary); background:transparent; border-color:var(--primary); }
 
 /* ========================================================= SIZE ========================================================= */
 
@@ -89,6 +103,11 @@
 /* ========================================================= MOBILE ========================================================= */
 
 @media (max-width:768px) {
+    /* Sub levels: always expanded and indented under their parent */
+    .navbar .nav-item { display:block; width:100%; }
+    .navbar .nav-sub,
+    .navbar .nav-sub .nav-sub { position:static; display:flex; min-width:0; box-shadow:none; background:transparent; border:0; border-left:2px solid var(--border); border-radius:0; margin:.25rem 0 .25rem .75rem; padding:0 0 0 .5rem; }
+
     /* Collapse */
     .navbar.collapse .navbar-inner { flex-wrap:wrap; }
     .navbar.collapse .navbar-toggle { display:block; }
@@ -103,7 +122,7 @@
     .navbar.wrap .navbar-inner { flex-wrap:wrap; }
     .navbar.wrap .nav-links { width:100%; flex-wrap:wrap; justify-content:flex-start; }
 
-    /* Scroll */
+    /* Scroll (note: horizontal scroll clips dropdowns, so prefer collapse or wrap when using sub levels) */
     .navbar.scroll .nav-links { max-width:100%; overflow-x:auto; flex-wrap:nowrap; justify-content:flex-start; }
     .navbar.scroll .nav-links a { flex-shrink:0; white-space:nowrap; }
 }

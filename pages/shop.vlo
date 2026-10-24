@@ -1,19 +1,14 @@
 <BaseLayout title="Your Shop" auth="true">
 <div class="cart-page">
 
-  <!-- ══════════════════════════ TABS ══════════════════════════ -->
-  <div class="shop-tabs">
-    <a href="/shop?tab=customer{if step}&step={{step}}{else if inv}&step=invoice{/if}{if inv}&inv={{inv}}{/if}"
-       class="shop-tab {if tab != 'admin'}active{/if}">
-      Customer View
-    </a>
-    {if user_role == 'Admin' || user_role == 'Editor'}
-      <a href="/shop?tab=admin{if inv}&inv={{inv}}{/if}"
-         class="shop-tab {if tab == 'admin'}active{/if}">
-        Admin Management
-      </a>
-    {/if}
-  </div>
+<!-- ══════════════════════════ TABS ══════════════════════════ -->
+<div class="shop-tabs">
+  <a href="/shop?tab=customer{if step}&step={{step}}{else if inv}&step=invoice{/if}{if inv}&inv={{inv}}{/if}"
+   class="shop-tab {if tab == 'customer' || !tab}active{/if}">Customer View</a>  
+   {if user_role == 'Admin' || user_role == 'Editor'}
+    <a href="/shop?tab=admin{if inv}&inv={{inv}}{/if}" class="shop-tab {if tab == 'admin'}active{/if}">Admin Management</a>
+  {/if}
+</div>
 
   <!-- ══════════════════════════ CUSTOMER VIEW ══════════════════════════ -->
   {if tab != "admin"}
@@ -79,9 +74,12 @@
 
     <!-- ─── CART VIEW ─── -->
     {if step == "" || step == null}
-      <div data-source="/api/cart_items">
-        <div id="cart-wrapper">
-          {{ "" | ajax:",0,#cart-wrapper,html" }}
+      <!-- The AJAX wrapper -->
+      <div id="cart-wrapper">
+        {{ "" | ajax:",0,#cart-wrapper,html" }}
+        
+        <!-- The Data Source wraps EVERYTHING that uses cart_items -->
+        <div data-source="/api/cart_items">
           <div class="cart-layout">
             <section class="cart-panel">
               <div class="cart-panel-heading">
@@ -108,6 +106,7 @@
                         </div>
                       </div>
 
+                      <!-- Quantity Update -->
                       <form v-put="/api/cart_items/{{item.cart_item_id}}" class="cart-item-actions" alert="false">
                         <label for="qty-{{item.cart_item_id}}">Quantity</label>
                         <input id="qty-{{item.cart_item_id}}" type="number" name="quantity"
@@ -118,7 +117,14 @@
                       <div class="cart-line-total">
                         <span>Line total</span>
                         <strong>PKR {{item.line_total|double:2}}</strong>
-                        <button v-delete="/api/cart_items/{{item.cart_item_id}}" v-confirm="Remove this item?" class="cart-remove">Remove</button>
+                        
+                        <!-- 🔥 TINY DELETE BUTTON -->
+                        <button v-delete="/api/cart_items/{{item.cart_item_id}}" v-confirm="Remove this item?" class="cart-remove-icon" title="Remove item">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                          </svg>
+                        </button>
                       </div>
                     </article>
                   {/for}
@@ -159,7 +165,6 @@
         </div>
       </div>
     {/if}
-
     <!-- ─── CHECKOUT VIEW ─── -->
     {if step == "checkout"}
       <div data-source="/api/cart_items">
@@ -304,8 +309,9 @@
                   <p>{{ invoice.0.invoice_notes }}</p>
                 </div>
               {/if}
+  
               <div class="invoice-actions">
-                {if invoice.0.payment_status != 'paid'}
+                {if invoice.0.payment_status != 'paid' && tab == "admin" && (user_role == 'Admin' || user_role == 'Editor')}
                   <form v-put="/api/orders/{{ invoice.0.order_id }}" alert="div:#invoice-alert" style="margin:0;">
                     <input type="hidden" name="payment_status" value="paid">
                     <button type="submit" class="cart-primary" style="background:#00ff88; color:#000; border-color:#00ff88;">
@@ -316,6 +322,7 @@
                 <button type="button" onclick="window.print()" class="cart-continue">Print Invoice</button>
                 <a href="/shop?tab=customer" class="cart-continue no-ajax">Back to Shop</a>
               </div>
+              
             </section>
           {/if}
         </div>
@@ -677,7 +684,25 @@
 .cart-empty h3{margin:16px 0 8px}
 .cart-empty p{margin-bottom:24px;color:#888;font-size:.9rem}
 .invoice-status.status-paid{background:rgba(0,255,136,0.1);border-color:rgba(0,255,136,0.3);color:#00ff88}
-
+.cart-remove-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #ff6666;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.cart-remove-icon:hover {
+  background: rgba(255, 68, 68, 0.1);
+  border-color: #ff6666;
+  color: #ff4444;
+}
 /* ══════════════════════════ CHECKOUT STYLES ══════════════════════════ */
 .checkout-form{display:flex;flex-direction:column;gap:20px}
 .checkout-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}

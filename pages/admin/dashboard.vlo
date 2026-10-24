@@ -24,7 +24,7 @@
         <!-- CONTENT -->
         <main class="dashboard-content">
            <!-- ═══ STATS SUMMARY ═══ -->
-            <div data-source="/api/dash/get_dashboard_stats">
+            <div data-source="/api/admin/get_dashboard_stats">
                 {for stat in dashboard_stats}
                 <div class="stats-row">
                     <div class="stat-card">
@@ -63,7 +63,7 @@
                 
                 <!-- 1. Monthly Product Additions (Pre-aggregated Time Series) -->
                 <LineChart 
-                    source="/api/dash/get_monthly_products"
+                    source="/api/admin/get_monthly_products"
                     title="Monthly Product Additions"
                     label_column="month"
                     value_column="count"
@@ -73,7 +73,7 @@
 
                 <!-- 2. Cumulative Revenue Over Time -->
                 <LineChart 
-                    source="/api/dash/get_sales_stats"
+                    source="/api/admin/get_sales_stats"
                     title="Cumulative Revenue Growth"
                     label_column="date|qtr"
                     value_column="price"
@@ -88,7 +88,7 @@
                 
                 <!-- 3. NEW: Revenue Share by Category (Pie) -->
                 <PieChart 
-                    source="/api/dash/get_category_stats"
+                    source="/api/admin/get_category_stats"
                     title="Revenue Share by Category"
                     label_column="category"
                     value_column="total_revenue"
@@ -98,7 +98,7 @@
 
                 <!-- 4. NEW: Price Range Distribution (Pie) -->
                 <PieChart 
-                    source="/api/dash/get_price_distribution"
+                    source="/api/admin/get_price_distribution"
                     title="Price Range Distribution"
                     label_column="price_range"
                     value_column="count"
@@ -108,7 +108,7 @@
 
                 <!-- 5. NEW: Inventory Health / Stock Status (Pie) -->
                 <PieChart 
-                    source="/api/dash/get_stock_status"
+                    source="/api/admin/get_stock_status"
                     title="Inventory Health"
                     label_column="status"
                     value_column="count"
@@ -123,7 +123,7 @@
                 
                 <!-- 6. Products per Category (Horizontal Bar) -->
                 <HorizontalBarChart 
-                    source="/api/dash/get_category_stats"
+                    source="/api/admin/get_category_stats"
                     title="Products per Category"
                     label_column="category"
                     value_column="product_count"
@@ -132,7 +132,7 @@
 
                 <!-- 7. Stock Volume by Category (Lollipop) -->
                 <LollipopChart 
-                    source="/api/dash/get_products_analytics"
+                    source="/api/admin/get_products_analytics"
                     title="Stock Volume by Category"
                     label_column="category"
                     value_column="stock"

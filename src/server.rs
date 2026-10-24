@@ -1172,6 +1172,11 @@ fn build_pages_recursive(
     for entry in fs::read_dir(dir).map_err(|e| format!("Failed to read dir: {}", e))?.flatten() {
         let path = entry.path();
         if path.is_dir() { 
+            // 🔥 Skip the entire pages/api/ subtree — API definitions are
+            //    loaded by `load_api_actions`, never rendered as HTML pages.
+            if path == pages_root.join("api") {
+                continue;
+            }
             build_pages_recursive(&path, pages_root, build_dir, manifest)?; 
             continue; 
         }

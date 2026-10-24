@@ -116,17 +116,28 @@ fn load_actions_from_file(file: &Path) -> HashMap<String, ApiAction> {
                     std::borrow::Cow::Borrowed(block.as_str())
                 };
 
-            if let Ok(json) = serde_json::from_str::<Value>(&clean) {
-                if let Some(object) = json.as_object() {
-                    for (name, value) in object {
-                        if let Ok(action) = serde_json::from_value::<ApiAction>(value.clone()) {
-                            actions.insert(name.clone(), action);
+            // 🔥 NEW: Sanitize multi-line strings (Escapes raw newlines inside JSON strings)
+            let sanitized = sanitize_json_multiline(&clean);
+
+            match serde_json::from_str::<Value>(&sanitized) {
+                Ok(json) => {
+                    if let Some(object) = json.as_object() {
+                        for (name, value) in object {
+                            if let Ok(action) = serde_json::from_value::<ApiAction>(value.clone()) {
+                                actions.insert(name.clone(), action);
+                            } else {
+                                eprintln!("❌ [VLO API] Failed to parse action definition '{}' in {:?}", name, file);
+                            }
                         }
                     }
                 }
+                Err(e) => {
+                    eprintln!("❌ [VLO API] JSON Syntax Error in {:?}: {}", file, e);
+                }
             }
-        }
-    }
+        } // 👈 Added missing closing brace for `if let Some(block)`
+    } // 👈 Added missing closing brace for `if let Ok(content)`
+    
     actions
 }
 
@@ -751,16 +762,48 @@ pub async fn execute_api_sql(
     sql_template: &str,
     params: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let sql = substitute_sql_params(sql_template, params);
-    crate::vlo_debug!("Executing SQL = {}", sql);
-    let rows_json = pool
-        .fetch_all_json(&sql)
-        .await
-        .map_err(|e| format!("SQL error: {}", e))?;
+    // 1. Substitute parameters
+    let raw_sql = substitute_sql_params(sql_template, params);
+    
+    // 2. Translate dialect (SQLite -> Postgres/MySQL)
+    let translated_sql = pool.translate_sql(&raw_sql);
+    
+    crate::vlo_debug!("Executing SQL = {}", translated_sql);
+
+    // 3. Split into statements and strip manual BEGIN/COMMIT
+    let stmts: Vec<String> = translated_sql
+        .split(';')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .filter(|s| {
+            let up = s.to_uppercase();
+            !up.starts_with("BEGIN")
+                && !up.starts_with("COMMIT")
+                && !up.starts_with("ROLLBACK")
+                && !up.starts_with("SAVEPOINT")
+                && !up.starts_with("RELEASE")
+        })
+        .collect();
+
+    if stmts.is_empty() {
+        return Ok(serde_json::json!({
+            "success": true, "data": [], "affected_rows": 0
+        }));
+    }
+
+    // 4. Fast path: single statement (no transaction overhead)
+    if stmts.len() == 1 {
+        let rows = pool.fetch_all_json(&stmts[0]).await
+            .map_err(|e| format!("SQL error: {}", e))?;
+        return Ok(serde_json::json!({
+            "success": true, "data": rows, "affected_rows": rows.len()
+        }));
+    }
+
+    // 5. Multi-statement: run atomically in a transaction
+    let last_rows = pool.execute_multi_statement(&stmts).await?;
     Ok(serde_json::json!({
-        "success": true,
-        "data": rows_json,
-        "affected_rows": rows_json.len()
+        "success": true, "data": last_rows, "affected_rows": last_rows.len()
     }))
 }
 
@@ -1059,4 +1102,39 @@ fn extract_emit_markers(sql: &str) -> (String, Vec<String>) {
         rest = &after[end + 2..];
     }
     (cleaned, events)
+}
+
+/// Pre-processes the JSON block to allow raw multi-line strings.
+/// Escapes newlines inside string literals so serde_json doesn't crash.
+fn sanitize_json_multiline(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_string = false;
+    let mut escape_next = false;
+
+    for c in input.chars() {
+        if escape_next {
+            out.push(c);
+            escape_next = false;
+            continue;
+        }
+
+        match c {
+            '\\' if in_string => {
+                out.push(c);
+                escape_next = true;
+            }
+            '"' => {
+                out.push(c);
+                in_string = !in_string;
+            }
+            '\n' | '\r' if in_string => {
+                // Convert raw newlines to escaped \n
+                out.push_str("\\n");
+            }
+            _ => {
+                out.push(c);
+            }
+        }
+    }
+    out
 }

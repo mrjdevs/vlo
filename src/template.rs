@@ -1,8 +1,13 @@
 use crate::state::PROP_RE;
 use serde_json::Value;
 use std::{
+    borrow::Cow,
+    cell::OnceCell,
     collections::HashMap,
-    sync::LazyLock,
+    fmt::Write as _,
+    path::{Path, PathBuf},
+    sync::{Arc, LazyLock, RwLock},
+    time::SystemTime,
 };
 
 static RUNTIME_DATA_SOURCE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -12,136 +17,115 @@ static RUNTIME_DATA_SOURCE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-// ______________________ Quote mask ____________________
-
+// ═════════════════════════════════════════════════════════════
+// Quote mask — one linear byte pass
+//
+// mask[pos] == "pos is inside an attribute quote". Only ever queried at `{{`
+// (ASCII) positions, so scanning bytes instead of chars is equivalent: UTF-8
+// continuation bytes can never equal `<`, `>`, `"` or `'`.
+//
+// Perf: text outside tags is skipped with one byte search for the next `<`, and
+// <script>/<style> bodies are skipped with one substring search.
+// ═════════════════════════════════════════════════════════════
 fn quote_mask(template: &str) -> Vec<bool> {
-    let len = template.len();
+    let bytes = template.as_bytes();
+    let len = bytes.len();
     let mut mask = vec![false; len + 1];
 
-    // State machine:
-    //   in_raw  - inside a <script> or <style> block (skip until closing tag)
-    //   in_tag  - between `<` and `>` in normal content
-    //   quote   - if Some, inside an attribute quote
-    let mut in_raw = false;
-    let mut raw_close: &'static str = "";
-
     let mut in_tag = false;
-    let mut quote: Option<char> = None;
-
+    let mut quote: u8 = 0; // 0 = none
     let mut i = 0usize;
+
     while i < len {
-        // ── Inside <script>...</script> or <style>...</style> ──
-        if in_raw {
-            if template[i..].starts_with(raw_close) {
-                in_raw = false;
-                i += raw_close.len();
+        if !in_tag {
+            // Outside a tag every mask bit is false: jump to the next '<'.
+            match bytes[i..].iter().position(|&b| b == b'<') {
+                Some(p) => i += p,
+                None => break,
+            }
+            let rest = &template[i..];
+            if rest.starts_with("<script") || rest.starts_with("<style") {
+                let close = if rest.starts_with("<script") { "</script>" } else { "</style>" };
+                // skip the '<', then jump past the closing tag (or to the end)
+                i += 1;
+                match template[i..].find(close) {
+                    Some(p) => i += p + close.len(),
+                    None => i = len,
+                }
                 continue;
             }
-            // Advance by full UTF-8 char length, not one byte — the raw
-            i += template[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+            in_tag = true;
+            i += 1;
             continue;
         }
 
-        // ── Normal content ──
-        let ch = template[i..].chars().next().unwrap();
-        mask[i] = in_tag && quote.is_some();
-
-        if in_tag {
-            match quote {
-                Some(active) => {
-                    if ch == active {
-                        quote = None;
-                    }
-                }
-                None => match ch {
-                    '"' | '\'' => quote = Some(ch),
-                    '>' => in_tag = false,
-                    _ => {}
-                },
+        // Inside a tag
+        mask[i] = quote != 0;
+        let b = bytes[i];
+        if quote != 0 {
+            if b == quote {
+                quote = 0;
             }
-        } else if ch == '<' {
-            // Detect entry into a raw-text region before treating
-            // this as a regular tag.
-            if template[i..].starts_with("<script") {
-                in_raw = true;
-                raw_close = "</script>";
-            } else if template[i..].starts_with("<style") {
-                in_raw = true;
-                raw_close = "</style>";
-            } else {
-                in_tag = true;
+        } else {
+            match b {
+                b'"' | b'\'' => quote = b,
+                b'>' => in_tag = false,
+                _ => {}
             }
         }
-
-        i += ch.len_utf8();
+        i += 1;
     }
 
-    mask[len] = in_tag && quote.is_some();
+    mask[len] = in_tag && quote != 0;
     mask
 }
-
-/// [G4] Find `target` at quote-depth 0. Skips escaped quotes.
 
 #[inline]
 fn is_word_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
 
-/// Advance a byte cursor past one full UTF-8 character.
-/// Returns the new cursor position, or `len` if at the end.
-#[inline]
-fn advance_char(s: &str, cursor: usize) -> usize {
-    s[cursor..]
-        .chars()
-        .next()
-        .map(|c| cursor + c.len_utf8())
-        .unwrap_or(s.len())
-}
-
+/// Find `target` (ASCII) outside of quotes. Skips escaped closing quotes.
 fn find_unquoted_char(s: &str, target: char) -> Option<usize> {
-    let mut in_quotes: Option<char> = None;
+    debug_assert!(target.is_ascii());
+    let t = target as u8;
     let bytes = s.as_bytes();
+    let mut quote: u8 = 0;
 
-    for (i, ch) in s.char_indices() {
-        if let Some(q) = in_quotes {
-            if ch == q && (i == 0 || bytes[i - 1] != b'\\') {
-                in_quotes = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        if quote != 0 {
+            if b == quote && (i == 0 || bytes[i - 1] != b'\\') {
+                quote = 0;
             }
-        } else if ch == '"' || ch == '\'' {
-            in_quotes = Some(ch);
-        } else if ch == target {
+        } else if b == b'"' || b == b'\'' {
+            quote = b;
+        } else if b == t {
             return Some(i);
         }
     }
     None
 }
 
-pub fn get_nested_value(path: &str, context: &HashMap<String, Value>) -> Value {
+// ═════════════════════════════════════════════════════════════
+// Value lookup (borrowing — no deep clones)
+// ═════════════════════════════════════════════════════════════
+fn get_nested_ref<'a>(path: &str, context: &'a HashMap<String, Value>) -> Option<&'a Value> {
     let path = path.trim();
     if path.is_empty() {
-        return Value::Null;
+        return None;
     }
-
     let mut parts = path.split('.');
-    let first = parts.next().unwrap();
-    let mut current = context.get(first);
-
+    let mut current = context.get(parts.next()?)?;
     for part in parts {
-        match current {
-            Some(Value::Object(map)) => current = map.get(part),
-            Some(Value::Array(arr)) => {
-                if let Ok(idx) = part.parse::<usize>() {
-                    current = arr.get(idx);
-                } else {
-                    return Value::Null;
-                }
-            }
-            _ => return Value::Null,
-        }
+        current = match current {
+            Value::Object(map) => map.get(part)?,
+            Value::Array(arr) => arr.get(part.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
     }
-
-    current.cloned().unwrap_or(Value::Null)
+    Some(current)
 }
+
 
 // ═════════════════════════════════════════════════════════════
 // Expression language
@@ -151,10 +135,27 @@ pub fn evaluate_condition(expr: &str, context: &HashMap<String, Value>) -> bool 
     if expr.is_empty() {
         return false;
     }
+
+    // Fast path: a bare variable/literal (`item.active`, `logged_in`, `5`).
+    // No operators, quotes, parens, whitespace, and no word operator (`in`,
+    // `contains`) possible → result is just the truthiness of the operand.
+    if !expr
+        .bytes()
+        .any(|b| matches!(b, b'|' | b'&' | b'(' | b')' | b'!' | b'=' | b'<' | b'>' | b'"' | b'\'' | b' ' | b'\t' | b'\n' | b'\r'))
+        && (!expr.contains("in")
+            || (find_word_operator(expr, "in").is_none()
+                && find_word_operator(expr, "contains").is_none()))
+    {
+        return is_truthy(&resolve_operand_cow(expr, context));
+    }
+
     evaluate_or(expr, context)
 }
 
 fn evaluate_or(expr: &str, context: &HashMap<String, Value>) -> bool {
+    if !expr.contains("||") {
+        return evaluate_and(expr.trim(), context);
+    }
     for branch in split_logical(expr, "||") {
         if evaluate_and(branch.trim(), context) {
             return true;
@@ -164,6 +165,9 @@ fn evaluate_or(expr: &str, context: &HashMap<String, Value>) -> bool {
 }
 
 fn evaluate_and(expr: &str, context: &HashMap<String, Value>) -> bool {
+    if !expr.contains("&&") {
+        return evaluate_atom(expr.trim(), context);
+    }
     for branch in split_logical(expr, "&&") {
         if !evaluate_atom(branch.trim(), context) {
             return false;
@@ -198,29 +202,34 @@ fn evaluate_atom(expr: &str, context: &HashMap<String, Value>) -> bool {
         return !evaluate_atom(stripped.trim(), context);
     }
 
-    // Word operators.
-    for op in ["not in", "in", "contains"] {
-        if let Some(pos) = find_word_operator(expr, op) {
-            let left = resolve_operand(&expr[..pos], context);
-            let right = resolve_operand(&expr[pos + op.len()..], context);
-            return match op {
-                "in" => value_in(&left, &right),
-                "not in" => !value_in(&left, &right),
-                "contains" => value_in(&right, &left),
-                _ => false,
-            };
+    // Word operators ("in" is a substring of every one of them → one cheap gate).
+    if expr.contains("in") {
+        for op in ["not in", "in", "contains"] {
+            if let Some(pos) = find_word_operator(expr, op) {
+                let left = resolve_operand_cow(&expr[..pos], context);
+                let right = resolve_operand_cow(&expr[pos + op.len()..], context);
+                return match op {
+                    "in" => value_in(&left, &right),
+                    "not in" => !value_in(&left, &right),
+                    "contains" => value_in(&right, &left),
+                    _ => false,
+                };
+            }
         }
     }
 
-    for op in ["==", "!=", "<=", ">=", "<", ">"] {
-        if let Some(pos) = find_operator(expr, op) {
-            let left = resolve_operand(&expr[..pos], context);
-            let right = resolve_operand(&expr[pos + op.len()..], context);
-            return compare_values(&left, &right, op);
+    // Comparison operators: skip the six scans when no candidate byte exists.
+    if expr.bytes().any(|b| matches!(b, b'=' | b'<' | b'>')) {
+        for op in ["==", "!=", "<=", ">=", "<", ">"] {
+            if let Some(pos) = find_operator(expr, op) {
+                let left = resolve_operand_cow(&expr[..pos], context);
+                let right = resolve_operand_cow(&expr[pos + op.len()..], context);
+                return compare_values(&left, &right, op);
+            }
         }
     }
 
-    is_truthy(&resolve_operand(expr, context))
+    is_truthy(&resolve_operand_cow(expr, context))
 }
 
 fn find_word_operator(expr: &str, op: &str) -> Option<usize> {
@@ -372,33 +381,49 @@ fn find_operator(expr: &str, op: &str) -> Option<usize> {
     None
 }
 
-fn resolve_operand(operand: &str, context: &HashMap<String, Value>) -> Value {
+/// Resolves an operand without cloning when it is a variable lookup.
+fn resolve_operand_cow<'a>(operand: &str, context: &'a HashMap<String, Value>) -> Cow<'a, Value> {
     let trimmed = operand.trim();
 
-    if trimmed == "true" {
-        return Value::Bool(true);
-    }
-    if trimmed == "false" {
-        return Value::Bool(false);
-    }
-    if trimmed == "null" || trimmed == "nil" {
-        return Value::Null;
+    match trimmed {
+        "true" => return Cow::Owned(Value::Bool(true)),
+        "false" => return Cow::Owned(Value::Bool(false)),
+        "null" | "nil" => return Cow::Owned(Value::Null),
+        _ => {}
     }
 
-    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
-        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    let bytes = trimmed.as_bytes();
+    if bytes.len() >= 2
+        && ((bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\''))
     {
-        return Value::String(trimmed[1..trimmed.len() - 1].to_string());
+        return Cow::Owned(Value::String(trimmed[1..trimmed.len() - 1].to_string()));
     }
-    if let Ok(num) = trimmed.parse::<i64>() {
-        return Value::Number(num.into());
+
+    // Only strings that can start a number (incl. inf / nan spellings) are parsed.
+    if let Some(&b0) = bytes.first() {
+        if b0.is_ascii_digit() || matches!(b0, b'-' | b'+' | b'.' | b'i' | b'I' | b'n' | b'N') {
+            if let Ok(num) = trimmed.parse::<i64>() {
+                return Cow::Owned(Value::Number(num.into()));
+            }
+            if let Ok(num) = trimmed.parse::<f64>() {
+                return Cow::Owned(
+                    serde_json::Number::from_f64(num)
+                        .map(Value::Number)
+                        .unwrap_or(Value::Null),
+                );
+            }
+        }
     }
-    if let Ok(num) = trimmed.parse::<f64>() {
-        return serde_json::Number::from_f64(num)
-            .map(Value::Number)
-            .unwrap_or(Value::Null);
+
+    match get_nested_ref(trimmed, context) {
+        Some(v) => Cow::Borrowed(v),
+        None => Cow::Owned(Value::Null),
     }
-    get_nested_value(trimmed, context)
+}
+
+fn resolve_operand(operand: &str, context: &HashMap<String, Value>) -> Value {
+    resolve_operand_cow(operand, context).into_owned()
 }
 
 fn is_literal_operand(base: &str) -> bool {
@@ -459,160 +484,147 @@ pub fn is_truthy(val: &Value) -> bool {
 
 // ═════════════════════════════════════════════════════════════
 // Token scanner — single-brace blocks only [G1]
+//
+// Perf: jumps straight to the next `{` / `<` byte instead of testing every
+// byte, then compares only against that bucket's tokens.
 // ═════════════════════════════════════════════════════════════
-pub fn find_next_token(template: &str, from: usize) -> Option<(usize, &'static str)> {
-    const BRACE_TOKENS: &[&str] = &[
-        "{{", "{if ", "{for ", "{unless ", "{switch ", "{with ",
-        "{capture ", "{capture}", "{assign ", "{firstof ", "{include ",
-        "{raw}", "{comment}", "{break}", "{continue}", "{else if ", "{else}",
-        "{/if}", "{/for}", "{/unless}", "{/switch}", "{/with}", "{/capture}",
-        "{/raw}", "{/comment}", "{case ", "{default}",
-    ];
-    const ANGLE_TOKENS: &[&str] = &[
-        "<script", "</script>", "<pre>", "<pre ", "<code>", "<code ",
-        "<textarea>", "<textarea ",
-    ];
+const BRACE_TOKENS: &[&str] = &[
+    "{{", "{if ", "{for ", "{unless ", "{switch ", "{with ",
+    "{capture ", "{capture}", "{assign ", "{firstof ", "{include ",
+    "{raw}", "{comment}", "{break}", "{continue}", "{else if ", "{else}",
+    "{/if}", "{/for}", "{/unless}", "{/switch}", "{/with}", "{/capture}",
+    "{/raw}", "{/comment}", "{case ", "{default}",
+];
+const ANGLE_TOKENS: &[&str] = &[
+    "<script", "</script>", "<pre>", "<pre ", "<code>", "<code ",
+    "<textarea>", "<textarea ",
+];
 
+pub fn find_next_token(template: &str, from: usize) -> Option<(usize, &'static str)> {
     let bytes = template.as_bytes();
     let mut i = from;
     while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                let rest = &template[i..];
-                for &tok in BRACE_TOKENS {
-                    if rest.starts_with(tok) { return Some((i, tok)); }
-                }
+        let p = bytes[i..].iter().position(|&b| b == b'{' || b == b'<')?;
+        i += p;
+        let rest = &bytes[i..];
+        let bucket = if rest[0] == b'{' { BRACE_TOKENS } else { ANGLE_TOKENS };
+        for &tok in bucket {
+            if rest.starts_with(tok.as_bytes()) {
+                return Some((i, tok));
             }
-            b'<' => {
-                let rest = &template[i..];
-                for &tok in ANGLE_TOKENS {
-                    if rest.starts_with(tok) { return Some((i, tok)); }
-                }
-            }
-            _ => {}
         }
         i += 1;
     }
     None
 }
-// ═════════════════════════════════════════════════════════════
-// Block end finder
-// ═════════════════════════════════════════════════════════════
-pub fn find_block_end(template: &str, start: usize, token: &str) -> Option<(usize, usize)> {
-    let kind = token
+
+/// Extract the tag name from a token string.
+fn tag_name_of(token: &str) -> &str {
+    token
         .trim_start_matches('{')
         .trim_start_matches('#')
         .split_whitespace()
         .next()
         .unwrap_or("")
-        .trim_end_matches('}');
+        .trim_end_matches('}')
+}
 
+// ═════════════════════════════════════════════════════════════
+// Block end finder — single pass, zero allocations
+// (the old version built 3 strings per call and re-ran 3 `find`s over the
+//  remaining template on every nesting step)
+// ═════════════════════════════════════════════════════════════
+pub fn find_block_end(template: &str, start: usize, token: &str) -> Option<(usize, usize)> {
+    let kind = tag_name_of(token);
     if kind.is_empty() {
         return None;
     }
 
     // [G2] Quote-aware header end.
-    let rest = &template[start..];
-    let header_offset = find_unquoted_char(rest, '}')?;
+    let header_offset = find_unquoted_char(&template[start..], '}')?;
     let header_end = start + header_offset + 1;
 
-    // [B3] Only the space-form counts as a nested opener.
-    let open_pattern = format!("{{{kind} ");
-    let open_pattern_bare = format!("{{{kind}}}");
-    let close_pattern = format!("{{/{kind}}}");
-
+    let bytes = template.as_bytes();
+    let kb = kind.as_bytes();
     let mut depth = 1usize;
     let mut cursor = header_end;
 
-    while cursor < template.len() {
-        let next_open_a = template[cursor..].find(&open_pattern).map(|p| cursor + p);
-        let next_open_b = template[cursor..].find(&open_pattern_bare).map(|p| cursor + p);
-        let next_open = match (next_open_a, next_open_b) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (Some(a), None) => Some(a),
-            (None, Some(b)) => Some(b),
-            (None, None) => None,
-        };
-        let next_close = template[cursor..]
-            .find(&close_pattern)
-            .map(|p| cursor + p);
+    while cursor < bytes.len() {
+        let p = bytes[cursor..].iter().position(|&b| b == b'{')?;
+        let pos = cursor + p;
+        let after = &bytes[pos + 1..];
 
-        match (next_open, next_close) {
-            (Some(o), Some(c)) if o < c => {
-                depth += 1;
-                cursor = o + open_pattern.len().max(open_pattern_bare.len());
+        // {/kind}
+        if after.first() == Some(&b'/')
+            && after[1..].starts_with(kb)
+            && after.get(1 + kb.len()) == Some(&b'}')
+        {
+            depth -= 1;
+            let end = pos + kb.len() + 3;
+            if depth == 0 {
+                return Some((header_end, end));
             }
-            (_, Some(c)) => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some((header_end, c + close_pattern.len()));
-                }
-                cursor = c + close_pattern.len();
-            }
-            _ => return None,
+            cursor = end;
+            continue;
         }
+
+        // [B3] `{kind ` or `{kind}` opens a nested block
+        if after.starts_with(kb) && matches!(after.get(kb.len()), Some(b' ') | Some(b'}')) {
+            depth += 1;
+            cursor = pos + kb.len() + 2;
+            continue;
+        }
+
+        cursor = pos + 1;
     }
     None
 }
 
 // ═════════════════════════════════════════════════════════════
-// Branch splitting — single-brace only [G1]
+// Branch splitting — one pass over `{` bytes [G1]
 // ═════════════════════════════════════════════════════════════
-pub fn split_else_branches(inner: &str) -> (String, Option<String>) {
+const SPLIT_TOKENS: &[(&[u8], u8)] = &[
+    (b"{if ", 0),
+    (b"{for ", 0),
+    (b"{unless ", 0),
+    (b"{switch ", 0),
+    (b"{with ", 0),
+    (b"{capture ", 0),
+    (b"{capture}", 0),
+    (b"{/if}", 1),
+    (b"{/for}", 1),
+    (b"{/unless}", 1),
+    (b"{/switch}", 1),
+    (b"{/with}", 1),
+    (b"{/capture}", 1),
+    (b"{else if ", 2),
+    (b"{else}", 3),
+];
+
+/// Borrowing version: no String allocations.
+pub fn split_else_branches_ref(inner: &str) -> (&str, Option<&str>) {
+    let bytes = inner.as_bytes();
     let mut depth = 0usize;
     let mut cursor = 0usize;
 
-    let targets = [
-        ("{if ", 0),
-        ("{for ", 0),
-        ("{unless ", 0),
-        ("{switch ", 0),
-        ("{with ", 0),
-        ("{capture ", 0),
-        ("{capture}", 0),
-        ("{/if}", 1),
-        ("{/for}", 1),
-        ("{/unless}", 1),
-        ("{/switch}", 1),
-        ("{/with}", 1),
-        ("{/capture}", 1),
-        ("{else if ", 2),
-        ("{else}", 3),
-    ];
+    while let Some(p) = bytes[cursor..].iter().position(|&b| b == b'{') {
+        let pos = cursor + p;
+        let rest = &bytes[pos..];
 
-    while cursor < inner.len() {
-        let mut candidate: Option<(usize, u8, usize)> = None;
-        for (pat, kind) in targets {
-            if let Some(p) = inner[cursor..].find(pat) {
-                let abs = cursor + p;
-                if candidate.map(|(cp, _, _)| abs < cp).unwrap_or(true) {
-                    candidate = Some((abs, kind, pat.len()));
-                }
-            }
-        }
-        let Some((pos, kind, len)) = candidate else {
-            break;
+        let Some(&(pat, kind)) = SPLIT_TOKENS.iter().find(|(pat, _)| rest.starts_with(pat)) else {
+            cursor = pos + 1;
+            continue;
         };
+
         match kind {
-            0 => {
-                depth += 1;
-                cursor = pos + len;
-            }
-            1 => {
-                if depth > 0 {
-                    depth -= 1;
-                }
-                cursor = pos + len;
-            }
-            2 | 3 if depth == 0 => {
-                return (inner[..pos].to_string(), Some(inner[pos..].to_string()));
-            }
-            _ => {
-                cursor = pos + len;
-            }
+            0 => depth += 1,
+            1 => depth = depth.saturating_sub(1),
+            _ if depth == 0 => return (&inner[..pos], Some(&inner[pos..])),
+            _ => {}
         }
+        cursor = pos + pat.len();
     }
-    (inner.to_string(), None)
+    (inner, None)
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -624,31 +636,20 @@ pub fn evaluate_if_block(
     context: &mut HashMap<String, Value>,
     preserve_unresolved: bool,
 ) -> String {
-    if preserve_unresolved && expression_uses_runtime_query(expression) {
-        if !all_vars_resolved(expression, context) {
-            return format!("{{if {}}}{}{{/if}}", expression, inner);
-        }
+    if preserve_unresolved
+        && expression_uses_runtime_query(expression)
+        && !all_vars_resolved(expression, context)
+    {
+        return format!("{{if {}}}{}{{/if}}", expression, inner);
     }
 
-    let (true_part, else_part) = split_else_branches(inner);
+    let (true_part, else_part) = split_else_branches_ref(inner);
 
     if evaluate_condition(expression, context) {
-        return render_control_flow_internal(&true_part, context, preserve_unresolved);
+        return render_control_flow_internal(true_part, context, preserve_unresolved);
     }
 
-    if let Some(rest) = else_part {
-        if let Some(v) = rest.strip_prefix("{else if ") {
-            if let Some(end) = v.find('}') {
-                let expr = v[..end].trim();
-                let body = &v[end + 1..];
-                return evaluate_if_block(body, expr, context, preserve_unresolved);
-            }
-        }
-        let else_body = rest.strip_prefix("{else}").unwrap_or(&rest);
-        return render_control_flow_internal(else_body, context, preserve_unresolved);
-    }
-
-    String::new()
+    render_else_branch(else_part, context, preserve_unresolved)
 }
 
 pub fn evaluate_unless_block(
@@ -657,37 +658,50 @@ pub fn evaluate_unless_block(
     context: &mut HashMap<String, Value>,
     preserve_unresolved: bool,
 ) -> String {
-    let (true_part, else_part) = split_else_branches(inner);
+    let (true_part, else_part) = split_else_branches_ref(inner);
     if !evaluate_condition(expression, context) {
-        return render_control_flow_internal(&true_part, context, preserve_unresolved);
+        return render_control_flow_internal(true_part, context, preserve_unresolved);
     }
-    if let Some(rest) = else_part {
-        if let Some(v) = rest.strip_prefix("{else if ") {
-            if let Some(end) = v.find('}') {
-                let expr = v[..end].trim();
-                let body = &v[end + 1..];
-                return evaluate_if_block(body, expr, context, preserve_unresolved);
-            }
-        }
-        let else_body = rest.strip_prefix("{else}").unwrap_or(&rest);
-        return render_control_flow_internal(else_body, context, preserve_unresolved);
-    }
-    String::new()
+    render_else_branch(else_part, context, preserve_unresolved)
 }
+
+/// Shared tail of `if` / `unless`: handles `{else if …}` chains and `{else}`.
+fn render_else_branch(
+    else_part: Option<&str>,
+    context: &mut HashMap<String, Value>,
+    preserve_unresolved: bool,
+) -> String {
+    let Some(rest) = else_part else {
+        return String::new();
+    };
+    if let Some(v) = rest.strip_prefix("{else if ") {
+        if let Some(end) = v.find('}') {
+            let expr = v[..end].trim();
+            let body = &v[end + 1..];
+            return evaluate_if_block(body, expr, context, preserve_unresolved);
+        }
+    }
+    let else_body = rest.strip_prefix("{else}").unwrap_or(rest);
+    render_control_flow_internal(else_body, context, preserve_unresolved)
+}
+
 // ═════════════════════════════════════════════════════════════
 // Switch — nested-switch aware [B4]
 // ═════════════════════════════════════════════════════════════
 fn find_next_case_or_default(inner: &str, from: usize) -> Option<(usize, bool)> {
+    let bytes = inner.as_bytes();
     let mut cursor = from;
     let mut switch_depth = 0usize;
 
-    while cursor < inner.len() {
-        if inner[cursor..].starts_with("{switch ") {
+    while let Some(p) = bytes.get(cursor..)?.iter().position(|&b| b == b'{') {
+        cursor += p;
+        let rest = &inner[cursor..];
+        if rest.starts_with("{switch ") {
             switch_depth += 1;
             cursor += 8;
             continue;
         }
-        if inner[cursor..].starts_with("{/switch}") {
+        if rest.starts_with("{/switch}") {
             if switch_depth == 0 {
                 break;
             }
@@ -696,14 +710,14 @@ fn find_next_case_or_default(inner: &str, from: usize) -> Option<(usize, bool)> 
             continue;
         }
         if switch_depth == 0 {
-            if inner[cursor..].starts_with("{case ") {
+            if rest.starts_with("{case ") {
                 return Some((cursor, false));
             }
-            if inner[cursor..].starts_with("{default") {
+            if rest.starts_with("{default") {
                 return Some((cursor, true));
             }
         }
-        cursor = advance_char(inner, cursor);
+        cursor += 1;
     }
     None
 }
@@ -732,18 +746,16 @@ pub fn evaluate_switch_block(
             None => break,
         };
         let case_val_expr = inner[marker_pos + 6..header_close].trim();
-        let case_val = resolve_operand(case_val_expr, context);
+        let case_val = resolve_operand_cow(case_val_expr, context);
         let body_start = header_close + 1;
         let body_end = find_next_case_or_default(inner, body_start)
             .map(|(p, _)| p)
             .unwrap_or(inner.len());
 
-        // 🔥 FIX: exact match first, then case-insensitive fallback for strings
+        // exact match first, then case-insensitive fallback for strings
         let matched = compare_values(&subject, &case_val, "==")
-            || match (&subject, &case_val) {
-                (Value::String(a), Value::String(b)) => {
-                    a.trim().eq_ignore_ascii_case(b.trim())
-                }
+            || match (&subject, &*case_val) {
+                (Value::String(a), Value::String(b)) => a.trim().eq_ignore_ascii_case(b.trim()),
                 _ => false,
             };
 
@@ -757,14 +769,74 @@ pub fn evaluate_switch_block(
 
 // ═════════════════════════════════════════════════════════════
 // For — [B1] break/continue content preservation
+//
+// Perf vs. the old version:
+//  * the array is borrowed from the context (old: deep-cloned whole array)
+//  * ONE context clone per loop (old: one deep clone of the entire context per
+//    item). Loop variables are overwritten in place each iteration. A fresh
+//    clone per iteration is only kept when the body can mutate the context
+//    (`{assign}` / `{capture}`), so scoping behavior is unchanged.
+//  * body quote-mask computed once per loop, not once per iteration
 // ═════════════════════════════════════════════════════════════
 const BREAK_MARKER: &str = "\u{0001}VLO_BREAK\u{0001}";
 const CONTINUE_MARKER: &str = "\u{0001}VLO_CONTINUE\u{0001}";
 
-pub fn evaluate_for_block(
+#[inline]
+fn set_var(map: &mut HashMap<String, Value>, key: &str, value: Value) {
+    match map.get_mut(key) {
+        Some(slot) => *slot = value,
+        None => {
+            map.insert(key.to_string(), value);
+        }
+    }
+}
+
+/// Public API kept as-is (borrowed context); clones once and delegates.
+#[inline]
+fn body_mutates_context(text: &str) -> bool {
+    text.contains("{assign ") || text.contains("{capture")
+}
+
+/// Runs `f` with `vars` visible. If the text being rendered can write to the
+/// context (`{assign}` / `{capture}`) a private clone is used, exactly like the
+/// old code. Otherwise the vars are set in place and restored afterwards, which
+/// avoids deep-cloning the whole context.
+fn with_scope<R>(
+    ctx: &mut HashMap<String, Value>,
+    vars: Vec<(String, Value)>,
+    mutates: bool,
+    f: impl FnOnce(&mut HashMap<String, Value>) -> R,
+) -> R {
+    if mutates {
+        let mut scoped = ctx.clone();
+        for (k, v) in vars {
+            scoped.insert(k, v);
+        }
+        return f(&mut scoped);
+    }
+    let mut saved: Vec<(String, Option<Value>)> = Vec::with_capacity(vars.len());
+    for (k, v) in vars {
+        let old = ctx.insert(k.clone(), v);
+        saved.push((k, old));
+    }
+    let out = f(ctx);
+    for (k, old) in saved.into_iter().rev() {
+        match old {
+            Some(v) => {
+                ctx.insert(k, v);
+            }
+            None => {
+                ctx.remove(&k);
+            }
+        }
+    }
+    out
+}
+
+fn for_block_scoped(
     inner: &str,
     expression: &str,
-    context: &HashMap<String, Value>,
+    context: &mut HashMap<String, Value>,
     preserve_unresolved: bool,
 ) -> String {
     let mut parts = expression.split_whitespace();
@@ -776,7 +848,7 @@ pub fn evaluate_for_block(
         return String::new();
     }
 
-    let mut array_expr_parts = Vec::new();
+    let mut array_expr_parts: Vec<&str> = Vec::new();
     let mut limit: Option<usize> = None;
     let mut offset: Option<usize> = None;
     let mut reversed = false;
@@ -788,64 +860,105 @@ pub fn evaluate_for_block(
         else { array_expr_parts.push(p); }
     }
 
-    let array_expr = array_expr_parts.join(" ");
-    let mut array = get_nested_value(&array_expr, context);
-
-    // 🔥 BULLETPROOF AUTO-PARSE: Strip quotes and parse JSON arrays
-    if let Value::String(s) = &array {
-        let trimmed = s.trim();
-        let clean_s = if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2) || 
-                      (trimmed.starts_with('\'') && trimmed.ends_with('\'') && trimmed.len() >= 2) {
-            &trimmed[1..trimmed.len()-1]
-        } else {
-            trimmed
-        };
-        
-        if clean_s.starts_with('[') {
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(clean_s) {
-                array = parsed;
-            }
-        }
-    }
-
-    let (body, else_part) = split_else_branches(inner);
-
-    let Value::Array(items) = array else {
-        let mut fallback_ctx = context.clone();
-        return render_else(else_part, &mut fallback_ctx, preserve_unresolved);
+    let joined: String;
+    let array_expr: &str = if array_expr_parts.len() == 1 {
+        array_expr_parts[0]
+    } else {
+        joined = array_expr_parts.join(" ");
+        &joined
     };
-    
-    if items.is_empty() {
-        let mut fallback_ctx = context.clone();
-        return render_else(else_part, &mut fallback_ctx, preserve_unresolved);
-    }
-
-    let mut items_all: Vec<Value> = items;
-    if reversed { items_all.reverse(); }
 
     let off = offset.unwrap_or(0);
-    let lim = limit.unwrap_or(items_all.len());
-    let items_to_iter: Vec<Value> = items_all.into_iter().skip(off).take(lim).collect();
 
-    if items_to_iter.is_empty() {
-        let mut fallback_ctx = context.clone();
-        return render_else(else_part, &mut fallback_ctx, preserve_unresolved);
+    // Only the selected items are cloned (old: whole array, then again per item).
+    let selected: Vec<Value> = {
+        let looked = get_nested_ref(array_expr, context);
+
+        // Auto-parse: strip quotes and parse JSON arrays stored as strings
+        let parsed: Option<Value> = match looked {
+            Some(Value::String(s)) => {
+                let trimmed = s.trim();
+                let clean_s = if trimmed.len() >= 2
+                    && ((trimmed.starts_with('"') && trimmed.ends_with('"'))
+                        || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
+                {
+                    &trimmed[1..trimmed.len() - 1]
+                } else {
+                    trimmed
+                };
+                if clean_s.starts_with('[') {
+                    serde_json::from_str::<Value>(clean_s).ok()
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        match parsed.as_ref().or(looked) {
+            Some(Value::Array(items)) => {
+                let lim = limit.unwrap_or(items.len());
+                if reversed {
+                    items.iter().rev().skip(off).take(lim).cloned().collect()
+                } else {
+                    items.iter().skip(off).take(lim).cloned().collect()
+                }
+            }
+            _ => Vec::new(),
+        }
+    };
+
+    let (body, else_part) = split_else_branches_ref(inner);
+
+    if selected.is_empty() {
+        return render_else(else_part, context, preserve_unresolved);
     }
 
-    let count = items_to_iter.len();
+    let count = selected.len();
     let mut result = String::with_capacity(body.len() * count);
 
-    for (idx, item) in items_to_iter.into_iter().enumerate() {
-        let mut child = context.clone();
-        child.insert(item_var.to_string(), item);
-        child.insert("@index".to_string(), Value::Number(((idx + off) as i64).into()));
-        child.insert("@number".to_string(), Value::Number(((idx + off + 1) as i64).into()));
-        child.insert("@first".to_string(), Value::Bool(idx == 0));
-        child.insert("@last".to_string(), Value::Bool(idx + 1 == count));
-        child.insert("@count".to_string(), Value::Number((count as i64).into()));
-        child.insert("@remaining".to_string(), Value::Number(((count - idx - 1) as i64).into()));
+    let body_mutates = body_mutates_context(body);
+    let body_mask: Option<Vec<bool>> = if body.contains("{{") { Some(quote_mask(body)) } else { None };
 
-        let rendered = render_control_flow_internal(&body, &mut child, preserve_unresolved);
+    // Loop variables are set in place and restored afterwards (unless the body
+    // mutates the context, in which case each iteration gets a fresh clone).
+    const LOOP_KEYS: [&str; 6] = ["@index", "@number", "@first", "@last", "@count", "@remaining"];
+    let saved: Option<Vec<Option<Value>>> = if body_mutates {
+        None
+    } else {
+        let mut v = Vec::with_capacity(7);
+        v.push(context.get(item_var).cloned());
+        for k in LOOP_KEYS {
+            v.push(context.get(k).cloned());
+        }
+        Some(v)
+    };
+
+    let mut owned: Option<HashMap<String, Value>>;
+
+    for (idx, item) in selected.into_iter().enumerate() {
+        let scope: &mut HashMap<String, Value> = if body_mutates {
+            owned = Some(context.clone());
+            owned.as_mut().unwrap()
+        } else {
+            &mut *context
+        };
+
+        set_var(scope, item_var, item);
+        set_var(scope, "@index", Value::Number(((idx + off) as i64).into()));
+        set_var(scope, "@number", Value::Number(((idx + off + 1) as i64).into()));
+        set_var(scope, "@first", Value::Bool(idx == 0));
+        set_var(scope, "@last", Value::Bool(idx + 1 == count));
+        set_var(scope, "@count", Value::Number((count as i64).into()));
+        set_var(scope, "@remaining", Value::Number(((count - idx - 1) as i64).into()));
+
+        let rendered = render_walk(body, body_mask.as_deref(), scope, preserve_unresolved);
+
+        // Markers start with 0x01: skip the two searches when none is present.
+        if !rendered.as_bytes().contains(&1) {
+            result.push_str(&rendered);
+            continue;
+        }
 
         let break_pos = rendered.find(BREAK_MARKER);
         let continue_pos = rendered.find(CONTINUE_MARKER);
@@ -856,6 +969,19 @@ pub fn evaluate_for_block(
             (Some(bp), None) => { result.push_str(&rendered[..bp]); break; }
             (None, Some(cp)) => { result.push_str(&rendered[..cp]); continue; }
             (None, None) => result.push_str(&rendered),
+        }
+    }
+
+    // Restore whatever the loop variables were before the loop.
+    if let Some(saved) = saved {
+        let mut it = saved.into_iter();
+        let mut restore = |key: &str, old: Option<Value>| match old {
+            Some(v) => { context.insert(key.to_string(), v); }
+            None => { context.remove(key); }
+        };
+        restore(item_var, it.next().unwrap());
+        for k in LOOP_KEYS {
+            restore(k, it.next().unwrap());
         }
     }
     result
@@ -962,19 +1088,21 @@ fn parse_kv_pairs(raw: &str) -> Vec<(String, String)> {
 fn evaluate_with(
     inner: &str,
     expr: &str,
-    context: &HashMap<String, Value>,
+    context: &mut HashMap<String, Value>,
     preserve_unresolved: bool,
 ) -> String {
-    let mut child = context.clone();
-    for (k, v) in parse_kv_pairs(expr) {
-        child.insert(k, Value::String(v));
-    }
-    render_control_flow_internal(inner, &mut child, preserve_unresolved)
+    let vars: Vec<(String, Value)> = parse_kv_pairs(expr)
+        .into_iter()
+        .map(|(k, v)| (k, Value::String(v)))
+        .collect();
+    with_scope(context, vars, body_mutates_context(inner), |c| {
+        render_control_flow_internal(inner, c, preserve_unresolved)
+    })
 }
 
 fn evaluate_firstof(expr: &str, context: &HashMap<String, Value>) -> String {
     for part in expr.split_whitespace() {
-        let val = resolve_operand(part, context);
+        let val = resolve_operand_cow(part, context);
         if is_truthy(&val) {
             return format_value(&val);
         }
@@ -982,7 +1110,41 @@ fn evaluate_firstof(expr: &str, context: &HashMap<String, Value>) -> String {
     String::new()
 }
 
-fn evaluate_include(expr: &str, context: &HashMap<String, Value>, preserve_unresolved: bool) -> String {
+// Includes are cached by path + mtime: one `stat` per include instead of
+// exists() x3 + read + server-block strip. Edits are still picked up instantly.
+static INCLUDE_CACHE: LazyLock<RwLock<HashMap<PathBuf, (SystemTime, Arc<str>)>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+fn load_include(path: &Path) -> Option<Arc<str>> {
+    let meta = std::fs::metadata(path).ok()?; // None → candidate doesn't exist
+    let mtime = meta.modified().ok();
+
+    if let Some(mt) = mtime {
+        if let Ok(cache) = INCLUDE_CACHE.read() {
+            if let Some((t, content)) = cache.get(path) {
+                if *t == mt {
+                    return Some(Arc::clone(content));
+                }
+            }
+        }
+    }
+
+    let mut content = std::fs::read_to_string(path).unwrap_or_default();
+    if let Some(start) = content.find("<script server>") {
+        if let Some(end) = content[start..].find("</script>") {
+            content.replace_range(start..start + end + 9, "");
+        }
+    }
+    let content: Arc<str> = Arc::from(content);
+    if let Some(mt) = mtime {
+        if let Ok(mut cache) = INCLUDE_CACHE.write() {
+            cache.insert(path.to_path_buf(), (mt, Arc::clone(&content)));
+        }
+    }
+    Some(content)
+}
+
+fn evaluate_include(expr: &str, context: &mut HashMap<String, Value>, preserve_unresolved: bool) -> String {
     let mut parts = expr.split_whitespace();
     let Some(path_expr) = parts.next() else { return String::new(); };
     let path = path_expr.trim_matches('"').trim_matches('\'');
@@ -993,83 +1155,55 @@ fn evaluate_include(expr: &str, context: &HashMap<String, Value>, preserve_unres
         root.join("components").join(format!("{}.vlo", path)),
         root.join("partials").join(format!("{}.vlo", path)),
     ];
-    let Some(file_path) = candidates.into_iter().find(|p| p.exists()) else { return String::new(); };
+    let Some(content) = candidates.iter().find_map(|p| load_include(p)) else {
+        return String::new();
+    };
 
-    let mut content = match std::fs::read_to_string(&file_path) { Ok(c) => c, Err(_) => return String::new() };
-    if let Some(start) = content.find("<script server>") {
-        if let Some(end) = content[start..].find("</script>") { content.replace_range(start..start + end + 9, ""); }
-    }
-
-    let mut child = context.clone();
-    if let Some(with_idx) = expr.find(" with ") {
-        for (k, v) in parse_kv_pairs(&expr[with_idx + 6..]) { child.insert(k, Value::String(v)); }
-    }
-    render_control_flow_internal(&content, &mut child, preserve_unresolved)
+    let vars: Vec<(String, Value)> = match expr.find(" with ") {
+        Some(with_idx) => parse_kv_pairs(&expr[with_idx + 6..])
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect(),
+        None => Vec::new(),
+    };
+    with_scope(context, vars, body_mutates_context(&content), |c| {
+        render_control_flow_internal(&content, c, preserve_unresolved)
+    })
 }
 
 fn render_else(
-    else_part: Option<String>,
+    else_part: Option<&str>,
     context: &mut HashMap<String, Value>,
     preserve_unresolved: bool,
 ) -> String {
-    else_part
-        .map(|v| {
-            render_control_flow_internal(
-                v.strip_prefix("{else}").unwrap_or(&v),
-                context,
-                preserve_unresolved,
-            )
-        })
-        .unwrap_or_default()
+    let Some(v) = else_part else {
+        return String::new();
+    };
+    let body = v.strip_prefix("{else}").unwrap_or(v);
+    // The old code always rendered the else branch in a cloned scope.
+    with_scope(context, Vec::new(), body_mutates_context(body), |c| {
+        render_control_flow_internal(body, c, preserve_unresolved)
+    })
 }
 
 // ═════════════════════════════════════════════════════════════
 // Runtime query preservation
 // ═════════════════════════════════════════════════════════════
+
+/// Identifier-like words of an expression (same split as the old char loop).
+#[inline]
+fn expr_words(expression: &str) -> impl Iterator<Item = &str> {
+    expression
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+}
+
 fn expression_uses_runtime_query(expression: &str) -> bool {
-    let mut current = String::new();
-    for ch in expression.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            current.push(ch);
-            continue;
-        }
-        if !current.is_empty() {
-            if is_runtime_var(&current) {
-                return true;
-            }
-            current.clear();
-        }
-    }
-    !current.is_empty() && is_runtime_var(&current)
+    expr_words(expression).any(is_runtime_var)
 }
 
 fn all_vars_resolved(expression: &str, context: &HashMap<String, Value>) -> bool {
-    let mut current = String::new();
-    for ch in expression.chars() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
-            current.push(ch);
-        } else {
-            if !current.is_empty() && is_runtime_var(&current) && !context.contains_key(&current) {
-                return false;
-            }
-            current.clear();
-        }
-    }
-    if !current.is_empty() && is_runtime_var(&current) && !context.contains_key(&current) {
-        return false;
-    }
-    true
-}
-
-/// Extract the tag name from a token string.
-fn tag_name_of(token: &str) -> &str {
-    token
-        .trim_start_matches('{')
-        .trim_start_matches('#')
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .trim_end_matches('}')
+    expr_words(expression).all(|w| !is_runtime_var(w) || context.contains_key(w))
 }
 
 // [B6] Exact tag matching instead of substring.
@@ -1117,6 +1251,41 @@ fn block_uses_runtime_query(block: &str) -> bool {
     false
 }
 
+/// One-pass marker restore (old code: one full `replace` pass per marker).
+fn restore_markers(template: &str, prefix: &str, values: &[String]) -> String {
+    if values.is_empty() || !template.contains(prefix) {
+        return template.to_string();
+    }
+    let mut out = String::with_capacity(template.len());
+    let mut cursor = 0usize;
+    while let Some(rel) = template[cursor..].find(prefix) {
+        let start = cursor + rel;
+        out.push_str(&template[cursor..start]);
+        let digits_start = start + prefix.len();
+        let digits_len = template[digits_start..]
+            .bytes()
+            .take_while(u8::is_ascii_digit)
+            .count();
+        let digits_end = digits_start + digits_len;
+        let replacement = (digits_len > 0 && template[digits_end..].starts_with("__"))
+            .then(|| template[digits_start..digits_end].parse::<usize>().ok())
+            .flatten()
+            .and_then(|i| values.get(i));
+        match replacement {
+            Some(v) => {
+                out.push_str(v);
+                cursor = digits_end + 2;
+            }
+            None => {
+                out.push_str(prefix);
+                cursor = digits_start;
+            }
+        }
+    }
+    out.push_str(&template[cursor..]);
+    out
+}
+
 pub fn preserve_runtime_query_interpolations(template: &str) -> (String, Vec<String>) {
     let mut result = String::with_capacity(template.len());
     let mut values = Vec::new();
@@ -1137,7 +1306,7 @@ pub fn preserve_runtime_query_interpolations(template: &str) -> (String, Vec<Str
         if is_runtime_var(expression) {
             let index = values.len();
             values.push(template[start..end + 2].to_string());
-            result.push_str(&format!("__VLO_RUNTIME_QUERY_INTERPOLATION_{}__", index));
+            let _ = write!(result, "__VLO_RUNTIME_QUERY_INTERPOLATION_{}__", index);
         } else {
             result.push_str(&template[start..end + 2]);
         }
@@ -1147,14 +1316,7 @@ pub fn preserve_runtime_query_interpolations(template: &str) -> (String, Vec<Str
 }
 
 pub fn restore_runtime_query_interpolations(template: &str, values: &[String]) -> String {
-    let mut result = template.to_string();
-    for (index, value) in values.iter().enumerate() {
-        result = result.replace(
-            &format!("__VLO_RUNTIME_QUERY_INTERPOLATION_{}__", index),
-            value,
-        );
-    }
-    result
+    restore_markers(template, "__VLO_RUNTIME_QUERY_INTERPOLATION_", values)
 }
 
 pub fn preserve_runtime_query_blocks(template: &str) -> (String, Vec<String>) {
@@ -1218,7 +1380,7 @@ pub fn preserve_runtime_query_blocks(template: &str) -> (String, Vec<String>) {
         if expression_uses_runtime_query(expression) || block_uses_runtime_query(block) {
             let index = blocks.len();
             blocks.push(block.to_string());
-            result.push_str(&format!("__VLO_RUNTIME_QUERY_BLOCK_{}__", index));
+            let _ = write!(result, "__VLO_RUNTIME_QUERY_BLOCK_{}__", index);
             cursor = block_end;
         } else {
             result.push_str(&template[pos..header_end + 1]);
@@ -1229,17 +1391,14 @@ pub fn preserve_runtime_query_blocks(template: &str) -> (String, Vec<String>) {
 }
 
 pub fn restore_runtime_query_blocks(template: &str, blocks: &[String]) -> String {
-    let mut result = template.to_string();
-    for (index, block) in blocks.iter().enumerate() {
-        result = result.replace(&format!("__VLO_RUNTIME_QUERY_BLOCK_{}__", index), block);
-    }
-    result
+    restore_markers(template, "__VLO_RUNTIME_QUERY_BLOCK_", blocks)
 }
 
 pub fn preserve_runtime_data_sources(template: &str) -> (String, Vec<String>) {
     let mut result = String::with_capacity(template.len());
     let mut blocks = Vec::new();
     let mut last_end = 0usize;
+    let bytes = template.as_bytes();
 
     for cap in RUNTIME_DATA_SOURCE_RE.captures_iter(template) {
         let full = cap.get(0).unwrap();
@@ -1247,60 +1406,59 @@ pub fn preserve_runtime_data_sources(template: &str) -> (String, Vec<String>) {
             continue;
         }
         let tag = cap.get(1).unwrap().as_str();
-        let close = format!("</{}>", tag);
-        let open = format!("<{}", tag);
+        let (tb, tl) = (tag.as_bytes(), tag.len());
+
+        // Single pass over '<' bytes: `</tag>` closes, `<tag[ >/]` opens.
         let mut depth = 1usize;
         let mut cursor = full.end();
         let mut close_start = None;
 
-        while cursor < template.len() {
-            let next_open = template[cursor..].find(&open).map(|p| cursor + p);
-            let next_close = template[cursor..].find(&close).map(|p| cursor + p);
-            match (next_open, next_close) {
-                (Some(o), Some(c)) if o < c => {
-                    let after_open = o + open.len();
-                    if template
-                        .get(after_open..)
-                        .map(|v| v.starts_with('>') || v.starts_with(' ') || v.starts_with('/'))
-                        .unwrap_or(false)
-                    {
-                        depth += 1;
-                    }
-                    cursor = after_open;
+        while cursor < bytes.len() {
+            let Some(p) = bytes[cursor..].iter().position(|&b| b == b'<') else {
+                break;
+            };
+            let pos = cursor + p;
+            let after = &bytes[pos + 1..];
+
+            if after.first() == Some(&b'/')
+                && after[1..].starts_with(tb)
+                && after.get(1 + tl) == Some(&b'>')
+            {
+                depth -= 1;
+                if depth == 0 {
+                    close_start = Some(pos);
+                    break;
                 }
-                (_, Some(c)) => {
-                    depth -= 1;
-                    if depth == 0 {
-                        close_start = Some(c);
-                        break;
-                    }
-                    cursor = c + close.len();
-                }
-                _ => break,
+                cursor = pos + tl + 3;
+                continue;
             }
+            if after.starts_with(tb) {
+                if matches!(after.get(tl), Some(b'>') | Some(b' ') | Some(b'/')) {
+                    depth += 1;
+                }
+                cursor = pos + 1 + tl;
+                continue;
+            }
+            cursor = pos + 1;
         }
         let Some(close_pos) = close_start else {
             continue;
         };
 
+        let close_len = tl + 3;
         result.push_str(&template[last_end..full.end()]);
         let inner = &template[full.end()..close_pos];
         let index = blocks.len();
         blocks.push(inner.to_string());
-        result.push_str(&format!("__VLO_RUNTIME_DATA_SOURCE_{}__", index));
-        result.push_str(&close);
-        last_end = close_pos + close.len();
+        let _ = write!(result, "__VLO_RUNTIME_DATA_SOURCE_{}__</{}>", index, tag);
+        last_end = close_pos + close_len;
     }
     result.push_str(&template[last_end..]);
     (result, blocks)
 }
 
 pub fn restore_runtime_data_sources(template: &str, blocks: &[String]) -> String {
-    let mut result = template.to_string();
-    for (index, block) in blocks.iter().enumerate() {
-        result = result.replace(&format!("__VLO_RUNTIME_DATA_SOURCE_{}__", index), block);
-    }
-    result
+    restore_markers(template, "__VLO_RUNTIME_DATA_SOURCE_", blocks)
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -1310,7 +1468,7 @@ pub fn render_control_flow(template: &str, context: &HashMap<String, Value>) -> 
     let preserve = crate::state::is_building();
     let mut local_ctx = context.clone();
     let out = render_control_flow_internal(template, &mut local_ctx, preserve);
-    strip_flow_markers(&out)
+    strip_flow_markers(out)
 }
 
 pub fn render_control_flow_for_build(
@@ -1319,39 +1477,39 @@ pub fn render_control_flow_for_build(
 ) -> String {
     let (protected, blocks) = preserve_runtime_query_blocks(template);
 
-    let mut protected_interpolations = Vec::new();
-    let mut source = protected;
+    // Build the protected text in one pass (old: replace_range in a loop = O(n·k)).
+    let mut protected_interpolations: Vec<String> = Vec::new();
+    let mut source = String::with_capacity(protected.len());
     let mut cursor = 0usize;
 
-    while let Some(start_rel) = source[cursor..].find("{{") {
+    while let Some(start_rel) = protected[cursor..].find("{{") {
         let start = cursor + start_rel;
-        let Some(end_rel) = source[start + 2..].find("}}") else {
+        let Some(end_rel) = protected[start + 2..].find("}}") else {
             break;
         };
         let end = start + 2 + end_rel;
-        let expression = source[start + 2..end].trim();
-        if expression.contains('.') || is_runtime_var(expression) {
+        let expression = protected[start + 2..end].trim();
+
+        // Only protect the base variable, not modifier arguments
+        let base_key = expression.split('|').next().unwrap_or(expression).trim();
+        source.push_str(&protected[cursor..start]);
+        if base_key.contains('.') || is_runtime_var(base_key) {
             let index = protected_interpolations.len();
-            protected_interpolations.push(source[start..end + 2].to_string());
-            let marker = format!("__VLO_RUNTIME_INTERPOLATION_{}__", index);
-            source.replace_range(start..end + 2, &marker);
-            cursor = start + marker.len();
+            protected_interpolations.push(protected[start..end + 2].to_string());
+            let _ = write!(source, "__VLO_RUNTIME_INTERPOLATION_{}__", index);
         } else {
-            cursor = end + 2;
+            source.push_str(&protected[start..end + 2]);
         }
+        cursor = end + 2;
     }
+    source.push_str(&protected[cursor..]);
 
     let mut local_ctx = context.clone();
-    let mut rendered = render_control_flow_internal(&source, &mut local_ctx, true);
+    let rendered = render_control_flow_internal(&source, &mut local_ctx, true);
 
-    for (index, interpolation) in protected_interpolations.iter().enumerate() {
-        let marker = format!("__VLO_RUNTIME_INTERPOLATION_{}__", index);
-        if rendered.contains(&marker) {
-            rendered = rendered.replace(&marker, interpolation);
-        }
-    }
+    let rendered = restore_markers(&rendered, "__VLO_RUNTIME_INTERPOLATION_", &protected_interpolations);
     let restored = restore_runtime_query_blocks(&rendered, &blocks);
-    strip_flow_markers(&restored)
+    strip_flow_markers(restored)
 }
 
 pub fn render_interpolations(template: &str, context: &HashMap<String, Value>) -> String {
@@ -1359,7 +1517,7 @@ pub fn render_interpolations(template: &str, context: &HashMap<String, Value>) -
         return template.to_string();
     }
     let preserve = crate::state::is_building();
-    let in_quotes = quote_mask(template);
+    let in_quotes: OnceCell<Vec<bool>> = OnceCell::new();
 
     PROP_RE
         .replace_all(template, |captures: &regex::Captures| {
@@ -1371,28 +1529,52 @@ pub fn render_interpolations(template: &str, context: &HashMap<String, Value>) -
                 return full.as_str().to_string();
             }
 
-            let value = if let Some((base, chain)) = key.split_once('|') {
-                crate::modifier::apply(resolve_operand(base.trim(), context), chain)
+            let quoted = in_quotes.get_or_init(|| quote_mask(template))[full.start()];
+            let mut out = String::new();
+            if let Some((base, chain)) = key.split_once('|') {
+                let value = crate::modifier::apply(resolve_operand(base.trim(), context), chain);
+                if quoted { push_attr_escaped(&mut out, &value) } else { out = value }
             } else {
-                format_value(&resolve_operand(key, context))
-            };
-
-            if in_quotes[full.start()] {
-                escape_html_attribute(&value)
-            } else {
-                value
+                let value = resolve_operand_cow(key, context);
+                if quoted {
+                    let mut tmp = String::new();
+                    append_value(&mut tmp, &value);
+                    push_attr_escaped(&mut out, &tmp);
+                } else {
+                    append_value(&mut out, &value);
+                }
             }
+            out
         })
         .into_owned()
 }
 
+/// Appends `format_value(val)` without the intermediate String.
+#[inline]
+fn append_value(out: &mut String, val: &Value) {
+    match val {
+        Value::Null => {}
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Number(n) => {
+            let _ = write!(out, "{}", n);
+        }
+        Value::String(s) => out.push_str(s),
+        other => {
+            if let Ok(s) = serde_json::to_string(other) {
+                out.push_str(&s);
+            }
+        }
+    }
+}
+
 pub fn format_value(val: &Value) -> String {
     match val {
-        Value::Null => String::new(),
-        Value::Bool(b) => b.to_string(),
-        Value::Number(n) => n.to_string(),
         Value::String(s) => s.clone(),
-        _ => serde_json::to_string(val).unwrap_or_default(),
+        other => {
+            let mut s = String::new();
+            append_value(&mut s, other);
+            s
+        }
     }
 }
 
@@ -1410,13 +1592,26 @@ pub fn clean_empty_tags(html: &str) -> String {
     result
 }
 
+/// Single-pass attribute escaping (old: five chained `replace` allocations).
+#[inline]
+fn push_attr_escaped(out: &mut String, value: &str) {
+    out.reserve(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            c => out.push(c),
+        }
+    }
+}
+
 pub fn escape_html_attribute(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+    let mut out = String::new();
+    push_attr_escaped(&mut out, value);
+    out
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -1427,9 +1622,30 @@ fn render_control_flow_internal(
     context: &mut HashMap<String, Value>,
     preserve_unresolved: bool,
 ) -> String {
+    render_walk(template, None, context, preserve_unresolved)
+}
+
+#[inline]
+fn raw_close_tag(token: &str) -> &'static str {
+    match token {
+        "<script" => "</script>",
+        "<pre>" | "<pre " => "</pre>",
+        "<code>" | "<code " => "</code>",
+        _ => "</textarea>",
+    }
+}
+
+/// `pre_mask` lets a loop compute the body's quote mask once; otherwise the
+/// mask is built lazily — only if the template actually contains a `{{`.
+fn render_walk(
+    template: &str,
+    pre_mask: Option<&[bool]>,
+    context: &mut HashMap<String, Value>,
+    preserve_unresolved: bool,
+) -> String {
     let mut result = String::with_capacity(template.len());
     let mut cursor = 0usize;
-    let in_quotes = quote_mask(template);
+    let lazy_mask: OnceCell<Vec<bool>> = OnceCell::new();
 
     while cursor < template.len() {
         let Some((pos, token)) = find_next_token(template, cursor) else {
@@ -1441,10 +1657,9 @@ fn render_control_flow_internal(
         }
 
         if matches!(token, "<script" | "<pre>" | "<pre " | "<code>" | "<code " | "<textarea>" | "<textarea ") {
-            let tag_name = token.trim_start_matches('<').trim_end_matches(|c: char| !c.is_ascii_alphabetic());
-            let close_tag = format!("</{}>", tag_name);
+            let close_tag = raw_close_tag(token);
             let search_start = template[pos..].find('>').map(|i| pos + i + 1).unwrap_or(pos);
-            if let Some(end_rel) = template[search_start..].find(&close_tag) {
+            if let Some(end_rel) = template[search_start..].find(close_tag) {
                 let end = search_start + end_rel + close_tag.len();
                 result.push_str(&template[pos..end]);
                 cursor = end;
@@ -1458,7 +1673,10 @@ fn render_control_flow_internal(
             if let Some(end_rel) = template[pos + 2..].find("}}") {
                 let end = pos + 2 + end_rel;
                 let key = template[pos + 2..end].trim();
-                let base_key = key.split('|').next().unwrap_or(key).trim();
+                let (base_key, chain) = match key.split_once('|') {
+                    Some((b, c)) => (b.trim(), Some(c)),
+                    None => (key, None),
+                };
 
                 if preserve_unresolved
                     && !is_literal_operand(base_key)
@@ -1469,14 +1687,28 @@ fn render_control_flow_internal(
                     continue;
                 }
 
-                let value = if let Some((base, chain)) = key.split_once('|') {
-                    crate::modifier::apply(resolve_operand(base.trim(), context), chain)
-                } else {
-                    format_value(&resolve_operand(key, context))
+                let mask: &[bool] = match pre_mask {
+                    Some(m) => m,
+                    None => lazy_mask.get_or_init(|| quote_mask(template)),
                 };
+                let quoted = mask[pos];
 
-                let final_value = if in_quotes[pos] { escape_html_attribute(&value) } else { value };
-                result.push_str(&final_value);
+                match chain {
+                    Some(chain) => {
+                        let value = crate::modifier::apply(resolve_operand(base_key, context), chain);
+                        if quoted { push_attr_escaped(&mut result, &value) } else { result.push_str(&value) }
+                    }
+                    None => {
+                        let value = resolve_operand_cow(key, context);
+                        if quoted {
+                            let mut tmp = String::new();
+                            append_value(&mut tmp, &value);
+                            push_attr_escaped(&mut result, &tmp);
+                        } else {
+                            append_value(&mut result, &value);
+                        }
+                    }
+                }
                 cursor = end + 2;
             } else {
                 result.push_str(&template[pos..]);
@@ -1503,8 +1735,8 @@ fn render_control_flow_internal(
             "assign" => { evaluate_assign(expression, context); cursor = header_end; continue; }
             "include" => { result.push_str(&evaluate_include(expression, context, preserve_unresolved)); cursor = header_end; continue; }
             "raw" | "comment" => {
-                let close_tag = format!("{{/{}}}", tag);
-                if let Some(end_rel) = template[header_end..].find(&close_tag) {
+                let close_tag = if tag == "raw" { "{/raw}" } else { "{/comment}" };
+                if let Some(end_rel) = template[header_end..].find(close_tag) {
                     let end = header_end + end_rel + close_tag.len();
                     if tag == "raw" { result.push_str(&template[header_end..header_end + end_rel]); }
                     cursor = end;
@@ -1532,29 +1764,24 @@ fn render_control_flow_internal(
             continue;
         };
 
-        let rendered = match tag {
-            "if" => evaluate_if_block(inner, expression, context, preserve_unresolved),
-            "for" => evaluate_for_block(inner, expression, context, preserve_unresolved),
-            "unless" => evaluate_unless_block(inner, expression, context, preserve_unresolved),
-            "switch" => evaluate_switch_block(inner, expression, context, preserve_unresolved),
-            "capture" => {
-                evaluate_capture(inner, expression, context, preserve_unresolved);
-                String::new()
-            }
-            "with" => evaluate_with(inner, expression, context, preserve_unresolved),
-            _ => String::new(),
-        };
-
-        result.push_str(&rendered);
+        match tag {
+            "if" => result.push_str(&evaluate_if_block(inner, expression, context, preserve_unresolved)),
+            "for" => result.push_str(&for_block_scoped(inner, expression, context, preserve_unresolved)),
+            "unless" => result.push_str(&evaluate_unless_block(inner, expression, context, preserve_unresolved)),
+            "switch" => result.push_str(&evaluate_switch_block(inner, expression, context, preserve_unresolved)),
+            "capture" => evaluate_capture(inner, expression, context, preserve_unresolved),
+            "with" => result.push_str(&evaluate_with(inner, expression, context, preserve_unresolved)),
+            _ => {}
+        }
         cursor = block_end;
     }
 
     result
 }
 
-fn strip_flow_markers(s: &str) -> String {
-    if !s.contains(BREAK_MARKER) && !s.contains(CONTINUE_MARKER) {
-        return s.to_string();
+fn strip_flow_markers(s: String) -> String {
+    if !s.as_bytes().contains(&1) {
+        return s;
     }
     s.replace(BREAK_MARKER, "").replace(CONTINUE_MARKER, "")
 }
@@ -1570,6 +1797,7 @@ fn is_runtime_var(var: &str) -> bool {
         "flash_messages" | "flash_variant" | "flash_icon" | "flash_title" | "flash_description" |
         "variant" | "icon" | "title" | "description" | "duration" |
         "csrf_token" | "auth_identifier_field" | "auth_password_field" |
-        "data" | "meta" | "config"
+        "data" | "meta" | "config"  |
+        "tab" | "step" | "inv"
     )
 }

@@ -2,7 +2,19 @@ use crate::features::{Feature, is_enabled};
 use crate::state::get_project_root;
 use serde_json::Value;
 use sqlx::{Column, Row, ValueRef, TypeInfo};
-use std::{fs, path::Path, sync::OnceLock};
+use std::{fs, path::Path, sync::{LazyLock, OnceLock}};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DbColumnType {
+    Integer,
+    Float,
+    Boolean,
+    Text,
+    DateTime,
+    Json,
+    Blob,
+    Unknown,
+}
 
 // ===========================================================================
 // 1. DB POOL & SINGLE SOURCE OF TRUTH
@@ -44,118 +56,191 @@ fn resolve_driver(url: &str) -> String {
 }
 
 // ===========================================================================
-// 3. ROW TO JSON MACRO (Type-hint optimized & edge-case hardened)
+// 3. ROW TO JSON MACROS (Type-hint optimized & edge-case hardened)
 // ===========================================================================
-macro_rules! convert_row_to_json {
+
+/// Classifies the columns ONCE per query, returning a Vec of parsed types.
+#[macro_export]
+macro_rules! get_column_types {
     ($row:expr) => {{
-        
+        let mut types = Vec::with_capacity($row.columns().len());
+
+        for column in $row.columns() {
+            let type_name = column.type_info().name().to_lowercase();
+            let col_type = if type_name.contains("int")
+                || type_name.contains("serial")
+                || type_name.contains("int2")
+                || type_name.contains("int4")
+                || type_name.contains("int8")
+                || type_name.contains("bigint")
+                || type_name.contains("smallint")
+                || type_name.contains("tinyint")
+                || type_name.contains("mediumint")
+                || type_name.contains("unsigned")
+                || type_name.contains("year")
+            {
+                $crate::database::DbColumnType::Integer
+            } else if type_name.contains("float")
+                || type_name.contains("double")
+                || type_name.contains("real")
+                || type_name.contains("numeric")
+                || type_name.contains("decimal")
+            {
+                $crate::database::DbColumnType::Float
+            } else if type_name.contains("bool") || type_name == "bit" {
+                $crate::database::DbColumnType::Boolean
+            } else if type_name.contains("datetime")
+                || type_name.contains("timestamp")
+                || type_name == "date"
+                || type_name.contains("time")
+            {
+                $crate::database::DbColumnType::DateTime
+            } else if type_name.contains("json") {
+                $crate::database::DbColumnType::Json
+            } else if type_name.contains("blob")
+                || type_name.contains("bytea")
+                || type_name.contains("binary")
+                || type_name.contains("varbinary")
+                || type_name.contains("bit varying")
+            {
+                $crate::database::DbColumnType::Blob
+            } else if type_name.contains("text")
+                || type_name.contains("char")
+                || type_name.contains("varchar")
+                || type_name.contains("uuid")
+                || type_name.contains("enum")
+                || type_name.contains("clob")
+            {
+                $crate::database::DbColumnType::Text
+            } else {
+                $crate::database::DbColumnType::Unknown
+            };
+
+            types.push(col_type);
+        }
+
+        types
+    }};
+}
+/// Converts a row to JSON using the pre-classified column types.
+
+#[macro_export]
+macro_rules! convert_row_to_json {
+    ($row:expr, $col_types:expr) => {{
         let columns = $row.columns();
+        let col_types = &$col_types;
         let mut map = serde_json::Map::with_capacity(columns.len());
-        
+
         for (i, column) in columns.iter().enumerate() {
             let name = column.name().to_string();
-            
-            // Fast path: check if null first
             let is_null = $row.try_get_raw(i).map(|r| r.is_null()).unwrap_or(true);
+
             if is_null {
                 map.insert(name, serde_json::Value::Null);
                 continue;
             }
-            
-            // Get type hint from column metadata to avoid blind try_get chain
-            let type_name = column.type_info().name();
-            let type_lower = type_name.to_lowercase();
-            
-            let val: serde_json::Value = if type_lower.contains("int") || type_lower.contains("serial") {
-                // Integer types (INT, INTEGER, BIGINT, SERIAL, etc.)
-                if let Ok(v) = $row.try_get::<i64, _>(i) {
-                    serde_json::Value::Number(v.into())
-                } else if let Ok(v) = $row.try_get::<i32, _>(i) {
-                    serde_json::Value::Number((v as i64).into())
-                } else {
-                    serde_json::Value::Null
-                }
-            } else if type_lower.contains("timestamp") || type_lower.contains("date") || type_lower.contains("time") {
-                // 🚀 OPTIMIZATION: Timestamps/Dates. 
-                // sqlx returns these as formatted strings when cast to String.
-                // This avoids the 4 failing numeric/bool attempts in the fallback.
-                if let Ok(v) = $row.try_get::<String, _>(i) {
-                    serde_json::Value::String(v)
-                } else {
-                    serde_json::Value::Null
-                }
-            } else if type_lower.contains("float") || type_lower.contains("double") || type_lower.contains("real") {
-                // Float types (FLOAT, DOUBLE, REAL)
-                if let Ok(v) = $row.try_get::<f64, _>(i) {
-                    serde_json::Number::from_f64(v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null)
-                } else {
-                    serde_json::Value::Null
-                }
-            } else if type_lower.contains("numeric") || type_lower.contains("decimal") {
-                // 🚀 OPTIMIZATION: Safer NUMERIC/DECIMAL handling.
-                // Postgres NUMERIC may not decode directly to f64 without specific sqlx features.
-                // Try i64 first (for integer-like numerics), then fall back to String parsing.
-                if let Ok(v) = $row.try_get::<i64, _>(i) {
-                    serde_json::Value::Number(v.into())
-                } else if let Ok(v) = $row.try_get::<String, _>(i) {
-                    if let Ok(n) = v.parse::<i64>() {
-                        serde_json::Value::Number(n.into())
-                    } else if let Ok(n) = v.parse::<f64>() {
-                        serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(v))
+
+            let val = match col_types[i] {
+                $crate::database::DbColumnType::Integer => {
+                    if let Ok(v) = $row.try_get::<i64, _>(i) {
+                        serde_json::Value::from(v)
+                    } else if let Ok(v) = $row.try_get::<i32, _>(i) {
+                        serde_json::Value::from(v)
+                    } else if let Ok(v) = $row.try_get::<i16, _>(i) {
+                        serde_json::Value::from(v)
+                    } else if let Ok(v) = $row.try_get::<String, _>(i) {
+                        v.parse::<i64>()
+                            .map(serde_json::Value::from)
+                            .unwrap_or(serde_json::Value::Null)
                     } else {
-                        serde_json::Value::String(v)
+                        serde_json::Value::Null
                     }
-                } else {
-                    serde_json::Value::Null
                 }
-            } else if type_lower.contains("bool") {
-                // Boolean types (BOOL, BOOLEAN)
-                if let Ok(v) = $row.try_get::<bool, _>(i) {
-                    serde_json::Value::Bool(v)
-                } else {
-                    serde_json::Value::Null
-                }
-            } else if type_lower.contains("text") || type_lower.contains("char") || type_lower.contains("varchar") || type_lower.contains("string") || type_lower.contains("clob") || type_lower.contains("json") || type_lower.contains("uuid") {
-                // String-like types (TEXT, VARCHAR, CHAR, JSON, UUID, etc.)
-                if let Ok(v) = $row.try_get::<String, _>(i) {
-                    // Some DBs return numbers as strings, try to parse
-                    if let Ok(n) = v.parse::<i64>() {
-                        serde_json::Value::Number(n.into())
-                    } else if let Ok(n) = v.parse::<f64>() {
-                        serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(v))
+                $crate::database::DbColumnType::Float => {
+                    if let Ok(v) = $row.try_get::<f64, _>(i) {
+                        serde_json::Number::from_f64(v)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null)
+                    } else if let Ok(v) = $row.try_get::<f32, _>(i) {
+                        serde_json::Number::from_f64(v as f64)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null)
+                    } else if let Ok(v) = $row.try_get::<String, _>(i) {
+                        v.parse::<f64>()
+                            .ok()
+                            .and_then(serde_json::Number::from_f64)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null)
                     } else {
-                        serde_json::Value::String(v)
+                        serde_json::Value::Null
                     }
-                } else {
-                    serde_json::Value::Null
                 }
-            } else if type_lower.contains("blob") || type_lower.contains("bytea") || type_lower.contains("binary") {
-                // Binary types (BLOB, BYTEA, BINARY)
-                if let Ok(v) = $row.try_get::<Vec<u8>, _>(i) {
-                    serde_json::Value::String(format!("blob {}b", v.len()))
-                } else {
-                    serde_json::Value::Null
+                $crate::database::DbColumnType::Boolean => {
+                    if let Ok(v) = $row.try_get::<bool, _>(i) {
+                        serde_json::Value::Bool(v)
+                    } else if let Ok(v) = $row.try_get::<i64, _>(i) {
+                        serde_json::Value::Bool(v != 0)
+                    } else if let Ok(v) = $row.try_get::<i32, _>(i) {
+                        serde_json::Value::Bool(v != 0)
+                    } else {
+                        serde_json::Value::Null
+                    }
                 }
-            } else {
-                // Fallback: try the original chain for unknown/custom types (e.g., PostGIS POINT)
-                if let Ok(v) = $row.try_get::<i64, _>(i) { serde_json::Value::Number(v.into()) }
-                else if let Ok(v) = $row.try_get::<i32, _>(i) { serde_json::Value::Number((v as i64).into()) }
-                else if let Ok(v) = $row.try_get::<f64, _>(i) { serde_json::Number::from_f64(v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null) }
-                else if let Ok(v) = $row.try_get::<bool, _>(i) { serde_json::Value::Bool(v) }
-                else if let Ok(v) = $row.try_get::<String, _>(i) {
-                    if let Ok(n) = v.parse::<i64>() { serde_json::Value::Number(n.into()) }
-                    else if let Ok(n) = v.parse::<f64>() { serde_json::Number::from_f64(n).map(serde_json::Value::Number).unwrap_or(serde_json::Value::String(v)) }
-                    else { serde_json::Value::String(v) }
+                $crate::database::DbColumnType::DateTime => {
+                    if let Ok(v) = $row.try_get::<String, _>(i) {
+                        serde_json::Value::String(v)
+                    } else {
+                        serde_json::Value::Null
+                    }
                 }
-                else if let Ok(v) = $row.try_get::<Vec<u8>, _>(i) { serde_json::Value::String(format!("blob {}b", v.len())) }
-                else { serde_json::Value::Null }
+                $crate::database::DbColumnType::Json => {
+                    // 1. Try native JSON (Postgres JSONB)
+                    if let Ok(v) = $row.try_get::<serde_json::Value, _>(i) {
+                        v
+                    } 
+                    // 2. Fallback to String (SQLite/MySQL JSON_EXTRACT)
+                    else if let Ok(s) = $row.try_get::<String, _>(i) {
+                        // If it's a valid JSON string, parse it. If it's just a raw string, keep it.
+                        serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s))
+                    } 
+                    // 3. Last resort (numbers, floats, etc)
+                    else if let Ok(v) = $row.try_get::<i64, _>(i) {
+                        serde_json::Value::from(v)
+                    } else if let Ok(v) = $row.try_get::<f64, _>(i) {
+                        serde_json::Number::from_f64(v).map(serde_json::Value::Number).unwrap_or(serde_json::Value::Null)
+                    } else {
+                        serde_json::Value::Null
+                    }
+                }
+                $crate::database::DbColumnType::Blob => {
+                    $row.try_get::<Vec<u8>, _>(i)
+                        .map(|v| serde_json::Value::String(format!("blob {}b", v.len())))
+                        .unwrap_or(serde_json::Value::Null)
+                }
+                _ => {
+                    if let Ok(v) = $row.try_get::<String, _>(i) {
+                        serde_json::Value::String(v)
+                    } else if let Ok(v) = $row.try_get::<i64, _>(i) {
+                        serde_json::Value::from(v)
+                    } else if let Ok(v) = $row.try_get::<f64, _>(i) {
+                        serde_json::Number::from_f64(v)
+                            .map(serde_json::Value::Number)
+                            .unwrap_or(serde_json::Value::Null)
+                    } else if let Ok(v) = $row.try_get::<bool, _>(i) {
+                        serde_json::Value::Bool(v)
+                    } else {
+                        serde_json::Value::Null
+                    }
+                }
             };
-            
+
             map.insert(name, val);
         }
+
         serde_json::Value::Object(map)
     }};
 }
+
 
 // ===========================================================================
 // 4. DbPool IMPLEMENTATION
@@ -169,7 +254,6 @@ impl DbPool {
                 let path = url.strip_prefix("sqlite://").or_else(|| url.strip_prefix("sqlite:")).unwrap_or(url);
                 let abs = if Path::new(path).is_absolute() { Path::new(path).to_path_buf() } else { root.join(path) };
                 let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&abs).create_if_missing(true)
-                        // 🔥 THE FIX — three lines that prevent "database is locked"
                 .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal).synchronous(sqlx::sqlite::SqliteSynchronous::Normal).busy_timeout(std::time::Duration::from_secs(5));
                 sqlx::SqlitePool::connect_with(opts).await.map(DbPool::Sqlite).map_err(|e| format!("SQLite connection failed: {e}"))
             }
@@ -183,7 +267,17 @@ impl DbPool {
     pub async fn fetch_all_json(&self, sql: &str) -> Result<Vec<Value>, sqlx::Error> {
         for_each_db!(self, |c| {
             let rows = sqlx::query(sql).fetch_all(c).await?;
-            Ok(rows.iter().map(|row| convert_row_to_json!(row)).collect())
+            
+            // Extract types ONCE for the entire result set
+            let col_types = if let Some(first_row) = rows.first() {
+                get_column_types!(first_row)
+            } else {
+                return Ok(vec![]); // No rows, no work to do
+            };
+
+            // Convert rows using the pre-calculated types
+            let json_rows = rows.iter().map(|row| convert_row_to_json!(row, &col_types)).collect();
+            Ok(json_rows)
         })
     }
 
@@ -199,7 +293,6 @@ impl DbPool {
             DbPool::Sqlite(_) => format!("datetime('now', '+' || {} || ' seconds')", p),
         }
     }
-    // src/database.rs — inside impl DbPool { ... }
 
     /// SQL to check if a table exists. Returns rows if yes, empty if no.
     pub fn table_exists_sql(&self, table_name: &str) -> String {
@@ -252,6 +345,41 @@ impl DbPool {
             DbPool::MySql(_) => " AUTO_INCREMENT PRIMARY KEY",
         }
     }
+
+    /// Translates VLO standard SQL (SQLite syntax) to the target database dialect.
+    pub fn translate_sql(&self, sql: &str) -> String {
+        match self {
+            DbPool::Sqlite(_) => sql.to_string(),
+            
+            DbPool::Postgres(_) => {
+                let mut out = sql.to_string();
+                out = out.replace("json_object(", "jsonb_build_object(");
+                out = out.replace("json_extract(", "jsonb_extract_path_text(");
+                out
+            }
+            
+            DbPool::MySql(_) => {
+                static CONCAT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                    regex::Regex::new(r"'([^']*)'\s*\|\|\s*([a-zA-Z0-9_.\{\}]+)\s*\|\|\s*'([^']*)'").unwrap()
+                });
+                
+                let mut out = sql.to_string();
+                out = out.replace("json_object(", "JSON_OBJECT(");
+                out = out.replace("json_extract(", "JSON_EXTRACT(");
+                out = CONCAT_RE.replace_all(&out, "CONCAT('$1', $2, '$3')").into_owned();
+                out
+            }
+        }
+    }
+
+    /// Execute multiple statements atomically in a transaction.
+    pub async fn execute_multi_statement(&self, statements: &[String]) -> Result<Vec<Value>, String> {
+        match self {
+            DbPool::Sqlite(c) => run_tx_sqlite(c, statements).await,
+            DbPool::Postgres(c) => run_tx_pg(c, statements).await,
+            DbPool::MySql(c) => run_tx_mysql(c, statements).await,
+        }
+    }
 }
 
 // ===========================================================================
@@ -291,6 +419,39 @@ macro_rules! db_fetch_one_scalar_i64 {
         $crate::for_each_db!($pool, |c| ::sqlx::query_scalar::<_, i64>($sql) $(.bind($bind))*.fetch_one(c).await)
     };
 }
+
+macro_rules! impl_transaction {
+    ($fn_name:ident, $pool_type:ty) => {
+        async fn $fn_name(pool: &$pool_type, stmts: &[String]) -> Result<Vec<Value>, String> {
+            let mut tx = pool.begin().await.map_err(|e| format!("Begin tx: {}", e))?;
+            let mut last_rows = Vec::new();
+            
+            for s in stmts {
+                match sqlx::query(s).fetch_all(&mut *tx).await {
+                    Ok(rows) => {
+                        let col_types = if let Some(first_row) = rows.first() {
+                            get_column_types!(first_row)
+                        } else {
+                            vec![]
+                        };
+                        last_rows = rows.iter().map(|row| convert_row_to_json!(row, &col_types)).collect();
+                    }
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return Err(format!("SQL error: {}", e));
+                    }
+                }
+            }
+            tx.commit().await.map_err(|e| format!("Commit tx: {}", e))?;
+            Ok(last_rows)
+        }
+    };
+}
+
+// Generate the three functions instantly
+impl_transaction!(run_tx_sqlite, sqlx::SqlitePool);
+impl_transaction!(run_tx_pg, sqlx::PgPool);
+impl_transaction!(run_tx_mysql, sqlx::MySqlPool);
 
 // ===========================================================================
 // 6. INITIALIZATION
