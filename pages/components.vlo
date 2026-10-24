@@ -1,13 +1,5 @@
 <BaseLayout 
     title="Components"
-    navbar='
-        <Navbar brand="VLO">
-            <a href="/">Home</a>
-            <a href="/components" class="active">Components</a>
-            <a href="/pricing">Pricing</a>
-            <a href="/about">About</a>
-            <a href="/docs">Docs</a>
-        </Navbar>'
     footer='<Footer />'
 >
     <div class="components-page">

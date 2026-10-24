@@ -25,7 +25,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
-
+use crate::features::{is_enabled, Feature};
 // ============================================================================
 // API Action: Supports both simple SQL strings and role-protected objects
 // ============================================================================
@@ -39,7 +39,9 @@ pub enum ApiAction {
         #[serde(default)]
         roles: Vec<String>,
         #[serde(default)]
-        paginate: Option<bool>, // 🔥 NEW
+        paginate: Option<bool>,
+        #[serde(default)]
+        flash: Option<bool>,   // 🔥 NEW
     },
 }
 
@@ -57,10 +59,18 @@ impl ApiAction {
             ApiAction::Protected { roles, .. } => roles,
         }
     }
+
     pub fn paginate(&self) -> Option<bool> {
         match self {
             ApiAction::Simple(_) => None,
             ApiAction::Protected { paginate, .. } => *paginate,
+        }
+    }
+
+    pub fn flash(&self) -> Option<bool> {   // 🔥 NEW
+        match self {
+            ApiAction::Simple(_) => None,
+            ApiAction::Protected { flash, .. } => *flash,
         }
     }
 }
@@ -410,7 +420,6 @@ fn flash_response(status: StatusCode, body: serde_json::Value, flash_encoded: &s
 // ============================================================================
 // Main Route Handler (with Role Checking)
 // ============================================================================
-
 pub async fn api_route_handler(
     mut endpoint: Option<String>,
     id: Option<String>,
@@ -421,9 +430,7 @@ pub async fn api_route_handler(
     crate::vlo_debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     crate::vlo_debug!(
         "🔧 VLO DEBUG: API request started | Method: {} | Endpoint: {:?} | ID: {:?}",
-        method,
-        endpoint,
-        id
+        method, endpoint, id
     );
 
     if endpoint.is_none() {
@@ -438,53 +445,26 @@ pub async fn api_route_handler(
             return match load_api_actions() {
                 Ok(actions) => {
                     let action_names: Vec<&String> = actions.keys().collect();
-                    (
-                        StatusCode::OK,
-                        Json(serde_json::json!({"success": true, "actions": action_names})),
-                    )
-                        .into_response()
+                    (StatusCode::OK, Json(serde_json::json!({"success": true, "actions": action_names}))).into_response()
                 }
-                Err(error) => (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error})),
-                )
-                    .into_response(),
+                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error}))).into_response(),
             };
         }
     };
 
     let resource = normalize_resource(&endpoint);
     if !valid_identifier(&resource) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "success": false,
-                "error": "Invalid API resource"
-            })),
-        )
-            .into_response();
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"success": false, "error": "Invalid API resource"}))).into_response();
     }
 
     let operation = match crud_operation(&method) {
         Some(value) => value,
-        None => {
-            return (
-                StatusCode::METHOD_NOT_ALLOWED,
-                Json(serde_json::json!({"success": false, "error": "Unsupported HTTP method"})),
-            )
-                .into_response()
-        }
+        None => return (StatusCode::METHOD_NOT_ALLOWED, Json(serde_json::json!({"success": false, "error": "Unsupported HTTP method"}))).into_response(),
     };
 
     let actions = match load_api_actions() {
         Ok(value) => value,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error})),
-            )
-                .into_response()
-        }
+        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Failed to load API definitions", "details": error}))).into_response(),
     };
 
     let explicit_action = ["get_", "post_", "put_", "patch_", "delete_"]
@@ -508,27 +488,10 @@ pub async fn api_route_handler(
                     query.remove("id");
                     value.clone()
                 } else {
-                    return (
-                        StatusCode::NOT_FOUND,
-                        Json(serde_json::json!({
-                            "success": false,
-                            "error": "API operation not found",
-                            "action": action_name,
-                            "namespaced_attempt": namespaced_action
-                        })),
-                    )
-                        .into_response();
+                    return (StatusCode::NOT_FOUND, Json(serde_json::json!({"success": false, "error": "API operation not found", "action": action_name, "namespaced_attempt": namespaced_action}))).into_response();
                 }
             } else {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(serde_json::json!({
-                        "success": false,
-                        "error": "API operation not found",
-                        "action": action_name
-                    })),
-                )
-                    .into_response();
+                return (StatusCode::NOT_FOUND, Json(serde_json::json!({"success": false, "error": "API operation not found", "action": action_name}))).into_response();
             }
         }
     };
@@ -537,33 +500,12 @@ pub async fn api_route_handler(
     let required_roles = action_def.roles();
     if !required_roles.is_empty() {
         let user_role = auth.user.as_ref().map(|u| u.role.as_str()).unwrap_or("");
-        let has_access = required_roles
-            .iter()
-            .any(|r| r.eq_ignore_ascii_case(user_role));
-
+        let has_access = required_roles.iter().any(|r| r.eq_ignore_ascii_case(user_role));
         if !has_access {
-            crate::vlo_debug!(
-                "🚫 Access denied for action '{}'. Required roles: {:?}, User role: '{}'",
-                action_name,
-                required_roles,
-                user_role
-            );
-            return (
-                StatusCode::FORBIDDEN,
-                Json(serde_json::json!({
-                    "success": false,
-                    "error": "Insufficient permissions",
-                    "required_roles": required_roles,
-                    "your_role": user_role
-                })),
-            )
-                .into_response();
+            crate::vlo_debug!("🚫 Access denied for action '{}'. Required roles: {:?}, User role: '{}'", action_name, required_roles, user_role);
+            return (StatusCode::FORBIDDEN, Json(serde_json::json!({"success": false, "error": "Insufficient permissions", "required_roles": required_roles, "your_role": user_role}))).into_response();
         }
-        crate::vlo_debug!(
-            "✅ Role check passed for action '{}'. User role: '{}'",
-            action_name,
-            user_role
-        );
+        crate::vlo_debug!("✅ Role check passed for action '{}'. User role: '{}'", action_name, user_role);
     }
 
     let mut sql = action_def.sql().to_string();
@@ -584,12 +526,9 @@ pub async fn api_route_handler(
     }
 
     // 🔒 SECURITY: session injection must come AFTER form params
-    // so a malicious form cannot spoof user_id.
     if let Some(user) = auth.user.as_ref() {
         params.insert("user_id".to_string(), serde_json::Value::Number(user.id.into()));
     }
-    // 🔒 Only inject session_id when the SQL template actually references it.
-    // Prevents the session token from leaking into debug logs on every request.
     if sql.contains("{{session_id}}") {
         if let Some(token) = auth.session_token.as_ref() {
             params.insert("session_id".to_string(), serde_json::Value::String(token.clone()));
@@ -637,41 +576,26 @@ pub async fn api_route_handler(
 
     let pool = match crate::database::get_pool() {
         Ok(p) => p,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "success": false,
-                    "error": e
-                })),
-            ).into_response()
-        }
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": e}))).into_response(),
     };
 
-    // 🔥 FIX: Delete orphaned files from storage
+    // 🔥 Orphaned file cleanup (unchanged)
     if (method == Method::PUT || method == Method::PATCH) && params.contains_key("images") {
-        // 1. Get new images from the request
         let new_arr: Vec<String> = match params.get("images") {
             Some(Value::String(s)) => serde_json::from_str(s).unwrap_or_default(),
             Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
             _ => vec![],
         };
-
-        // 2. Fetch old images from the database
         let select_sql = format!("SELECT images FROM {} WHERE id = {{{{id}}}}", resource);
         let select_sql = substitute_sql_params(&select_sql, &params);
-        
         if let Ok(rows) = pool.fetch_all_json(&select_sql).await {
             if let Some(row) = rows.first() {
                 if let Some(Value::String(old_json)) = row.get("images") {
                     if let Ok(old_arr) = serde_json::from_str::<Vec<String>>(old_json) {
-                        // 3. Diff and delete physical files that are no longer in the new array
                         for old_file in old_arr {
                             if !new_arr.contains(&old_file) && !old_file.is_empty() {
                                 let f = old_file.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    let _ = crate::files::delete(&f);
-                                });
+                                tokio::task::spawn_blocking(move || { let _ = crate::files::delete(&f); });
                             }
                         }
                     }
@@ -679,13 +603,11 @@ pub async fn api_route_handler(
             }
         }
     }
-    
 
-    let action_type = if action_name.contains("put")
-        || action_name.contains("patch")
-        || method == Method::PUT
-        || method == Method::PATCH
-    {
+    // 🔥 EXTRACT `{{emit:event.name}}` markers from SQL
+    let (sql, custom_events) = extract_emit_markers(&sql);
+
+    let action_type = if action_name.contains("put") || action_name.contains("patch") || method == Method::PUT || method == Method::PATCH {
         "updated"
     } else if action_name.contains("delete") || method == Method::DELETE {
         "deleted"
@@ -697,33 +619,20 @@ pub async fn api_route_handler(
 
     match execute_api_sql(pool, &sql, &params).await {
         Ok(mut data) => {
-            let rows = data
-                .get("data")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
+            let rows = data.get("data").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
             crate::vlo_debug!("✅ VLO DEBUG: SQL successful — rows: {}", rows);
 
-            // 🔥 PAGINATION CONFIGURATION
-            // 1. Check if explicitly set in api.vlo
-            // 2. Fallback to auto-detecting if the SQL uses LIMIT
-            let should_paginate = action_def.paginate().unwrap_or_else(|| {
-                sql.to_lowercase().contains("limit")
-            });
-
+            // Pagination (unchanged)
+            let should_paginate = action_def.paginate().unwrap_or_else(|| sql.to_lowercase().contains("limit"));
             if method == Method::GET && !params.contains_key("id") && should_paginate {
                 let count_sql = generate_count_sql(&sql);
-                
-                // ... the rest of your existing count query logic ...
                 if !count_sql.is_empty() {
                     if let Ok(count_res) = execute_api_sql(pool, &count_sql, &params).await {
                         if let Some(count_data) = count_res.get("data").and_then(|d| d.as_array()) {
                             if let Some(first_row) = count_data.first() {
                                 if let Some(total) = first_row.get("total").and_then(|v| v.as_i64()) {
-                                    let page =
-                                        params.get("page").and_then(|v| v.as_i64()).unwrap_or(1);
-                                    let limit =
-                                        params.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
+                                    let page = params.get("page").and_then(|v| v.as_i64()).unwrap_or(1);
+                                    let limit = params.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
                                     let total_pages = (total as f64 / limit as f64).ceil() as i64;
                                     let pagination = serde_json::json!({
                                         "total": total, "page": page, "limit": limit,
@@ -740,31 +649,75 @@ pub async fn api_route_handler(
                 }
             }
 
-            // Reuse the already-computed `resource` from earlier (was recomputed).
+            // ─── 🔥 AUTO-EMIT: fire events from naming convention + explicit markers ───
+            if method != Method::GET && is_enabled(Feature::Jobs) {
+                let context = data.get("data")
+                    .and_then(|v| v.as_array())
+                    .and_then(|a| a.first())
+                    .cloned()
+                    .unwrap_or(serde_json::json!({}));
+                let user_id = auth.user.as_ref().map(|u| u.id);
+
+                // Naming convention: post_orders → order.created
+                if let Some(event) = derive_event_type(&action_name, &method) {
+                    if let Err(e) = crate::jobs::auto_emit_events(pool, &event, &context, user_id).await {
+                        crate::vlo_debug!("⚠️ [AUTO-EMIT] Failed for '{}': {}", event, e);
+                    }
+                }
+
+                // Explicit markers: {{emit:order.shipped}}
+                for event in &custom_events {
+                    if let Err(e) = crate::jobs::auto_emit_events(pool, event, &context, user_id).await {
+                        crate::vlo_debug!("⚠️ [AUTO-EMIT] Failed for marker '{}': {}", event, e);
+                    }
+                }
+            }
+
+            // Broadcast live update for mutations
             if method != Method::GET {
                 crate::router::broadcast_live(&resource, &data);
             }
 
+            // ─── 🔥 FLASH: respect per-action opt-out ───
             if method != Method::GET {
+                let should_flash = action_def.flash().unwrap_or(true); // default true (backward compat)
+            if should_flash {
                 let (icon, title) = match action_type {
                     "updated" => ("✏️", "Update Successful"),
                     "deleted" => ("🗑️", "Delete Successful"),
-                    _ => ("✅", "Operation Successful"),
+                    _         => ("✅", "Operation Successful"),
                 };
                 let flash = crate::auth::encode_flash(
-                    "success",
-                    icon,
-                    title,
+                    "success", icon, title,
                     &format!("{} completed successfully.", action_type),
                 );
-                return flash_response(
-                    StatusCode::OK,
-                    serde_json::json!({
-                        "success": true,
-                        "message": format!("{} operation successful", action_type)
-                    }),
-                    &flash,
-                );
+
+                // 🔥 Preserve redirect from SQL result (e.g., post_orders → thank you)
+                let mut body = serde_json::json!({
+                    "success": true,
+                    "message": format!("{} operation successful", action_type)
+                });
+            if let Some(rows) = data.get("data").and_then(|v| v.as_array()) {
+                if let Some(first) = rows.first() {
+                    if let Some(redirect) = first.get("redirect").and_then(|v| v.as_str()) {
+                        // Some actions return json_object → double-wrapped string
+                        // Unwrap: '{"redirect":"/url"}' → '/url'
+                        let url = if redirect.starts_with('{') {
+                            serde_json::from_str::<serde_json::Value>(redirect)
+                                .ok()
+                                .and_then(|v| v.get("redirect").and_then(|r| r.as_str()).map(String::from))
+                                .unwrap_or_else(|| redirect.to_string())
+                        } else {
+                            redirect.to_string()
+                        };
+                        body["redirect"] = serde_json::json!(url);
+                    }
+                }
+            }
+
+                return flash_response(StatusCode::OK, body, &flash);
+            }
+            return (StatusCode::OK, Json(data)).into_response();
             }
 
             (StatusCode::OK, Json(data)).into_response()
@@ -772,22 +725,19 @@ pub async fn api_route_handler(
         Err(error) => {
             eprintln!("❌ [VLO API] {} {} -> SQL error: {}", method, action_name, error);
             if method != Method::GET {
-                let flash = crate::auth::encode_flash("error", "⚠️", "Operation Failed", &error);
-                return flash_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    serde_json::json!({
-                        "success": false,
-                        "error": "Operation failed",
-                        "details": error
-                    }),
-                    &flash,
-                );
+                // Errors always flash unless explicitly opted out
+                let should_flash = action_def.flash().unwrap_or(true);
+                if should_flash {
+                    let flash = crate::auth::encode_flash("error", "⚠️", "Operation Failed", &error);
+                    return flash_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        serde_json::json!({"success": false, "error": "Operation failed", "details": error}),
+                        &flash,
+                    );
+                }
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "Operation failed", "details": error}))).into_response();
             }
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"success": false, "error": "SQL Execution Error", "details": error, "action": action_name})),
-            )
-                .into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"success": false, "error": "SQL Execution Error", "details": error, "action": action_name}))).into_response()
         }
     }
 }
@@ -1029,4 +979,84 @@ fn query_string_to_value(value: &str) -> Value {
         }
     }
     Value::String(value.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// 🔥 AUTO-EMIT HELPERS
+// ---------------------------------------------------------------------------
+
+/// Derive event name from action: `post_orders` → `order.created`
+fn derive_event_type(action: &str, method: &Method) -> Option<String> {
+    if *method == Method::GET { return None; }
+
+    let (verb, resource) = if let Some(r) = action.strip_prefix("post_") {
+        ("created", r)
+    } else if let Some(r) = action.strip_prefix("put_").or_else(|| action.strip_prefix("patch_")) {
+        ("updated", r)
+    } else if let Some(r) = action.strip_prefix("delete_") {
+        ("deleted", r)
+    } else {
+        return None;
+    };
+
+    if resource.is_empty() { return None; }
+
+    // 🔒 Skip framework-owned resources — they must not auto-emit events.
+    // Prevents infinite loops like: adding an email_rule → fires
+    // email_rule.created → a rule for that event sends mail → adds more rules.
+    // Also covers vlo_jobs, vlo_sessions, vlo_auth_tokens, and any future
+    // framework table that's prefixed with `vlo_`.
+    if resource.starts_with("vlo_")
+        || matches!(resource,
+            "email_rules"
+            | "email_rules_stats"
+            | "jobs"
+            | "sessions"
+            | "auth_tokens"
+        )
+    {
+        return None;
+    }
+
+    // Singularize
+    let singular = if resource.ends_with("ies") && resource.len() > 3 {
+        format!("{}y", &resource[..resource.len() - 3])
+    } else if resource.ends_with('s') && !resource.ends_with("ss") {
+        resource[..resource.len() - 1].to_string()
+    } else {
+        resource.to_string()
+    };
+
+    // Domain-specific rename: user registration
+    if resource == "users" && verb == "created" {
+        return Some("user.registered".to_string());
+    }
+
+    Some(format!("{}.{}", singular, verb))
+}
+
+/// Extract `{{emit:event.name}}` markers from SQL.
+/// Returns (cleaned_sql, events).
+fn extract_emit_markers(sql: &str) -> (String, Vec<String>) {
+    if !sql.contains("{{emit:") {
+        return (sql.to_string(), Vec::new());
+    }
+    let mut events = Vec::new();
+    let mut cleaned = String::with_capacity(sql.len());
+    let mut rest = sql;
+    loop {
+        let Some(start) = rest.find("{{emit:") else {
+            cleaned.push_str(rest);
+            break;
+        };
+        cleaned.push_str(&rest[..start]);
+        let after = &rest[start + 7..];
+        let Some(end) = after.find("}}") else {
+            cleaned.push_str(&rest[start..]);
+            break;
+        };
+        events.push(after[..end].trim().to_string());
+        rest = &after[end + 2..];
+    }
+    (cleaned, events)
 }

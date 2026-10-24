@@ -9,7 +9,7 @@ use crate::{
     auth,
     features::{is_enabled, Feature},
     files_api::serve_file,
-    router::{hmr_handler, home_handler, not_found_handler, page_handler, watch_files},
+    router::{hmr_handler, home_handler, page_handler, watch_files, page_handler_any},
     state::{self, get_project_root},
     template::escape_html_attribute,
     component::parse_props_v7,
@@ -69,24 +69,65 @@ impl BuildCache {
             .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
 
         let mut pages = HashMap::new();
-        if let Ok(entries) = fs::read_dir(build_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("html") {
-                    continue;
-                }
-                let Ok(content) = fs::read_to_string(&path) else { continue };
-                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("index");
-                let key = if stem == "index" {
-                    "/".to_string()
-                } else {
-                    format!("/{}", stem)
-                };
-                pages.insert(key, Arc::from(content));
-            }
-        }
+        walk_html_files(build_dir, build_dir, &mut pages);
 
         Self { manifest, pages, initialized: true }
+    }
+}
+
+/// Recursively scan `dir` for `.html` files and insert them into `pages`.
+///
+/// Path mapping rules:
+///   index.html           → /
+///   admin/index.html     → /admin
+///   admin/users.html     → /admin/users
+///   admin/users/edit.html→ /admin/users/edit
+///
+/// Non-page directories are skipped:
+///   static/              → handled by ServeDir, not by page lookup
+fn walk_html_files(dir: &Path, build_dir: &Path, pages: &mut HashMap<String, Arc<str>>) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        // Skip static/ — served by tower_http::ServeDir, not by page routes
+        if path.is_dir() {
+            if let Ok(rel) = path.strip_prefix(build_dir) {
+                if rel == Path::new("static") {
+                    continue;
+                }
+            }
+            walk_html_files(&path, build_dir, pages);
+            continue;
+        }
+
+        if path.extension().and_then(|e| e.to_str()) != Some("html") {
+            continue;
+        }
+
+        let Ok(content) = fs::read_to_string(&path) else { continue };
+        let Ok(rel) = path.strip_prefix(build_dir) else { continue };
+
+        // Normalize Windows backslashes to forward slashes
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+
+        // Strip .html suffix → gives us the route-shaped path
+        let no_ext = rel_str.trim_end_matches(".html");
+
+        // Route key derivation:
+        //   "index"          → "/"
+        //   "admin/index"    → "/admin"
+        //   "admin/users"    → "/admin/users"
+        let key = if no_ext == "index" {
+            "/".to_string()
+        } else if let Some(stripped) = no_ext.strip_suffix("/index") {
+            format!("/{}", stripped)
+        } else {
+            format!("/{}", no_ext)
+        };
+
+        pages.insert(key, Arc::from(content));
     }
 }
 
@@ -294,11 +335,28 @@ async fn session_cleanup_task() {
 // ─────────────────────────────────────────────────────────────
 fn build_common_routes() -> Router {
     let mut app = Router::new()
+
         // 🔥 MUST BE BEFORE GENERIC API ROUTES
         .route("/__vlo/image", get(crate::files_api::optimize_image))
         .route("/uploads/*path", get(serve_file))
         .route("/healthz", get(healthz_handler))
-        .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler));
+        .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
+
+        // 🔥 GENERIC FILE API — admin-only, whitelisted dirs only.
+        //    Must come BEFORE /api/:resource so `_files` isn't
+        //    treated as a resource name. Static `_files` beats
+        //    dynamic `:resource` in Axum, but explicit ordering
+        //    documents the intent and survives future route shuffles.
+        .route(
+            "/api/_files",
+            get(crate::fs_api::list_files),
+        )
+        .route(
+            "/api/_files/*path",
+            get(crate::fs_api::read_file)
+                .put(crate::fs_api::write_file)
+                .delete(crate::fs_api::delete_file),
+        );
 
     if is_enabled(Feature::Files) {
         app = app
@@ -470,7 +528,7 @@ pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
         .route("/:path", get(page_handler))
         .route("/__vlo_hmr", get(move || hmr_handler(tx)))
         .nest_service("/static", ServeDir::new(public_path_service))
-        .fallback(not_found_handler);
+        .fallback(page_handler_any);
 
     let app = apply_common_layers(app);
     run_server(state::AppMode::Development, app, host, port, "dev").await
@@ -893,7 +951,16 @@ fn inject_per_request_dynamic(html: &mut String, auth: &Option<crate::auth::Auth
 // ─────────────────────────────────────────────────────────────
 async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Response {
     let cache = ensure_build_cache(&build_dir);
-    let path = uri.path();
+
+    // 🔥 Normalize trailing slash: /admin/ → /admin (but keep "/" as "/")
+    let raw_path = uri.path();
+    let path: &str = if raw_path == "/" {
+        "/"
+    } else {
+        raw_path.trim_end_matches('/')
+    };
+    // Alias keeps downstream references unchanged
+    let lookup = path;
 
     let (query, next_decoded) = parse_query(&uri);
 
@@ -916,7 +983,7 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
         return resp;
     }
 
-    let lookup = if path == "/" { "/" } else { path };
+    // `lookup` is now canonical — no need for the old if-else
     let Some(page_html) = cache.pages.get(lookup).cloned() else {
         let not_found = build_dir.join("404.html");
         return match fs::read_to_string(not_found) {
@@ -1104,11 +1171,31 @@ fn build_pages_recursive(
 ) -> Result<(), String> {
     for entry in fs::read_dir(dir).map_err(|e| format!("Failed to read dir: {}", e))?.flatten() {
         let path = entry.path();
-        if path.is_dir() { build_pages_recursive(&path, pages_root, build_dir, manifest)?; continue; }
+        if path.is_dir() { 
+            build_pages_recursive(&path, pages_root, build_dir, manifest)?; 
+            continue; 
+        }
         if path.extension().and_then(|e| e.to_str()) != Some("vlo") { continue; }
 
+        // rel: file path relative to pages/ (used for layout resolution + output path)
+        //   pages/index.vlo         → "index"
+        //   pages/admin/index.vlo   → "admin/index"
+        //   pages/blog/post.vlo     → "blog/post"
         let rel = path.strip_prefix(pages_root).map_err(|e| format!("Path error: {}", e))?
             .with_extension("").to_string_lossy().replace('\\', "/");
+
+        // route: URL path this page responds to (used for manifest key + title fallback)
+        //   "index"          → "/"
+        //   "admin/index"    → "/admin"
+        //   "blog/post"      → "/blog/post"
+        let route = if rel == "index" {
+            "/".to_string()
+        } else if let Some(stripped) = rel.strip_suffix("/index") {
+            format!("/{}", stripped)
+        } else {
+            format!("/{}", rel)
+        };
+
         let content = fs::read_to_string(&path).unwrap_or_default();
         let guard = crate::auth::extract_page_guard(&content);
         
@@ -1117,19 +1204,34 @@ fn build_pages_recursive(
             .and_then(|c| parse_props_v7(c.get(2)?.as_str()).get("cache").cloned())
             .and_then(|v| v.as_str().map(String::from));
 
-        let html = crate::router::wrap_html(&rel, &crate::router::render_vlo_for_build_at(&rel, content), true);
-        let out = if rel == "index" { build_dir.join("index.html") } else { build_dir.join(format!("{}.html", rel)) };
+        // Pass `rel` (file path) to renderer — layout resolution walks the path
+        // hierarchy (admin/index → tries layouts/admin/indexLayout then layouts/adminLayout)
+        let rendered = crate::router::render_vlo_for_build_at(&rel, content);
+        // Pass `route` (URL path) to wrap_html — better title fallback than "admin/index"
+        let html = crate::router::wrap_html(&route, &rendered, true);
+
+        // Output path mirrors source structure: admin/index.vlo → admin/index.html
+        let out = if rel == "index" {
+            build_dir.join("index.html")
+        } else {
+            build_dir.join(format!("{}.html", rel))
+        };
         
-        if let Some(p) = out.parent() { fs::create_dir_all(p).map_err(|e| format!("Dir error: {}", e))?; }
+        if let Some(p) = out.parent() { 
+            fs::create_dir_all(p).map_err(|e| format!("Dir error: {}", e))?; 
+        }
         fs::write(&out, html).map_err(|e| format!("Write error: {}", e))?;
 
-        let route = if rel == "index" { "/" } else { &format!("/{}", rel) };
         let mut cfg = serde_json::Map::new();
         if let Some(g) = guard { 
-            cfg.extend([("auth".into(), g.auth.into()), ("guest".into(), g.guest.into()), ("roles".into(), g.roles.into())]); 
+            cfg.extend([
+                ("auth".into(), g.auth.into()), 
+                ("guest".into(), g.guest.into()), 
+                ("roles".into(), g.roles.into())
+            ]); 
         }
         if let Some(c) = cache { cfg.insert("cache".into(), c.into()); }
-        if !cfg.is_empty() { manifest.insert(route.to_string(), cfg.into()); }
+        if !cfg.is_empty() { manifest.insert(route, cfg.into()); }
 
         println!("  ├─ Generated: {}", out.display());
     }
@@ -1361,138 +1463,53 @@ pub fn inject_conditional_scripts(source: &str) -> String {
 // JS constants (unchanged — full feature coverage)
 // ─────────────────────────────────────────────────────────────
 const VLO_SHARED_RESPONSE_HANDLER_JS: &str = r##"
-function vloParseAlert(form) {
-    if (!form) return null;
-    var v = form.getAttribute('data-vlo-alert') || form.getAttribute('alert');
-    if (v === null || v === '') return null;
+function vloParseAlert(form){if(!form)return null;var v=form.getAttribute('data-vlo-alert')||form.getAttribute('alert');if(v===null||v==='')return null;if(v==='true'||v==='1')return{tag:'div',selector:null};if(v==='false'||v==='0')return null;var c=v.indexOf(':');if(c===-1)return{tag:'div',selector:v.trim()};var tag=v.slice(0,c).trim().toLowerCase()||'div';var sel=v.slice(c+1).trim();return{tag:tag,selector:sel||null}}
 
-    // Legacy mode: "true", "1" -> insert before submit button
-    if (v === 'true' || v === '1') return { tag: 'div', selector: null };
-    if (v === 'false' || v === '0') return null;
+function vloInsertAlert(form,config,className,styleCss,innerHtml){if(!config||!form)return;var el=document.createElement(config.tag);el.className=className;el.style.cssText=styleCss;el.innerHTML=innerHtml;if(config.selector){var t=document.querySelector(config.selector);if(t){t.appendChild(el);return}}var btn=form.querySelector('button[type="submit"]');if(btn)btn.parentNode.insertBefore(el,btn);else form.appendChild(el)}
 
-    // Selector mode: "tag:selector" or bare "selector" (defaults to div)
-    var colonIdx = v.indexOf(':');
-    if (colonIdx === -1) {
-        return { tag: 'div', selector: v.trim() };
-    }
-
-    var tag = v.slice(0, colonIdx).trim().toLowerCase();
-    var selector = v.slice(colonIdx + 1).trim();
-
-    if (!tag) tag = 'div';
-    if (!selector) return { tag: tag, selector: null };
-
-    return { tag: tag, selector: selector };
-}
-
-function vloInsertAlert(form, config, className, styleCss, innerHtml) {
-    if (!config || !form) return;
-
-    var el = document.createElement(config.tag);
-    el.className = className;
-    el.style.cssText = styleCss;
-    el.innerHTML = innerHtml;
-
-    if (config.selector) {
-        var target = document.querySelector(config.selector);
-        if (target) {
-            target.appendChild(el);
-            return;
-        }
-    }
-    // Legacy / fallback: insert before submit button
-    var btn = form.querySelector('button[type="submit"]');
-    if (btn) btn.parentNode.insertBefore(el, btn);
-    else form.appendChild(el);
-}
-
-function vloHandleResponse(r, form) {
-    return r.json().then(function(d) {
-        var alertConfig = vloParseAlert(form);
-
-        if (!r.ok) {
-            if (d.activation_required) {
-                if (alertConfig && form) {
-                    var oldA = form.querySelector('.vlo-inline-error');
-                    if (oldA) oldA.remove();
-                    vloInsertAlert(form, alertConfig,
-                        'auth-alert vlo-inline-error',
-                        'display:flex;flex-direction:column;gap:10px;margin-bottom:15px;padding:16px;background:rgba(0,245,255,0.05);border:1px solid rgba(0,245,255,0.25);border-radius:8px;font-size:0.9rem;',
-                        '<div style="display:flex;align-items:center;gap:10px"><span style="background:rgba(0,245,255,0.1);color:#00f5ff;font-weight:bold;font-size:1.2rem;width:24px;height:24px;display:grid;place-items:center;border-radius:7px">i</span><p style="margin:0;color:#80f0ff">' + (d.error || 'Account is not active') + ' Please check your email.</p></div><button type="button" onclick="openResendActivationModal()" style="margin-top:8px;padding:8px 12px;background:#00f5ff;color:#000;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:0.8rem;">Resend Activation Email</button>'
-                    );
-                }
-                throw new Error("activation_required");
+function vloHandleResponse(r,form){
+    return r.json().then(function(d){
+        var alertConfig=vloParseAlert(form);
+        if(!r.ok){
+            if(d.activation_required){
+                if(alertConfig&&form){var o=form.querySelector('.vlo-inline-error');if(o)o.remove();vloInsertAlert(form,alertConfig,'auth-alert vlo-inline-error','display:flex;flex-direction:column;gap:10px;margin-bottom:15px;padding:16px;background:rgba(0,245,255,0.05);border:1px solid rgba(0,245,255,0.25);border-radius:8px;font-size:0.9rem;','<div style="display:flex;align-items:center;gap:10px"><span style="background:rgba(0,245,255,0.1);color:#00f5ff;font-weight:bold;font-size:1.2rem;width:24px;height:24px;display:grid;place-items:center;border-radius:7px">i</span><p style="margin:0;color:#80f0ff">'+(d.error||'Account is not active')+' Please check your email.</p></div><button type="button" onclick="openResendActivationModal()" style="margin-top:8px;padding:8px 12px;background:#00f5ff;color:#000;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:0.8rem;">Resend Activation Email</button>')}
+                throw new Error("activation_required")
             }
-            if (d.warning || (r.ok && d.success && d.warning)) {
-                if (alertConfig && form) {
-                    var oldW = form.querySelector('.vlo-inline-error');
-                    if (oldW) oldW.remove();
-                    vloInsertAlert(form, alertConfig,
-                        'auth-alert vlo-inline-error',
-                        'display:flex;align-items:center;gap:10px;margin-bottom:15px;padding:12px;background:rgba(255,170,0,0.1);border:1px solid rgba(255,170,0,0.3);border-radius:8px;font-size:0.9rem;',
-                        '<span style="font-weight:bold;font-size:1.2rem">!</span><p style="margin:0;color:#ffaa00">' + (d.message || 'Warning') + '</p>'
-                    );
-                }
-                if (form) {
-                    setTimeout(function() {
-                        var m = form.closest('.vlo-modal-overlay');
-                        if (m) m.classList.remove('active');
-                        else window.location.reload();
-                    }, 4000);
-                }
-                throw new Error("warning");
+            if(d.warning||(r.ok&&d.success&&d.warning)){
+                if(alertConfig&&form){var o=form.querySelector('.vlo-inline-error');if(o)o.remove();vloInsertAlert(form,alertConfig,'auth-alert vlo-inline-error','display:flex;align-items:center;gap:10px;margin-bottom:15px;padding:12px;background:rgba(255,170,0,0.1);border:1px solid rgba(255,170,0,0.3);border-radius:8px;font-size:0.9rem;','<span style="font-weight:bold;font-size:1.2rem">!</span><p style="margin:0;color:#ffaa00">'+(d.message||'Warning')+'</p>')}
+                if(form)setTimeout(function(){var m=form.closest('.vlo-modal-overlay');if(m)m.classList.remove('active');else window.location.reload()},4000);
+                throw new Error("warning")
             }
-            throw new Error(d.error || d.details || d.message || 'Request failed');
+            throw new Error(d.error||d.details||d.message||'Request failed')
         }
-                // In vloHandleResponse, look for this line:
-        if (d.redirect || (d.data && d.data.length > 0 && d.data[0].redirect)) {
-            window.location.href = d.redirect || d.data[0].redirect;
-            return;
-        }
-        if (d.redirect) { window.location.href = d.redirect; return; }
-        if (form) {
-            var old = form.querySelector('.vlo-inline-error');
-            if (old) old.remove();
-
-            if (d.message && alertConfig) {
-                vloInsertAlert(form, alertConfig,
-                    'auth-alert vlo-inline-error',
-                    'display:flex;align-items:center;gap:10px;color:#00ff88;margin-bottom:15px;padding:12px;background:rgba(0,255,136,0.1);border:1px solid rgba(0,255,136,0.3);border-radius:8px;font-size:0.9rem;',
-                    '<span style="font-weight:bold;font-size:1.2rem">OK</span><p style="margin:0;color:#00ff88">' + d.message + '</p>'
-                );
-            }
+        if(d.redirect){window.location.href=d.redirect;return}
+        if(Array.isArray(d.data)&&d.data[0]&&d.data[0].redirect){window.location.href=d.data[0].redirect;return}
+        if(form){
+            var o=form.querySelector('.vlo-inline-error');if(o)o.remove();
+            if(d.message&&alertConfig)vloInsertAlert(form,alertConfig,'auth-alert vlo-inline-error','display:flex;align-items:center;gap:10px;color:#00ff88;margin-bottom:15px;padding:12px;background:rgba(0,255,136,0.1);border:1px solid rgba(0,255,136,0.3);border-radius:8px;font-size:0.9rem;','<span style="font-weight:bold;font-size:1.2rem">OK</span><p style="margin:0;color:#00ff88">'+d.message+'</p>');
             form.reset();
-            setTimeout(function() {
-                var m = form.closest('.vlo-modal-overlay');
-                if (m) m.classList.remove('active');
-                else window.location.reload();
-            }, 2000);
+            setTimeout(function(){var m=form.closest('.vlo-modal-overlay');if(m)m.classList.remove('active');else window.location.reload()},2000)
         }
         window.dispatchEvent(new CustomEvent('vlo:mutation'));
-        return d;
-    });
+        return d
+    })
 }
-
-function vloShowError(e, form) {
-    if (e.message === "activation_required" || e.message === "warning") return;
-    console.error('[VLO API]', e);
-    if (!form) {
-        var t = document.createElement('div');
-        t.className = 'vlo-flash';
-        t.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';
-        t.innerHTML = '<span style="font-size:1.4rem">!</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">' + (e.message || 'Request failed') + '</span></div>';
+function vloShowError(e,form){
+    if(e.message==="activation_required"||e.message==="warning")return;
+    console.error('[VLO API]',e);
+    if(!form){
+        var t=document.createElement('div');t.className='vlo-flash';t.style.cssText='position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';
+        t.innerHTML='<span style="font-size:1.4rem">!</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">'+(e.message||'Request failed')+'</span></div>';
         document.body.appendChild(t);
-        setTimeout(function() { t.style.transition = 'opacity 0.4s'; t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 400); }, 4000);
-        return;
+        setTimeout(function(){t.style.transition='opacity 0.4s';t.style.opacity='0';setTimeout(function(){t.remove()},400)},4000);
+        return
     }
-    var oldE = form.querySelector('.vlo-inline-error');
-    if (oldE) oldE.remove();
-    var err = document.createElement('div');
-    err.className = 'auth-alert vlo-inline-error';
-    err.style.cssText = 'display:flex;align-items:center;gap:10px;color:#ff4444;margin-bottom:15px;padding:12px;background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);border-radius:8px;font-size:0.9rem;';
-    err.innerHTML = '<span style="font-weight:bold;font-size:1.2rem">!</span><p style="margin:0;color:#ff4444">' + (e.message || 'Request failed') + '</p>';
-    var btn = form.querySelector('button[type="submit"]');
-    if (btn) btn.parentNode.insertBefore(err, btn); else form.appendChild(err);
+    var o=form.querySelector('.vlo-inline-error');if(o)o.remove();
+    var err=document.createElement('div');err.className='auth-alert vlo-inline-error';
+    err.style.cssText='display:flex;align-items:center;gap:10px;color:#ff4444;margin-bottom:15px;padding:12px;background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);border-radius:8px;font-size:0.9rem;';
+    err.innerHTML='<span style="font-weight:bold;font-size:1.2rem">!</span><p style="margin:0;color:#ff4444">'+(e.message||'Request failed')+'</p>';
+    var btn=form.querySelector('button[type="submit"]');
+    if(btn)btn.parentNode.insertBefore(err,btn);else form.appendChild(err)
 }
 "##;
 

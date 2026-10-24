@@ -1,4 +1,5 @@
-<BaseLayout title="Project Guidelines" footer='<Footer />'>
+<BaseLayout title="Project Guidelines"
+footer='<Footer />' >
     <div class="guidelines-page">
         <header class="guidelines-hero">
             <div class="hero-badge"><span class="pulse"></span> VLO PROJECT GUIDELINES</div>

@@ -168,7 +168,9 @@ impl DbPool {
             _ => {
                 let path = url.strip_prefix("sqlite://").or_else(|| url.strip_prefix("sqlite:")).unwrap_or(url);
                 let abs = if Path::new(path).is_absolute() { Path::new(path).to_path_buf() } else { root.join(path) };
-                let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&abs).create_if_missing(true);
+                let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&abs).create_if_missing(true)
+                        // 🔥 THE FIX — three lines that prevent "database is locked"
+                .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal).synchronous(sqlx::sqlite::SqliteSynchronous::Normal).busy_timeout(std::time::Duration::from_secs(5));
                 sqlx::SqlitePool::connect_with(opts).await.map(DbPool::Sqlite).map_err(|e| format!("SQLite connection failed: {e}"))
             }
         }
@@ -195,6 +197,59 @@ impl DbPool {
             DbPool::Postgres(_) => format!("CURRENT_TIMESTAMP + ({} || ' seconds')::interval", p),
             DbPool::MySql(_) => format!("DATE_ADD(NOW(), INTERVAL {} SECOND)", p),
             DbPool::Sqlite(_) => format!("datetime('now', '+' || {} || ' seconds')", p),
+        }
+    }
+    // src/database.rs — inside impl DbPool { ... }
+
+    /// SQL to check if a table exists. Returns rows if yes, empty if no.
+    pub fn table_exists_sql(&self, table_name: &str) -> String {
+        let safe = table_name.replace('\'', "''");
+        match self {
+            DbPool::Sqlite(_) => format!(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='{}'",
+                safe
+            ),
+            DbPool::Postgres(_) => format!(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name='{}'",
+                safe
+            ),
+            DbPool::MySql(_) => format!(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='{}'",
+                safe
+            ),
+        }
+    }
+
+    /// SQL to fetch the columns of a table. Returns one row per column.
+    pub fn table_columns_sql(&self, table_name: &str) -> String {
+        let safe = table_name.replace('\'', "''");
+        match self {
+            DbPool::Sqlite(_) => format!("PRAGMA table_info({})", safe),
+            DbPool::Postgres(_) => format!(
+                "SELECT column_name FROM information_schema.columns WHERE table_name='{}' AND table_schema='public'",
+                safe
+            ),
+            DbPool::MySql(_) => format!(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='{}'",
+                safe
+            ),
+        }
+    }
+
+    /// Which key in the result of `table_columns_sql` holds the column name?
+    pub fn table_columns_key(&self) -> &'static str {
+        match self {
+            DbPool::Sqlite(_) => "name",
+            DbPool::Postgres(_) | DbPool::MySql(_) => "column_name",
+        }
+    }
+
+    /// DB-specific suffix for an auto-incrementing primary key.
+    pub fn primary_key_suffix(&self) -> &'static str {
+        match self {
+            DbPool::Sqlite(_) => " PRIMARY KEY AUTOINCREMENT",
+            DbPool::Postgres(_) => " SERIAL PRIMARY KEY",
+            DbPool::MySql(_) => " AUTO_INCREMENT PRIMARY KEY",
         }
     }
 }

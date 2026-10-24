@@ -1,4 +1,5 @@
-<BaseLayout title="Product Management" roles="Admin, Editor">
+<BaseLayout title="Product Management" auth="true" roles="Admin, Editor" 
+footer='<Footer />'>
   <div class="dashboard-wrap">
     
     <!-- ══════════ HEADER ══════════ -->
@@ -287,7 +288,6 @@
       </div>
     </form>
   </Modal>
-
   <!-- ══════════ CSS ══════════ -->
   <style>
 .dashboard-wrap{max-width:1200px;margin:0 auto;padding:40px 24px 80px;color:#e5e5e5;font-family:ui-sans-serif,system-ui,-apple-system,sans-serif}

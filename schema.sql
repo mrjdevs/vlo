@@ -117,7 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_vlo_jobs_status_run_at ON vlo_jobs(status, run_at
 -- 2. PRODUCTS TABLE
 -- ============================================================
 
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     description TEXT,
@@ -574,9 +574,6 @@ WHERE NOT EXISTS (SELECT 1 FROM logs WHERE id = 10);
 
 
 
-
-PRAGMA foreign_keys = ON;
-
 -- =========================================================
 -- CARTS
 -- =========================================================
@@ -708,7 +705,10 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE INDEX IF NOT EXISTS idx_invoices_order
 ON invoices(order_id);
 
-
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id, id);
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_order_id ON invoices(order_id);
+CREATE INDEX IF NOT EXISTS idx_cart_items_cart_id ON cart_items(cart_id);
 
 -- ============================================================
 -- VERIFY SEED DATA
@@ -722,4 +722,16 @@ SELECT 'tasks', COUNT(*) FROM tasks
 UNION ALL
 SELECT 'logs', COUNT(*) FROM logs
 UNION ALL
-SELECT 'cart', COUNT(*) FROM cart;
+--SELECT 'cart', COUNT(*) FROM cart;
+
+
+
+-- seed.sql — Run once after initial setup, or after adding new email scenarios
+-- Usage: sqlite3 app.db < seed.sql
+
+--INSERT OR IGNORE INTO vlo_email_rules 
+--    (event_type, template, recipient, dedup_minutes) 
+--VALUES 
+--    (1,'order.created', 'order_confirmation', '$.customer_email', -1),
+--    (2, 'order.created', 'admin_high_value', 'admin@yourshop.com', -1),
+--    (3, 'user.registered', 'welcome', '$.email', -1);

@@ -1040,7 +1040,13 @@ pub fn build_component_attributes(
     }
 
     for (key, value) in props {
-        if key == "children" || key == "attributes" || key == "class" {
+        // 🔒 Skip framework-consumed props + component internals
+        if matches!(key.as_str(),
+            "children" | "attributes" | "class" |
+            "auth" | "guest" | "roles" | "role" |
+            "cache" |
+            "footer" | "navbar" | "hero"
+        ) {
             continue;
         }
         if used.contains(key) {

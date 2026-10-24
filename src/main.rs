@@ -19,6 +19,8 @@ mod modifier;
 mod mailer;
 mod features;
 mod jobs;
+mod schema;
+mod fs_api;
 
 use clap::Parser;
 
@@ -72,6 +74,11 @@ async fn init_enabled_features(is_build: bool) -> Result<(), String> {
     }
 
     // Long-lived background workers: only spawn when a server actually runs.
+    if is_enabled(Feature::Jobs) && !is_build {
+    jobs::ensure_schema().await
+        .map_err(|e| format!("Jobs schema init failed: {}", e))?;
+    }
+
     if !is_build {
         if is_enabled(Feature::Jobs) {
             tokio::spawn(crate::jobs::start_worker());

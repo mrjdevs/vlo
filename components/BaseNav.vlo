@@ -14,7 +14,8 @@
     <a href="/docs">Docs</a>
     {if logged_in}
         <a href="/products">Products</a>
-        <a href="/dashboard">Dashboard</a>
+        <a href="/admin/">Admin</a>
+        <a href="/admin/dashboard">Dashboard</a>
         <a href="/shop" class="cart-link">🛒 Cart - 
             <span class="cart-count">
                 {{ "" | ajax:"/api/cart_count,0,data.0.total,json" }}

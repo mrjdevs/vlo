@@ -193,14 +193,11 @@ pub fn resolve_data_sources(
         let before = cap.get(2).unwrap().as_str();
         let after = cap.get(4).unwrap().as_str();
 
-        // ── Split the data-source URL into path + inline query ──
-        //
-        // `data-source="/api/product?id=240"` must resolve the action
-        // as `product`, not `product?id=240`. The inline query params
-        // (`id=240`) are merged into the per-block context so the SQL
-        // template can reference them via `{{id}}`.
+        // Substitute {{var}} before parsing. Shadowed so downstream code
+        // (action_path, inline_params) needs no changes.
         let raw_url = cap.get(3).unwrap().as_str();
-        let (action_path, inline_params) = split_action_url(raw_url);
+        let raw_url = crate::template::render_interpolations(raw_url, page_context);
+        let (action_path, inline_params) = split_action_url(&raw_url);
 
         let variable_name = action_path
             .split('/')
@@ -905,10 +902,21 @@ pub async fn render_page(
     let page_path = path.clone();
 
     let result = tokio::task::spawn_blocking(move || -> Option<Response> {
-        let file = state::get_project_root()
-            .join("pages")
-            .join(format!("{}.vlo", page_path));
-        let content = fs::read_to_string(&file).ok()?;
+    let root = state::get_project_root();
+    let pages_dir = root.join("pages");
+
+    // 1. Try exact:    pages/admin.vlo
+    // 2. Fallback:     pages/admin/index.vlo
+    // 3. Cleanup:      strip trailing slash from "admin/"
+    let clean_path = page_path.trim_end_matches('/');
+    let mut file = pages_dir.join(format!("{}.vlo", clean_path));
+    if !file.exists() {
+        let index_file = pages_dir.join(clean_path).join("index.vlo");
+        if index_file.exists() {
+            file = index_file;
+        }
+    }
+    let content = fs::read_to_string(&file).ok()?;
         let mut query = query;
 
         // Page guard check.
@@ -1054,6 +1062,31 @@ pub async fn render_404() -> impl IntoResponse {
     })
 }
 
+pub async fn page_handler_any(
+    uri: axum::http::Uri,
+    axum::Extension(auth): axum::Extension<crate::auth::AuthUser>,
+    headers: axum::http::HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    // Strip leading slash, decode
+    let raw = uri.path().trim_start_matches('/');
+    let path = urlencoding::decode(raw)
+        .map(|c| c.into_owned())
+        .unwrap_or_else(|_| raw.to_string());
+
+    // 🔒 SECURITY: block path traversal
+    if path.is_empty()
+        || path.contains("..")
+        || path.contains('\\')
+        || path.contains('\0')
+    {
+        return not_found_handler().await.into_response();
+    }
+
+    let flash_encoded = extract_flash_cookie(&headers);
+    render_page(path, query, auth, flash_encoded).await.into_response()
+}
+
 pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> String {
     let dev = state::app_mode().is_dev();
 
@@ -1173,10 +1206,25 @@ function showErr(input, msg) {
     };
 
     // ─── Single-pass injections ────────────────────────────
+    // 🔥 Detect opt-in marker BEFORE injecting anything
+    // Pages that need the CSRF fetch patch declare:
+    //   <meta name="vlo-csrf-patch" content="1">
+    let needs_csrf_patch = html.contains(r#"<meta name="vlo-csrf-patch""#);
+    if needs_csrf_patch {
+        // Strip the marker so it doesn't leak to the browser
+        html = html.replace(r#"<meta name="vlo-csrf-patch" content="1">"#, "");
+        html = html.replace(r#"<meta name="vlo-csrf-patch" content="1" />"#, "");
+    }
+
     let mut head_injections = String::new();
     if !csrf_meta.is_empty() {
         head_injections.push_str(&csrf_meta);
         head_injections.push('\n');
+        // 🔥 Only inject the patch when the page declared it needs it
+        if needs_csrf_patch {
+            head_injections.push_str(VLO_FETCH_CSRF_PATCH_JS);
+            head_injections.push('\n');
+        }
     }
     if !style_block.is_empty() {
         head_injections.push_str(&style_block);
@@ -1286,6 +1334,40 @@ const SSE_SCRIPT: &str = r#"<script id="__VLO_SSE__">
     } catch(err) { console.error('VLO SSE Error:', err); }
   };
   window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error:', e); };
+})();
+</script>"#;
+
+const VLO_FETCH_CSRF_PATCH_JS: &str = r#"<script>
+(function(){
+if(window.__VLO_FETCH_PATCHED__)return;window.__VLO_FETCH_PATCHED__=!0;
+function sameOrigin(i){try{var u=typeof i=="string"?i:i instanceof URL?i.href:i instanceof Request?i.url:null;return u?new URL(u,location.href).origin===location.origin:!1}catch(_){return!1}}
+function method(i,o){return String((o&&o.method)||(i&&i.method)||"GET").toUpperCase()}
+function getH(h,k){
+if(h instanceof Headers)return h.get(k);
+if(Array.isArray(h)){var p=h.find(function(x){return String(x[0]).toLowerCase()===k.toLowerCase()});return p?p[1]:null}
+if(h&&typeof h==="object"){var key=Object.keys(h).find(function(x){return x.toLowerCase()===k.toLowerCase()});return key?h[key]:null}
+return null
+}
+function setH(h,k,v){
+if(h instanceof Headers){h.set(k,v);return h}
+if(Array.isArray(h)){var f=h.filter(function(x){return String(x[0]).toLowerCase()!==k.toLowerCase()});f.push([k,v]);return f}
+h=h||{};
+Object.keys(h).forEach(function(x){if(x.toLowerCase()===k.toLowerCase())delete h[x]});
+h[k]=v;return h
+}
+var orig=window.fetch;
+window.fetch=function(input,init){
+init=init||{};
+var m=method(input,init);
+if(m!=="GET"&&m!=="HEAD"&&m!=="OPTIONS"&&sameOrigin(input)){
+var t=document.querySelector('meta[name="csrf-token"]')?.content||"";
+if(t){
+var cur=getH(init.headers||{},"X-CSRF-Token");
+if(cur==null||cur===""){init.headers=setH(init.headers||{},"X-CSRF-Token",t)}
+}
+}
+return orig.call(this,input,init);
+};
 })();
 </script>"#;
 
