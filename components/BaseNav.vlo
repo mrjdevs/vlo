@@ -24,7 +24,10 @@
             <span class="cart-count">
                 {{ "" | ajax:"/api/cart_count,0,data.0.total,json" }}
             </span>
-        <a href="/api/auth/logout">Logout ({{user_name}})</a>
+        </a>
+        <form data-vlo-post="/api/auth/logout" style="display:inline">
+            <button type="submit" class="nav-logout" style="background:none;border:none;color:inherit;cursor:pointer;font:inherit;padding:0">Logout ({{user_name}})</button>
+        </form>
     {else}
         <a href="/login">Login</a>
     {/if}

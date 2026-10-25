@@ -20,7 +20,7 @@
 
         <div class="prod-card">
           <!-- ══════════ IMAGE GALLERY ══════════ -->
-          <ImageGallery images={{prod.images|json_decode}} alt="Product Image" download="true"/>
+          <ImageGallery images={{prod.images|json_decode|raw}} alt="Product Image" download="true"/>
           
           <!-- ══════════ INFO ══════════ -->
           <div class="prod-info">

@@ -196,7 +196,7 @@ pub fn resolve_data_sources(
         // Substitute {{var}} before parsing. Shadowed so downstream code
         // (action_path, inline_params) needs no changes.
         let raw_url = cap.get(3).unwrap().as_str();
-        let raw_url = crate::template::render_interpolations(raw_url, page_context);
+        let raw_url = crate::template::render_interpolations_raw(raw_url, page_context);
         let (action_path, inline_params) = split_action_url(&raw_url);
 
         let variable_name = action_path
@@ -893,6 +893,15 @@ fn compute_layout_uses_flash(page_path: &str) -> bool {
     false
 }
 
+fn is_safe_page_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\\')
+        && !path.contains('\0')
+        && path
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
 pub async fn render_page(
     path: String,
     query: HashMap<String, String>,
@@ -909,6 +918,9 @@ pub async fn render_page(
     // 2. Fallback:     pages/admin/index.vlo
     // 3. Cleanup:      strip trailing slash from "admin/"
     let clean_path = page_path.trim_end_matches('/');
+    if !is_safe_page_path(clean_path) {
+        return None;
+    }
     let mut file = pages_dir.join(format!("{}.vlo", clean_path));
     if !file.exists() {
         let index_file = pages_dir.join(clean_path).join("index.vlo");
@@ -1167,7 +1179,7 @@ pub fn wrap_html(title: &str, rendered: &RenderedPage, auto_flash: bool) -> Stri
     };
 
     let mut html = rendered.html.clone();
-    html = html.replace("{{title}}", title);
+    html = html.replace("{{title}}", &crate::template::escape_html_text(title));
 
     // ─── FORM VALIDATOR SCRIPT (conditional) ───────────────
     let validate_script = if html.contains("vloValidate") || html.contains("v-validate") {
@@ -1326,7 +1338,7 @@ const SSE_SCRIPT: &str = r#"<script id="__VLO_SSE__">
         if (typeof data.value === 'object' && data.value !== null) {
           window.dispatchEvent(new CustomEvent('vlo:mutation'));
         } else {
-          els[i].innerHTML = data.value;
+          els[i].textContent = data.value;
           els[i].classList.add('vlo-sync-updated');
           setTimeout((function(el){ return function(){ el.classList.remove('vlo-sync-updated'); }; })(els[i]), 600);
         }
@@ -1474,6 +1486,7 @@ pub fn watch_files(
                 crate::component::clear_component_path_cache();
                 clear_layout_cache();
                 clear_layout_flash_cache();
+                state::clear_html_render_cache();
                 let _ = tx.send(());
                 println!("⚡ Reload");
             }

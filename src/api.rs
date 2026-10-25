@@ -508,6 +508,40 @@ pub async fn api_route_handler(
     };
 
     // ─── ROLE CHECK ────────────────────────────────────────────────
+    // An action's declared method prefix must match the request method;
+    // otherwise a GET could invoke a write action through a public route.
+    if let Some(prefix) = ["get_", "post_", "put_", "patch_", "delete_"]
+        .into_iter()
+        .find(|prefix| action_name.starts_with(prefix))
+    {
+        let method_ok = match prefix {
+            "get_" => matches!(method, Method::GET | Method::HEAD),
+            "post_" => method == Method::POST,
+            "put_" => method == Method::PUT,
+            "patch_" => method == Method::PATCH,
+            "delete_" => method == Method::DELETE,
+            _ => false,
+        };
+        if !method_ok {
+            return (StatusCode::METHOD_NOT_ALLOWED, Json(serde_json::json!({"success": false, "error": "Action does not match HTTP method"}))).into_response();
+        }
+    }
+
+    // Defense in depth: writes always require a session when auth is on,
+    // even for actions that omit an explicit role list.
+    let is_write_action = ["post_", "put_", "patch_", "delete_"]
+        .iter()
+        .any(|prefix| action_name.starts_with(prefix))
+        || sql_has_write(action_def.sql());
+    if is_write_action {
+        if matches!(method, Method::GET | Method::HEAD) {
+            return (StatusCode::METHOD_NOT_ALLOWED, Json(serde_json::json!({"success": false, "error": "Write actions require a write HTTP method"}))).into_response();
+        }
+        if is_enabled(Feature::Auth) && auth.user.is_none() {
+            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"success": false, "error": "Authentication required"}))).into_response();
+        }
+    }
+
     let required_roles = action_def.roles();
     if !required_roles.is_empty() {
         let user_role = auth.user.as_ref().map(|u| u.role.as_str()).unwrap_or("");
@@ -539,6 +573,7 @@ pub async fn api_route_handler(
     // 🔒 SECURITY: session injection must come AFTER form params
     if let Some(user) = auth.user.as_ref() {
         params.insert("user_id".to_string(), serde_json::Value::Number(user.id.into()));
+        params.insert("user_role".to_string(), serde_json::Value::String(user.role.clone()));
     }
     if sql.contains("{{session_id}}") {
         if let Some(token) = auth.session_token.as_ref() {
@@ -771,10 +806,8 @@ pub async fn execute_api_sql(
     crate::vlo_debug!("Executing SQL = {}", translated_sql);
 
     // 3. Split into statements and strip manual BEGIN/COMMIT
-    let stmts: Vec<String> = translated_sql
-        .split(';')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    let stmts: Vec<String> = split_sql_statements(&translated_sql)
+        .into_iter()
         .filter(|s| {
             let up = s.to_uppercase();
             !up.starts_with("BEGIN")
@@ -805,6 +838,102 @@ pub async fn execute_api_sql(
     Ok(serde_json::json!({
         "success": true, "data": last_rows, "affected_rows": last_rows.len()
     }))
+}
+
+/// Splits a SQL script on `;` outside quoted strings, quoted identifiers and
+/// comments. Substituted values may contain semicolons (addresses, notes), so
+/// a plain `split(';')` corrupts the statement into an unterminated literal.
+fn split_sql_statements(sql: &str) -> Vec<String> {
+    enum State {
+        Normal,
+        SingleQuote,
+        DoubleQuote,
+        Backtick,
+        Bracket,
+        LineComment,
+        BlockComment,
+    }
+
+    let mut statements = Vec::new();
+    let mut current = String::new();
+    let mut state = State::Normal;
+    let mut chars = sql.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match state {
+            State::Normal => match c {
+                '\'' => { state = State::SingleQuote; current.push(c); }
+                '"' => { state = State::DoubleQuote; current.push(c); }
+                '`' => { state = State::Backtick; current.push(c); }
+                '[' => { state = State::Bracket; current.push(c); }
+                '-' if chars.peek() == Some(&'-') => {
+                    state = State::LineComment;
+                    current.push(c);
+                    current.push(chars.next().unwrap());
+                }
+                '/' if chars.peek() == Some(&'*') => {
+                    state = State::BlockComment;
+                    current.push(c);
+                    current.push(chars.next().unwrap());
+                }
+                ';' => {
+                    let trimmed = current.trim();
+                    if !trimmed.is_empty() { statements.push(trimmed.to_string()); }
+                    current.clear();
+                }
+                _ => current.push(c),
+            },
+            State::SingleQuote => {
+                current.push(c);
+                if c == '\'' {
+                    if chars.peek() == Some(&'\'') {
+                        current.push(chars.next().unwrap());
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::DoubleQuote => {
+                current.push(c);
+                if c == '"' {
+                    if chars.peek() == Some(&'"') {
+                        current.push(chars.next().unwrap());
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::Backtick => {
+                current.push(c);
+                if c == '`' {
+                    if chars.peek() == Some(&'`') {
+                        current.push(chars.next().unwrap());
+                    } else {
+                        state = State::Normal;
+                    }
+                }
+            }
+            State::Bracket => {
+                current.push(c);
+                if c == ']' { state = State::Normal; }
+            }
+            State::LineComment => {
+                current.push(c);
+                if c == '\n' { state = State::Normal; }
+            }
+            State::BlockComment => {
+                current.push(c);
+                if c == '*' && chars.peek() == Some(&'/') {
+                    current.push(chars.next().unwrap());
+                    state = State::Normal;
+                }
+            }
+        }
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() { statements.push(trimmed.to_string()); }
+    statements
 }
 
 /// Single-pass `{{key}}` substitution.
@@ -909,6 +1038,22 @@ fn crud_operation(method: &Method) -> Option<&'static str> {
         Method::DELETE => Some("delete"),
         _ => None,
     }
+}
+
+fn sql_has_write(sql: &str) -> bool {
+    split_sql_statements(sql).iter().any(|statement| {
+        let first = statement
+            .trim_start()
+            .split(|c: char| c.is_whitespace() || c == '(')
+            .find(|token| !token.is_empty())
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        matches!(
+            first.as_str(),
+            "INSERT" | "UPDATE" | "DELETE" | "REPLACE" | "CREATE" | "DROP" | "ALTER"
+                | "TRUNCATE" | "PRAGMA" | "ATTACH" | "DETACH"
+        )
+    })
 }
 
 fn normalize_resource(endpoint: &str) -> String {
@@ -1137,4 +1282,27 @@ fn sanitize_json_multiline(input: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_sql_statements;
+
+    #[test]
+    fn splits_outside_quotes_comments_and_identifiers() {
+        let sql = "INSERT INTO t (a) VALUES ('uh; g'); UPDATE t SET a = 'x;y' WHERE b = \"c;d\"; -- tail; comment\nSELECT 1; /* block; */ SELECT 2";
+        let parts = split_sql_statements(sql);
+        assert_eq!(parts.len(), 4);
+        assert!(parts[0].contains("'uh; g'"));
+        assert!(parts[1].contains("'x;y'"));
+        assert!(parts[1].contains("\"c;d\""));
+        assert_eq!(parts[3], "/* block; */ SELECT 2");
+    }
+
+    #[test]
+    fn keeps_escaped_quote_semicolons() {
+        let parts = split_sql_statements("SELECT 'it''s; fine'; SELECT 2");
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], "SELECT 'it''s; fine'");
+    }
 }

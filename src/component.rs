@@ -1,7 +1,16 @@
 // ─────────────────────────────────────────────────────────────
 // component.rs — VLO component rendering engine
-// Optimized: read-first path cache, byte-index prop parsing,
-// fast scanner, capacity hints. Behavior identical.
+//
+// Performance notes (behavior preserved):
+//  * props are overlaid on the page context and restored afterwards, instead
+//    of deep-cloning the whole context twice per component instance
+//  * per-template facts (used props, <button> default) computed once and cached
+//  * byte-jumping tag scanners with borrowed slices (no format!/String per scan)
+//  * nested-render loop tracks "did anything change" instead of copying and
+//    comparing the whole page every pass
+//  * debug output goes through vlo_debug! (the API response is no longer
+//    formatted and printed on every render)
+//  * module detection checks <project>/modules, not the substring "modules"
 // ─────────────────────────────────────────────────────────────
 use crate::{
     api::strip_server_block,
@@ -10,8 +19,8 @@ use crate::{
         STYLE_RE, TEMPLATE_CACHE,
     },
     template::{
-        clean_empty_tags, escape_html_attribute, render_control_flow,
-        render_interpolations,
+        clean_empty_tags, escape_html_attribute, mark_safe_html,
+        render_control_flow_in_scope, render_interpolations,
     },
 };
 use serde_json::Value;
@@ -23,17 +32,20 @@ use std::{
 };
 
 // ─── PATH CACHE: avoids repeated filesystem probes per tag ───────────
-static PATH_CACHE: LazyLock<RwLock<HashMap<String, Option<PathBuf>>>> =
+// Value: resolved path + "is this a module component" flag (computed once).
+type PathEntry = Option<(PathBuf, bool)>;
+
+static PATH_CACHE: LazyLock<RwLock<HashMap<String, PathEntry>>> =
     LazyLock::new(Default::default);
 
-/// Cached public entry point. Resolves once per component name, then reuses.
-pub fn component_path(name: &str) -> Option<PathBuf> {
-    // Fast path: already resolved (Some or None).
+fn component_info(name: &str) -> PathEntry {
     if let Some(hit) = PATH_CACHE.read().unwrap().get(name) {
         return hit.clone();
     }
-    // Slow path: resolve from disk and cache the result.
-    let found = resolve_component_path_internal(name);
+    let found = resolve_component_path_internal(name).map(|p| {
+        let is_module = is_module_path(&p);
+        (p, is_module)
+    });
     PATH_CACHE
         .write()
         .unwrap()
@@ -41,9 +53,29 @@ pub fn component_path(name: &str) -> Option<PathBuf> {
     found
 }
 
-/// Clears the cache. Called by the file watcher on HMR reloads.
+/// Cached public entry point. Resolves once per component name, then reuses.
+
+/// Clears the caches. Called by the file watcher on HMR reloads.
 pub fn clear_component_path_cache() {
     PATH_CACHE.write().unwrap().clear();
+    META_CACHE.write().unwrap().clear();
+}
+
+/// Alias kept for callers that use the shorter name.
+#[allow(dead_code)]
+pub fn clear_path_cache() {
+    clear_component_path_cache();
+}
+
+/// A component is a module component when it lives under `<project>/modules`.
+/// (The old check was `path.contains("modules")`, which also matched any
+/// project located in e.g. `my-modules/` or `node_modules/`.)
+fn is_module_path(path: &Path) -> bool {
+    let root = crate::state::get_project_root();
+    match path.strip_prefix(&root) {
+        Ok(rel) => rel.starts_with("modules"),
+        Err(_) => path.to_string_lossy().contains("modules"),
+    }
 }
 
 /// Internal resolver. Performs the actual filesystem lookups in the
@@ -113,28 +145,80 @@ pub fn read_component_template(path: &Path) -> Option<Arc<CompiledTemplate>> {
     Some(compiled)
 }
 
-pub fn render_tag(source: &str, tag: &str, context: &mut RenderedPage) -> String {
-    if let Some((start, end, props, children)) = find_tag(source, tag) {
-        return format!(
-            "{}{}{}",
-            &source[..start],
-            render_component_file(tag, &props, &children, context),
-            &source[end..]
-        );
-    }
-    source.to_string()
+// ─── PER-TEMPLATE FACTS (computed once per compiled template) ─────────
+struct TemplateMeta {
+    /// Props referenced as a plain `{{ name }}` in the template.
+    used: HashSet<String>,
+    /// Template contains `<button` (case-insensitive) → default type="button".
+    has_button: bool,
 }
 
-/// Fast-scanning top-level component renderer. Byte-indexed, with a
-/// `find('<')` skip when the current byte isn't the start of a tag.
-pub fn render_components(source: &str, context: &mut RenderedPage) -> String {
-    // Fast path: nothing to render if there are no uppercase tags.
+impl TemplateMeta {
+    fn from_template(template: &str) -> Self {
+        let mut used = HashSet::new();
+        for captures in crate::state::PROP_RE.captures_iter(template) {
+            used.insert(captures[1].to_string());
+        }
+        Self {
+            used,
+            has_button: contains_ci(template, "<button"),
+        }
+    }
+}
+
+/// Keyed by the compiled template's address. Each entry keeps its `Arc` alive,
+/// so an address can never be reused while its entry exists; a reloaded
+/// template gets a new Arc and therefore a fresh entry.
+static META_CACHE: LazyLock<
+    RwLock<HashMap<usize, (Arc<CompiledTemplate>, Arc<TemplateMeta>)>>,
+> = LazyLock::new(Default::default);
+
+fn template_meta(compiled: &Arc<CompiledTemplate>) -> Arc<TemplateMeta> {
+    let key = Arc::as_ptr(compiled) as usize;
+    if let Some((_, meta)) = META_CACHE.read().unwrap().get(&key) {
+        return Arc::clone(meta);
+    }
+    let meta = Arc::new(TemplateMeta::from_template(&compiled.template));
+    let mut cache = META_CACHE.write().unwrap();
+    if cache.len() > 1024 {
+        cache.clear();
+    }
+    cache.insert(key, (Arc::clone(compiled), Arc::clone(&meta)));
+    meta
+}
+
+fn contains_ci(hay: &str, needle: &str) -> bool {
+    let (h, n) = (hay.as_bytes(), needle.as_bytes());
+    !n.is_empty()
+        && h.len() >= n.len()
+        && h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
+}
+
+// ─── TAG RENDERING ───────────────────────────────────────────────────
+fn render_tag_opt(source: &str, tag: &str, context: &mut RenderedPage) -> Option<String> {
+    let (start, end, props, children) = find_tag_ref(source, tag)?;
+    let rendered = render_component_file(tag, props, children, context);
+    let mut out = String::with_capacity(source.len() - (end - start) + rendered.len());
+    out.push_str(&source[..start]);
+    out.push_str(&rendered);
+    out.push_str(&source[end..]);
+    Some(out)
+}
+
+pub fn render_tag(source: &str, tag: &str, context: &mut RenderedPage) -> String {
+    render_tag_opt(source, tag, context).unwrap_or_else(|| source.to_string())
+}
+
+/// Returns `None` when nothing was rendered (no copy of the source is made).
+fn render_components_opt(source: &str, context: &mut RenderedPage) -> Option<String> {
+    // Fast path: nothing to render if there are no tags at all.
     if !source.contains('<') {
-        return source.to_string();
+        return None;
     }
 
     let b = source.as_bytes();
-    let mut output = String::with_capacity(source.len());
+    let mut output = String::new();
+    let mut replaced = false;
     let mut last = 0usize;
     let mut i = 0usize;
 
@@ -165,21 +249,58 @@ pub fn render_components(source: &str, context: &mut RenderedPage) -> String {
             }
         }
 
-        if let Some((_, tag_end, props, children)) = find_tag(&source[pos..], tag) {
+        if let Some((_, tag_end, props, children)) = find_tag_ref(&source[pos..], tag) {
+            if !replaced {
+                output.reserve(source.len());
+                replaced = true;
+            }
             output.push_str(&source[last..pos]);
-            output.push_str(&render_component_file(tag, &props, &children, context));
+            output.push_str(&render_component_file(tag, props, children, context));
             last = pos + tag_end;
             i = last;
         }
     }
+
+    if !replaced {
+        return None;
+    }
     output.push_str(&source[last..]);
-    output
+    Some(output)
 }
 
-pub fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, String)> {
-    let open = format!("<{}", name);
-    let start = source.find(&open)?;
-    let mut index = start + open.len();
+/// Fast-scanning top-level component renderer.
+pub fn render_components(source: &str, context: &mut RenderedPage) -> String {
+    render_components_opt(source, context).unwrap_or_else(|| source.to_string())
+}
+
+// ─── SCANNERS (byte-jumping, borrowed slices) ────────────────────────
+#[inline]
+fn at_open(b: &[u8], i: usize, name: &[u8]) -> bool {
+    b.get(i + 1..).map_or(false, |r| r.starts_with(name))
+}
+
+#[inline]
+fn at_close(b: &[u8], i: usize, name: &[u8]) -> bool {
+    b.get(i + 1) == Some(&b'/')
+        && b.get(i + 2..).map_or(false, |r| r.starts_with(name))
+        && b.get(i + 2 + name.len()) == Some(&b'>')
+}
+
+/// Borrowing `find_tag`: (start, end, props, children).
+fn find_tag_ref<'a>(source: &'a str, name: &str) -> Option<(usize, usize, &'a str, &'a str)> {
+    let b = source.as_bytes();
+    let nb = name.as_bytes();
+
+    // First occurrence of "<name" (any boundary), like `source.find("<name")`.
+    let mut from = 0usize;
+    let start = loop {
+        let p = from + b.get(from..)?.iter().position(|&c| c == b'<')?;
+        if at_open(b, p, nb) {
+            break p;
+        }
+        from = p + 1;
+    };
+    let mut index = start + 1 + nb.len();
 
     if index < source.len() {
         let next = source[index..].chars().next()?;
@@ -190,38 +311,41 @@ pub fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, Strin
 
     let props_start = index;
     let open_end = find_tag_opening_end(source, index)?;
-    let props = source[props_start..open_end].to_string();
+    let props = &source[props_start..open_end];
 
     let self_closing = props.trim_end().ends_with('/') || is_void_tag(name);
     index = open_end + 1;
 
     if self_closing {
-        return Some((start, index, props, String::new()));
+        return Some((start, index, props, ""));
     }
 
-    let close = format!("</{}>", name);
     let children_start = index;
     let mut depth: usize = 1;
 
-    while index < source.len() {
-        let remaining = &source[index..];
+    while index < b.len() {
+        let Some(p) = b[index..].iter().position(|&c| c == b'<') else {
+            index = b.len();
+            break;
+        };
+        index += p;
 
-        if remaining.starts_with(&close) {
+        if at_close(b, index, nb) {
             depth = depth.saturating_sub(1);
             if depth == 0 {
                 return Some((
                     start,
-                    index + close.len(),
+                    index + nb.len() + 3,
                     props,
-                    source[children_start..index].to_string(),
+                    &source[children_start..index],
                 ));
             }
-            index += close.len();
+            index += nb.len() + 3;
             continue;
         }
 
-        if remaining.starts_with(&open) {
-            let after_name = index + open.len();
+        if at_open(b, index, nb) {
+            let after_name = index + 1 + nb.len();
             let valid = source[after_name..]
                 .chars()
                 .next()
@@ -239,29 +363,89 @@ pub fn find_tag(source: &str, name: &str) -> Option<(usize, usize, String, Strin
             }
         }
 
-        index += remaining
-            .chars()
-            .next()
-            .map(|ch| ch.len_utf8())
-            .unwrap_or(1);
+        index += 1;
     }
 
-    Some((
-        start,
-        index,
-        props,
-        source[children_start..].to_string(),
-    ))
+    Some((start, index, props, &source[children_start..]))
 }
 
+pub fn find_tag_opening_end(source: &str, start: usize) -> Option<usize> {
+    let b = source.as_bytes();
+    let mut quote: u8 = 0;
+    let mut cursor = start;
+
+    while cursor < b.len() {
+        let c = b[cursor];
+        if quote != 0 {
+            if c == quote {
+                quote = 0;
+            }
+        } else if c == b'"' || c == b'\'' {
+            quote = c;
+        } else if c == b'>' {
+            return Some(cursor);
+        }
+        cursor += 1;
+    }
+    None
+}
+
+pub fn find_matching_tag_end(
+    source: &str,
+    start: usize,
+    tag_name: &str,
+) -> Option<usize> {
+    let b = source.as_bytes();
+    let nb = tag_name.as_bytes();
+    let mut depth: usize = 1;
+    let mut cursor = start;
+
+    while cursor < b.len() {
+        let p = b[cursor..].iter().position(|&c| c == b'<')?;
+        cursor += p;
+
+        if at_close(b, cursor, nb) {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Some(cursor + nb.len() + 3);
+            }
+            cursor += nb.len() + 3;
+            continue;
+        }
+
+        if at_open(b, cursor, nb) {
+            let after_name = cursor + 1 + nb.len();
+            let valid = source[after_name..]
+                .chars()
+                .next()
+                .map(|ch| ch.is_whitespace() || ch == '>' || ch == '/')
+                .unwrap_or(false);
+
+            if valid {
+                let opening_end = find_tag_opening_end(source, after_name)?;
+                let props = source[after_name..opening_end].trim();
+                if !props.ends_with('/') && !is_void_tag(tag_name) {
+                    depth += 1;
+                }
+                cursor = opening_end + 1;
+                continue;
+            }
+        }
+
+        cursor += 1;
+    }
+    None
+}
+
+// ─── COMPONENT FILE RENDERING ────────────────────────────────────────
 pub fn render_component_file(
     name: &str,
     props_str: &str,
     children: &str,
     context: &mut RenderedPage,
 ) -> String {
-    let path = match component_path(name) {
-        Some(path) => path,
+    let (path, is_module_component) = match component_info(name) {
+        Some(info) => info,
         None => return format!("<!-- Missing component: {} -->", name),
     };
 
@@ -276,7 +460,6 @@ pub fn render_component_file(
     }
 
     let props = parse_props_v7(props_str);
-    let is_module_component = path.to_string_lossy().contains("modules");
 
     // 1. Track module usage and CSS even during build so styles are injected.
     if is_module_component {
@@ -332,11 +515,9 @@ pub fn render_component_file(
     let default_slot = render_nested_vlo_content(&raw_default_slot, context);
     let default_slot = apply_active_nav_class(&default_slot, context);
 
-    let mut render_ctx = context.template_context.clone();
-
     // ─── MODULE COMPONENT HANDLING (RUNTIME) ─────────────────────────
     if is_module_component {
-        println!("🔥🔥🔥 [VLO] FOUND MODULE COMPONENT: {}", name);
+        crate::vlo_debug!("🔥 [VLO] Module component: {}", name);
         if let Some(module_path) = path.parent().and_then(|p| p.parent()) {
             if let Some(module_name) = module_path.file_name().and_then(|n| n.to_str()) {
                 context.add_used_module(module_name);
@@ -344,10 +525,11 @@ pub fn render_component_file(
 
             let raw_data = if let Some(source) = props.get("source").and_then(|v| v.as_str()) {
                 let action = source.trim_start_matches("/api/").trim_matches('/');
-                println!("📡 [VLO] Fetching API for {}: action='{}'", name, action);
+                crate::vlo_debug!("📡 [VLO] Fetching API for {}: action='{}'", name, action);
 
-                let api_response = crate::router::fetch_api_data_sync(action, &render_ctx);
-                println!("📡 [VLO] API Response for {}: {:?}", name, api_response);
+                let api_response =
+                    crate::router::fetch_api_data_sync(action, &context.template_context);
+                crate::vlo_debug!("📡 [VLO] API Response for {}: {:?}", name, api_response);
 
                 api_response
                     .get("data")
@@ -355,7 +537,7 @@ pub fn render_component_file(
                     .and_then(|v| v.as_array().cloned())
                     .unwrap_or_default()
             } else {
-                println!(
+                crate::vlo_debug!(
                     "⚠️ [VLO] No 'source' prop found for {}. Props: {:?}",
                     name,
                     props.keys().collect::<Vec<_>>()
@@ -363,30 +545,22 @@ pub fn render_component_file(
                 Vec::new()
             };
 
-            println!(
+            crate::vlo_debug!(
                 "🔄 [VLO] Executing module handler for {} with {} rows",
                 name,
                 raw_data.len()
             );
             match crate::module_handler::execute_module_handler(module_path, &props, raw_data) {
                 Ok(response) => {
-                    println!(
+                    crate::vlo_debug!(
                         "✅ [VLO] Handler produced {} transformed rows for {}",
                         response.data.len(),
                         name
                     );
 
-                    let data_json = serde_json::json!(response.data);
-                    let meta_json = serde_json::json!(response.meta);
-                    let config_json = serde_json::json!(response.config);
-
-                    render_ctx.insert("data".to_string(), data_json.clone());
-                    render_ctx.insert("meta".to_string(), meta_json.clone());
-                    render_ctx.insert("config".to_string(), config_json.clone());
-
-                    context.insert("data", data_json);
-                    context.insert("meta", meta_json);
-                    context.insert("config", config_json);
+                    context.insert("data", serde_json::json!(response.data));
+                    context.insert("meta", serde_json::json!(response.meta));
+                    context.insert("config", serde_json::json!(response.config));
                 }
                 Err(e) => {
                     println!("❌ [VLO] Module handler error for {}: {}", name, e);
@@ -396,10 +570,14 @@ pub fn render_component_file(
     }
     // ────────────────────────────────────────────────────────────────
 
-    render_ctx.extend(props.clone());
-    render_ctx.insert("children".to_string(), Value::String(default_slot.clone()));
-
-    let rendered = render_component_template(template, &render_ctx);
+    // Props + children are overlaid on the page context for the render and
+    // removed again afterwards (no deep clone of the context).
+    let rendered = render_component_template_scoped(
+        template,
+        &mut context.template_context,
+        &props,
+        default_slot.clone(),
+    );
     let rendered = render_slots(&rendered, &named_slots, &default_slot);
 
     let incoming_class = props.get("class").and_then(|value| {
@@ -410,7 +588,8 @@ pub fn render_component_file(
         }
     });
 
-    let attributes = build_component_attributes(template, &props);
+    let meta = template_meta(&compiled);
+    let attributes = attributes_from_meta(&meta, &props);
     if attributes.is_empty() && incoming_class.is_none() {
         return rendered;
     }
@@ -437,6 +616,7 @@ pub fn render_component_file(
                 .map(|class| class.trim())
                 .filter(|class| !class.is_empty())
             {
+                let extra = escape_html_attribute(extra);
                 if let Some(class_match) = CLASS_RE.captures(&existing_attributes) {
                     let existing_value = class_match
                         .get(2)
@@ -538,33 +718,34 @@ pub fn parse_slot_content(children: &str) -> (HashMap<String, String>, String) {
     let mut default_start = 0usize;
 
     while cursor < children.len() {
-        let remaining = &children[cursor..];
-        let open_start = match remaining.find('<') {
+        let open_start = match children[cursor..].find('<') {
             Some(offset) => cursor + offset,
             None => break,
         };
 
-        let tag_info = match parse_element_at(children, open_start) {
-            Some(info) => info,
-            None => {
-                cursor = open_start + 1;
+        let (_tag_name, _opening_end, element_end, props, content) =
+            match parse_element_at_ref(children, open_start) {
+                Some(info) => info,
+                None => {
+                    cursor = open_start + 1;
+                    continue;
+                }
+            };
+
+        // The props parser only runs when "slot" can possibly be a prop.
+        if props.contains("slot") {
+            if let Some(slot_name) = get_slot_name(props) {
+                if open_start > default_start {
+                    default_content.push_str(&children[default_start..open_start]);
+                }
+                named_slots
+                    .entry(slot_name)
+                    .or_insert_with(String::new)
+                    .push_str(content);
+                cursor = element_end;
+                default_start = cursor;
                 continue;
             }
-        };
-
-        let (_tag_name, _opening_end, element_end, props, content) = tag_info;
-
-        if let Some(slot_name) = get_slot_name(&props) {
-            if open_start > default_start {
-                default_content.push_str(&children[default_start..open_start]);
-            }
-            named_slots
-                .entry(slot_name)
-                .or_insert_with(String::new)
-                .push_str(content);
-            cursor = element_end;
-            default_start = cursor;
-            continue;
         }
 
         cursor = element_end;
@@ -587,150 +768,67 @@ pub fn get_slot_name(props: &str) -> Option<String> {
     })
 }
 
+const VOID_TAGS: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
+    "source", "track", "wbr",
+];
+
 pub fn is_void_tag(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "area"
-            | "base"
-            | "br"
-            | "col"
-            | "embed"
-            | "hr"
-            | "img"
-            | "input"
-            | "link"
-            | "meta"
-            | "param"
-            | "source"
-            | "track"
-            | "wbr"
-    )
+    VOID_TAGS.iter().any(|tag| name.eq_ignore_ascii_case(tag))
 }
 
-pub fn parse_element_at(
+/// Borrowing `parse_element_at`: (tag, opening_end, element_end, props, content).
+fn parse_element_at_ref(
     source: &str,
     start: usize,
-) -> Option<(String, usize, usize, String, &str)> {
-    if !source[start..].starts_with('<') {
+) -> Option<(&str, usize, usize, &str, &str)> {
+    let b = source.as_bytes();
+    if b.get(start) != Some(&b'<') {
         return None;
     }
 
     let mut cursor = start + 1;
-    if cursor >= source.len() {
+    if cursor >= b.len() {
         return None;
     }
 
-    let first = source[cursor..].chars().next()?;
-    if first == '/' || first == '!' || first == '?' {
+    if matches!(b[cursor], b'/' | b'!' | b'?') {
         return None;
     }
 
     let tag_start = cursor;
-    while cursor < source.len() {
-        let ch = source[cursor..].chars().next()?;
-        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == ':' {
-            cursor += ch.len_utf8();
-        } else {
-            break;
-        }
+    while cursor < b.len()
+        && (b[cursor].is_ascii_alphanumeric() || matches!(b[cursor], b'-' | b'_' | b':'))
+    {
+        cursor += 1;
     }
     if cursor == tag_start {
         return None;
     }
 
-    let tag_name = source[tag_start..cursor].to_string();
+    let tag_name = &source[tag_start..cursor];
     let opening_end = find_tag_opening_end(source, cursor)?;
-    let props = source[cursor..opening_end].to_string();
-    let self_closing = props.trim_end().ends_with('/') || is_void_tag(&tag_name);
+    let props = &source[cursor..opening_end];
+    let self_closing = props.trim_end().ends_with('/') || is_void_tag(tag_name);
 
     if self_closing {
         return Some((tag_name, opening_end + 1, opening_end + 1, props, ""));
     }
 
     let content_start = opening_end + 1;
-    let element_end = find_matching_tag_end(source, content_start, &tag_name)?;
-    let close_start = element_end.checked_sub(format!("</{}>", tag_name).len())?;
+    let element_end = find_matching_tag_end(source, content_start, tag_name)?;
+    let close_start = element_end.checked_sub(tag_name.len() + 3)?;
     if close_start < content_start {
         return None;
     }
 
-    let content = &source[content_start..close_start];
-    Some((tag_name, opening_end + 1, element_end, props, content))
-}
-
-pub fn find_tag_opening_end(source: &str, start: usize) -> Option<usize> {
-    let mut quote: Option<char> = None;
-    let mut cursor = start;
-
-    while cursor < source.len() {
-        let ch = source[cursor..].chars().next()?;
-        match quote {
-            Some(active) => {
-                if ch == active {
-                    quote = None;
-                }
-            }
-            None => {
-                if ch == '"' || ch == '\'' {
-                    quote = Some(ch);
-                } else if ch == '>' {
-                    return Some(cursor);
-                }
-            }
-        }
-        cursor += ch.len_utf8();
-    }
-    None
-}
-
-pub fn find_matching_tag_end(
-    source: &str,
-    start: usize,
-    tag_name: &str,
-) -> Option<usize> {
-    let opening = format!("<{}", tag_name);
-    let closing = format!("</{}>", tag_name);
-    let mut depth: usize = 1;
-    let mut cursor = start;
-
-    while cursor < source.len() {
-        let remaining = &source[cursor..];
-
-        if remaining.starts_with(&closing) {
-            depth = depth.saturating_sub(1);
-            if depth == 0 {
-                return Some(cursor + closing.len());
-            }
-            cursor += closing.len();
-            continue;
-        }
-
-        if remaining.starts_with(&opening) {
-            let after_name = cursor + opening.len();
-            let valid = source[after_name..]
-                .chars()
-                .next()
-                .map(|ch| ch.is_whitespace() || ch == '>' || ch == '/')
-                .unwrap_or(false);
-
-            if valid {
-                let opening_end = find_tag_opening_end(source, after_name)?;
-                let props = source[after_name..opening_end].trim();
-                if !props.ends_with('/') && !is_void_tag(tag_name) {
-                    depth += 1;
-                }
-                cursor = opening_end + 1;
-                continue;
-            }
-        }
-
-        cursor += remaining
-            .chars()
-            .next()
-            .map(|ch| ch.len_utf8())
-            .unwrap_or(1);
-    }
-    None
+    Some((
+        tag_name,
+        opening_end + 1,
+        element_end,
+        props,
+        &source[content_start..close_start],
+    ))
 }
 
 /// Byte-indexed prop parser. Handles both quoted and unquoted values,
@@ -958,8 +1056,12 @@ fn apply_active_nav_class(html: &str, context: &RenderedPage) -> String {
             };
             let href = href_cap.get(1).unwrap().as_str();
 
+            // `current_path.starts_with("{href}/")` without building the string
             let is_match = href == current_path
-                || (current_path != "/" && current_path.starts_with(&format!("{}/", href)));
+                || (current_path != "/"
+                    && current_path
+                        .strip_prefix(href)
+                        .map_or(false, |rest| rest.starts_with('/')));
 
             if !is_match {
                 return full_match.to_string();
@@ -986,11 +1088,51 @@ fn apply_active_nav_class(html: &str, context: &RenderedPage) -> String {
         .into_owned()
 }
 
-pub fn render_component_template(template: &str, props: &HashMap<String, Value>) -> String {
-    let rendered = render_control_flow(template, props);
-    let rendered = render_interpolations(&rendered, props);
+/// Props that carry markup or template placeholders were authored in the
+/// template source, so they are trusted as a fragment: nested `{{...}}` is
+/// resolved (and escaped) by the interpolation pass that follows.
+fn prop_value_for_context(key: &str, value: &Value) -> Value {
+    if let Value::String(s) = value {
+        if key == "attributes" || s.contains('<') || s.contains("{{") {
+            return Value::String(mark_safe_html(s.clone()));
+        }
+    }
+    value.clone()
+}
+
+/// Same pipeline as `render_component_template`, but renders inside `ctx` with
+/// `props` + `children` overlaid, then restores `ctx` exactly as it was.
+fn render_component_template_scoped(
+    template: &str,
+    ctx: &mut HashMap<String, Value>,
+    props: &HashMap<String, Value>,
+    children: String,
+) -> String {
+    let mut saved: Vec<(&str, Option<Value>)> = Vec::with_capacity(props.len() + 1);
+    for (key, value) in props {
+        let old = ctx.insert(key.clone(), prop_value_for_context(key, value));
+        saved.push((key.as_str(), old));
+    }
+    let old = ctx.insert("children".to_string(), Value::String(mark_safe_html(children)));
+    saved.push(("children", old));
+
+    let rendered = render_control_flow_in_scope(template, ctx);
+    let rendered = render_interpolations(&rendered, ctx);
     let cleaned = clean_empty_tags(&rendered);
-    normalize_class_attributes(&cleaned)
+    let out = normalize_class_attributes(&cleaned);
+
+    // Restore in reverse so a prop literally named "children" unwinds correctly.
+    for (key, old) in saved.into_iter().rev() {
+        match old {
+            Some(value) => {
+                ctx.insert(key.to_string(), value);
+            }
+            None => {
+                ctx.remove(key);
+            }
+        }
+    }
+    out
 }
 
 pub fn normalize_class_attributes(html: &str) -> String {
@@ -1023,19 +1165,11 @@ pub fn normalize_class_attributes(html: &str) -> String {
         .into_owned()
 }
 
-pub fn build_component_attributes(
-    template: &str,
-    props: &HashMap<String, Value>,
-) -> String {
-    let mut used = HashSet::new();
-    for captures in crate::state::PROP_RE.captures_iter(template) {
-        used.insert(captures[1].to_string());
-    }
-
+fn attributes_from_meta(meta: &TemplateMeta, props: &HashMap<String, Value>) -> String {
+    let used = &meta.used;
     let mut attributes = Vec::with_capacity(props.len());
-    let button_default = template.to_ascii_lowercase().contains("<button");
 
-    if button_default && !props.contains_key("type") && !used.contains("type") {
+    if meta.has_button && !props.contains_key("type") && !used.contains("type") {
         attributes.push("type=\"button\"".to_string());
     }
 
@@ -1078,35 +1212,15 @@ pub fn build_component_attributes(
     attributes.join(" ")
 }
 
+const BOOLEAN_ATTRS: &[&str] = &[
+    "allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls", "default",
+    "defer", "disabled", "formnovalidate", "hidden", "inert", "ismap", "itemscope", "loop",
+    "multiple", "muted", "nomodule", "novalidate", "open", "playsinline", "readonly",
+    "required", "reversed", "selected",
+];
+
 pub fn is_boolean_attribute(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "allowfullscreen"
-            | "async"
-            | "autofocus"
-            | "autoplay"
-            | "checked"
-            | "controls"
-            | "default"
-            | "defer"
-            | "disabled"
-            | "formnovalidate"
-            | "hidden"
-            | "inert"
-            | "ismap"
-            | "itemscope"
-            | "loop"
-            | "multiple"
-            | "muted"
-            | "nomodule"
-            | "novalidate"
-            | "open"
-            | "playsinline"
-            | "readonly"
-            | "required"
-            | "reversed"
-            | "selected"
-    )
+    BOOLEAN_ATTRS.iter().any(|attr| name.eq_ignore_ascii_case(attr))
 }
 
 pub fn render_nested_vlo_content(content: &str, context: &mut RenderedPage) -> String {
@@ -1118,8 +1232,18 @@ pub fn render_nested_vlo_content(content: &str, context: &mut RenderedPage) -> S
     let mut source = strip_server_block(content);
 
     for _ in 0..20 {
-        let next_source = render_tag(&source, "BaseLayout", context);
-        let next_source = render_components(&next_source, context);
+        let layout = render_tag_opt(&source, "BaseLayout", context);
+        let components = {
+            let current = layout.as_deref().unwrap_or(&source);
+            render_components_opt(current, context)
+        };
+
+        // Nothing was rendered → the text is unchanged: done (no copy, no compare).
+        let next_source = match (components, layout) {
+            (Some(rendered), _) => rendered,
+            (None, Some(rendered)) => rendered,
+            (None, None) => break,
+        };
 
         if next_source == source {
             break;

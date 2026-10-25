@@ -1,0 +1,14 @@
+# Build artifacts
+/target/
+/dist/
+/.vlo/
+
+# Runtime data
+/vlo_app.db
+/vlo_app.db-shm
+/vlo_app.db-wal
+/storage/
+
+# Local secrets / session jars
+/.env
+/cookies.txt

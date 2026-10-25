@@ -1,4 +1,4 @@
-<BaseLayout title="Users" auth="true" roles="Admin" cache="static">
+<BaseLayout title="Users" auth="true" roles="Admin" cache="live">
   <div class="products-list-card">
     <Card title="Users" description="All registered users.">
       <div class="products-table-wrap">

@@ -221,7 +221,7 @@ pub fn render_email_template(template_name: &str, variables: &std::collections::
             let rendered_body = crate::template::render_interpolations(&body, variables);
             let rendered_body = crate::template::render_control_flow(&rendered_body, variables);
             let rendered_subject = if subject.trim().is_empty() { "Notification".to_string() } else {
-                let s = crate::template::render_interpolations(&subject, variables);
+                let s = crate::template::render_interpolations_raw(&subject, variables);
                 crate::template::render_control_flow(&s, variables)
             };
             Some(EmailTemplate { subject: rendered_subject, body: rendered_body })

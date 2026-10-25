@@ -425,8 +425,9 @@ macro_rules! impl_transaction {
         async fn $fn_name(pool: &$pool_type, stmts: &[String]) -> Result<Vec<Value>, String> {
             let mut tx = pool.begin().await.map_err(|e| format!("Begin tx: {}", e))?;
             let mut last_rows = Vec::new();
-            
-            for s in stmts {
+            let total = stmts.len();
+
+            for (idx, s) in stmts.iter().enumerate() {
                 match sqlx::query(s).fetch_all(&mut *tx).await {
                     Ok(rows) => {
                         let col_types = if let Some(first_row) = rows.first() {
@@ -437,8 +438,21 @@ macro_rules! impl_transaction {
                         last_rows = rows.iter().map(|row| convert_row_to_json!(row, &col_types)).collect();
                     }
                     Err(e) => {
-                        let _ = tx.rollback().await;
-                        return Err(format!("SQL error: {}", e));
+                        if let Err(rb) = tx.rollback().await {
+                            crate::vlo_debug!("⚠️ [TX] Rollback failed after stmt {}: {}", idx + 1, rb);
+                        }
+                        let preview = if s.len() > 300 {
+                            format!("{}… ({} chars)", &s[..300], s.len())
+                        } else {
+                            s.to_string()
+                        };
+                        crate::vlo_debug!("❌ [TX] Statement {}/{} FAILED", idx + 1, total);
+                        crate::vlo_debug!("❌ [TX] SQL: {}", preview);
+                        crate::vlo_debug!("❌ [TX] Error: {}", e);
+                        return Err(format!(
+                            "SQL error at statement {}/{}: {}\n--- SQL ---\n{}",
+                            idx + 1, total, e, preview
+                        ));
                     }
                 }
             }
@@ -448,11 +462,9 @@ macro_rules! impl_transaction {
     };
 }
 
-// Generate the three functions instantly
 impl_transaction!(run_tx_sqlite, sqlx::SqlitePool);
 impl_transaction!(run_tx_pg, sqlx::PgPool);
 impl_transaction!(run_tx_mysql, sqlx::MySqlPool);
-
 // ===========================================================================
 // 6. INITIALIZATION
 // ===========================================================================

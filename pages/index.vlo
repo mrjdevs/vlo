@@ -8,7 +8,7 @@
             <a href="/pricing">Pricing</a>
             <a href="/about">About</a>
             <a href="/docs">Docs</a>
-            <a href="/dashboard">Dashboard</a>
+            <a href="/admin/dashboard">Dashboard</a>
         </Navbar>'
 
     hero="<HeroLayout

@@ -53,19 +53,30 @@ impl Feature {
 
 static ENABLED_FEATURES: OnceLock<HashSet<Feature>> = OnceLock::new();
 
-pub fn init_features() {
+pub fn init_features() -> Result<(), String> {
     let features_str = std::env::var("VLO_FEATURES")
         .unwrap_or_else(|_| "auth,database,api,modules,email,sse,files,flash,pagination,directives".to_string());
 
-    let features: HashSet<Feature> = features_str
-        .split(',')
-        .map(|s| s.trim())  
-        .filter(|s| !s.is_empty()) 
-        .filter_map(Feature::from_str) 
-        .collect();
+    let mut features = HashSet::new();
+    for raw in features_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let feature = Feature::from_str(raw)
+            .ok_or_else(|| format!("Unknown feature `{raw}` in VLO_FEATURES"))?;
+        features.insert(feature);
+    }
 
-    ENABLED_FEATURES.set(features).ok();
-    
+    for dependent in [Feature::Auth, Feature::Api, Feature::Jobs] {
+        if features.contains(&dependent) && !features.contains(&Feature::Database) {
+            return Err(format!(
+                "Feature `{}` requires `database` to be enabled",
+                dependent.name()
+            ));
+        }
+    }
+
+    ENABLED_FEATURES
+        .set(features)
+        .map_err(|_| "Features were already initialized".to_string())?;
+
     // Print enabled features to console on startup
     let enabled: Vec<&str> = enabled_features().iter().map(|f| f.name()).collect();
     if enabled.is_empty() {
@@ -73,6 +84,7 @@ pub fn init_features() {
     } else {
         crate::vlo_debug!("⚙️  [FEATURES] Enabled: {}", enabled.join(", "));
     }
+    Ok(())
 }
 pub fn is_enabled(feature: Feature) -> bool {
     ENABLED_FEATURES

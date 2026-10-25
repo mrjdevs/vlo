@@ -113,7 +113,7 @@ footer='<Footer />'>
                     
                     <!-- 🔥 NEW: ADD TO CART BUTTON -->
                     {if product.stock > 0}
-                      <form v-post="/api/cart_items" alert="false" style="display:inline; margin:0;">
+                      <form v-post="/api/cart_items" alert="false" data-vlo-no-reload style="display:inline; margin:0;">
                         <input type="hidden" name="product_id" value="{{product.id}}">
                         <input type="hidden" name="quantity" value="1">
                         <button type="submit" class="icon-btn icon-btn-cart" title="Add to Cart">

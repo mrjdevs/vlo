@@ -52,9 +52,11 @@ fn m_words(v: String, _: Option<String>) -> String { v.split_whitespace().count(
 fn m_len(v: String, _: Option<String>) -> String { v.chars().count().to_string() }
 fn m_string(v: String, _: Option<String>) -> String { v }
 fn m_escape(v: String, _: Option<String>) -> String {
-    v.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+    crate::template::escape_html_text(&v)
 }
-fn m_nl2br(v: String, _: Option<String>) -> String { v.replace('\n', "<br>") }
+fn m_nl2br(v: String, _: Option<String>) -> String {
+    crate::template::escape_html_text(&v).replace('\n', "<br>")
+}
 fn m_upper_words(v: String, arg: Option<String>) -> String {
     let n: usize = arg.as_deref().unwrap_or("1").parse().unwrap_or(1);
     v.split_whitespace().enumerate().map(|(i,w)| if i<n { w.to_uppercase() } else { w.to_string() }).collect::<Vec<_>>().join(" ")
@@ -543,6 +545,7 @@ fn m_image(v: String, arg: Option<String>) -> String {
 
     let encoded = urlencoding::encode(&full_url);
     let base = "/__vlo/image";
+    let sizes = crate::template::escape_html_attribute(&sizes);
 
     // ── URL factory (captures owned `fit` by reference — fine)
     let make_url = |w: u32, h: u32, f: &str, q: u8| {
@@ -612,9 +615,12 @@ fn m_image(v: String, arg: Option<String>) -> String {
 }
 // ── Real-time / Live Updates ─────────────────────────────────────────────
 fn m_sync(v: String, arg: Option<String>) -> String {
-    let channel = arg.unwrap_or_else(|| "default".into());
+    let channel = crate::template::escape_html_attribute(
+        &arg.unwrap_or_else(|| "default".into()),
+    );
     // 🔥 Only output the span. The script is now injected globally by wrap_html.
-    format!(r#"<span class="vlo-live" data-channel="{}">{}</span>"#, channel, v)
+    let value = crate::template::escape_html_text(&v);
+    format!(r#"<span class="vlo-live" data-channel="{}">{}</span>"#, channel, value)
 }
 
 // ── AJAX Core Script (injected ONCE by wrap_html) ─────────────────────
@@ -639,13 +645,25 @@ pub const AJAX_CORE_BASE: &str = r##"
     if (!el) return;
     var id = V.seq[sel] = (V.seq[sel] || 0) + 1;
     el.style.opacity = "0.5";
-    fetch(url, { credentials: "same-origin" })
+    // 🔥 cache-bust so a stale HTML can never survive a mutation
+    var sep = url.indexOf("?") === -1 ? "?" : "&";
+    var bustUrl = url + sep + "_vlo_ts=" + Date.now();
+    fetch(bustUrl, { credentials: "same-origin", cache: "no-store" })
       .then(function(r) { return r.text(); })
       .then(function(html) {
         if (id !== V.seq[sel]) return;
         var doc = new DOMParser().parseFromString(html, "text/html");
         var fresh = doc.querySelector(sel);
-        if (!fresh) { location.href = url; return; }
+        if (!fresh) {
+          // 🔥 soft-fallback: wrapper legitimately absent (e.g. empty cart)
+          if (el.hasAttribute("data-soft")) {
+            el.innerHTML = "";
+            if (push) history.pushState({}, "", url);
+            return;
+          }
+          location.href = url;
+          return;
+        }
         el.innerHTML = fresh.innerHTML;
         if (push) history.pushState({}, "", url);
         if (window.__VLO_AJAX_WATCH__) window.__VLO_AJAX_WATCH__(sel);
@@ -831,17 +849,23 @@ fn m_ajax(v: String, arg: Option<String>) -> String {
         );
     }
     
-    // JSON MODE (small, per-element, no queue needed)
+    // JSON MODE — per-element, updates on vlo:mutation
     let safe_class = if url.is_empty() {
         "vlo-ajax-listen".to_string()
     } else {
-        format!("vlo-ajax-{}", url.replace('/', "-").replace('?', "-").replace('&', "-").trim_matches('-'))
+        ajax_class(url)
     };
+    let url_attr = crate::template::escape_html_attribute(url);
+    let target_attr = crate::template::escape_html_attribute(target);
+    let value = crate::template::escape_html_text(&v);
 
     format!(
         r#"<span class="{}" data-url="{}" data-interval="{}" data-field="{}">{}</span><script>
     (function() {{
-        function doFetch(el) {{
+        var el = document.querySelector('.{}');
+        if (!el || el.__vloWired) return;
+        el.__vloWired = true;
+        function doFetch() {{
             fetch(el.dataset.url, {{credentials:'same-origin'}})
                 .then(r => r.json())
                 .then(res => {{
@@ -860,26 +884,23 @@ fn m_ajax(v: String, arg: Option<String>) -> String {
                     }}
                 }}).catch(e => console.error('[VLO AJAX]', e));
         }}
-        document.querySelectorAll('.{}').forEach(el => {{
-            doFetch(el);
-            if (el.dataset.interval > 0) setInterval(() => doFetch(el), el.dataset.interval);
-        }});
-        // 🔥 Listen for mutations and re-fetch
-        if (!window.__VLO_JSON_MUT__) window.__VLO_JSON_MUT__ = {{}};
-        if (!window.__VLO_JSON_MUT__['{}']) {{
-            window.__VLO_JSON_MUT__['{}'] = true;
-            window.addEventListener('vlo:mutation', () => {{
-                document.querySelectorAll('.{}').forEach(el => doFetch(el));
-            }});
-        }}
+        doFetch();
+        if (el.dataset.interval > 0) setInterval(doFetch, el.dataset.interval);
+        // 🔥 Re-fetch on every vlo:mutation (add/update/delete)
+        window.addEventListener('vlo:mutation', doFetch);
     }})();
     </script>"#,
-        safe_class, url, interval, target, v, 
-        safe_class, // For document.querySelectorAll('.{}')
-        safe_class, // For window.__VLO_JSON_MUT__['{}']
-        safe_class, // For window.__VLO_JSON_MUT__['{}'] = true
-        safe_class  // For document.querySelectorAll('.{}') inside the listener
+        safe_class, url_attr, interval, target_attr, value, safe_class
     )
+}
+
+fn ajax_class(url: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in url.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("vlo-ajax-{hash:016x}")
 }
 // ── Developer Experience ─────────────────────────────────────────────
 fn m_debug(v: String, arg: Option<String>) -> String {
@@ -1017,6 +1038,17 @@ pub fn registry() -> HashMap<&'static str, ModifierFn> {
 pub static REG: LazyLock<HashMap<&'static str, ModifierFn>> = LazyLock::new(registry);
 
 // ── Public entry point ───────────────────────────────────────────────
+/// True when the chain's output is HTML (or already escaped), so the template
+/// interpolator must not escape it a second time.
+pub fn chain_is_html_output(chain: &str) -> bool {
+    parse_chain(chain).iter().any(|(name, _)| {
+        matches!(
+            name.as_str(),
+            "raw" | "safe" | "escape" | "nl2br" | "image" | "sync" | "ajax"
+        )
+    })
+}
+
 pub fn apply(value: Value, chain: &str) -> String {
     let original = value.clone();
     let mut current = value_to_string(&value);

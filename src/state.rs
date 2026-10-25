@@ -256,7 +256,6 @@ pub struct CachedHtml {
 pub static HTML_RENDER_CACHE: LazyLock<Mutex<HashMap<String, CachedHtml>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-#[allow(dead_code)]
 pub fn clear_html_render_cache() {
     if let Ok(mut cache) = HTML_RENDER_CACHE.lock() {
         cache.clear();

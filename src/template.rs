@@ -17,6 +17,49 @@ static RUNTIME_DATA_SOURCE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// Prefix marking a string that is already rendered, trusted HTML. The
+/// interpolator strips it and emits the payload unescaped. `|raw` / `|safe`
+/// provide the same opt-in for plain values.
+pub const SAFE_HTML_MARKER: &str = "\u{1}__VLO_SAFE_HTML__";
+
+pub fn mark_safe_html(value: String) -> String {
+    if value.is_empty() || value.starts_with(SAFE_HTML_MARKER) {
+        value
+    } else {
+        let mut out = String::with_capacity(SAFE_HTML_MARKER.len() + value.len());
+        out.push_str(SAFE_HTML_MARKER);
+        out.push_str(&value);
+        out
+    }
+}
+
+#[inline]
+fn strip_safe_markers(value: &str) -> Cow<'_, str> {
+    if value.contains(SAFE_HTML_MARKER) {
+        Cow::Owned(value.replace(SAFE_HTML_MARKER, ""))
+    } else {
+        Cow::Borrowed(value)
+    }
+}
+
+#[inline]
+fn strip_safe_prefix(value: &str) -> (&str, bool) {
+    match value.strip_prefix(SAFE_HTML_MARKER) {
+        Some(rest) => (rest, true),
+        None => (value, false),
+    }
+}
+
+fn resolve_operand_stripped(operand: &str, context: &HashMap<String, Value>) -> Value {
+    match resolve_operand(operand, context) {
+        Value::String(value) => match value.strip_prefix(SAFE_HTML_MARKER) {
+            Some(rest) => Value::String(strip_safe_markers(rest).into_owned()),
+            None => Value::String(value),
+        },
+        other => other,
+    }
+}
+
 // ═════════════════════════════════════════════════════════════
 // Quote mask — one linear byte pass
 //
@@ -792,6 +835,7 @@ fn set_var(map: &mut HashMap<String, Value>, key: &str, value: Value) {
 }
 
 /// Public API kept as-is (borrowed context); clones once and delegates.
+
 #[inline]
 fn body_mutates_context(text: &str) -> bool {
     text.contains("{assign ") || text.contains("{capture")
@@ -1029,7 +1073,7 @@ fn evaluate_capture(
     let rendered = render_control_flow_internal(inner, context, preserve_unresolved);
     let trimmed = name.trim();
     if !trimmed.is_empty() {
-        context.insert(trimmed.to_string(), Value::String(rendered));
+        context.insert(trimmed.to_string(), Value::String(mark_safe_html(rendered)));
     }
 }
 
@@ -1104,7 +1148,17 @@ fn evaluate_firstof(expr: &str, context: &HashMap<String, Value>) -> String {
     for part in expr.split_whitespace() {
         let val = resolve_operand_cow(part, context);
         if is_truthy(&val) {
-            return format_value(&val);
+            return match &*val {
+                Value::String(value) => {
+                    let (payload, safe) = strip_safe_prefix(value);
+                    if safe {
+                        payload.to_string()
+                    } else {
+                        escape_html_text(payload)
+                    }
+                }
+                other => escape_html_text(&format_value(other)),
+            };
         }
     }
     String::new()
@@ -1471,6 +1525,22 @@ pub fn render_control_flow(template: &str, context: &HashMap<String, Value>) -> 
     strip_flow_markers(out)
 }
 
+/// Renders `template` directly in `context` (no up-front deep clone).
+/// Used by the component renderer, which overlays props on the page context
+/// and restores it afterwards. If the template can write to the context
+/// (`{assign}` / `{capture}`) it falls back to a private clone, so nothing leaks.
+pub fn render_control_flow_in_scope(
+    template: &str,
+    context: &mut HashMap<String, Value>,
+) -> String {
+    let preserve = crate::state::is_building();
+    if body_mutates_context(template) {
+        let mut local = context.clone();
+        return strip_flow_markers(render_control_flow_internal(template, &mut local, preserve));
+    }
+    strip_flow_markers(render_control_flow_internal(template, context, preserve))
+}
+
 pub fn render_control_flow_for_build(
     template: &str,
     context: &HashMap<String, Value>,
@@ -1513,6 +1583,19 @@ pub fn render_control_flow_for_build(
 }
 
 pub fn render_interpolations(template: &str, context: &HashMap<String, Value>) -> String {
+    render_interpolations_mode(template, context, true)
+}
+
+/// Interpolation for non-HTML sinks (URLs, email subjects): no HTML escaping.
+pub fn render_interpolations_raw(template: &str, context: &HashMap<String, Value>) -> String {
+    render_interpolations_mode(template, context, false)
+}
+
+fn render_interpolations_mode(
+    template: &str,
+    context: &HashMap<String, Value>,
+    html_escape: bool,
+) -> String {
     if !template.contains("{{") {
         return template.to_string();
     }
@@ -1529,24 +1612,65 @@ pub fn render_interpolations(template: &str, context: &HashMap<String, Value>) -
                 return full.as_str().to_string();
             }
 
-            let quoted = in_quotes.get_or_init(|| quote_mask(template))[full.start()];
+            let quoted =
+                html_escape && in_quotes.get_or_init(|| quote_mask(template))[full.start()];
             let mut out = String::new();
             if let Some((base, chain)) = key.split_once('|') {
-                let value = crate::modifier::apply(resolve_operand(base.trim(), context), chain);
-                if quoted { push_attr_escaped(&mut out, &value) } else { out = value }
+                let value = resolve_operand_stripped(base.trim(), context);
+                let value = crate::modifier::apply(value, chain);
+                let safe_output =
+                    !html_escape || crate::modifier::chain_is_html_output(chain);
+                push_rendered_interpolation(&mut out, &value, quoted, safe_output);
             } else {
                 let value = resolve_operand_cow(key, context);
-                if quoted {
-                    let mut tmp = String::new();
-                    append_value(&mut tmp, &value);
-                    push_attr_escaped(&mut out, &tmp);
-                } else {
-                    append_value(&mut out, &value);
-                }
+                push_value_interpolation(&mut out, &value, quoted, !html_escape);
             }
             out
         })
         .into_owned()
+}
+
+/// Emits a value that has already been through modifiers.
+#[inline]
+fn push_rendered_interpolation(out: &mut String, value: &str, quoted: bool, safe_output: bool) {
+    let value = strip_safe_markers(value);
+    if quoted {
+        push_attr_escaped(out, &value);
+    } else if safe_output {
+        out.push_str(&value);
+    } else {
+        push_text_escaped(out, &value);
+    }
+}
+
+#[inline]
+fn push_value_interpolation(
+    out: &mut String,
+    value: &Value,
+    quoted: bool,
+    raw_output: bool,
+) {
+    if let Value::String(value) = value {
+        let (payload, safe) = strip_safe_prefix(value);
+        let payload = strip_safe_markers(payload);
+        if quoted {
+            push_attr_escaped(out, &payload);
+        } else if safe || raw_output {
+            out.push_str(&payload);
+        } else {
+            push_text_escaped(out, &payload);
+        }
+    } else {
+        let mut tmp = String::new();
+        append_value(&mut tmp, value);
+        if quoted {
+            push_attr_escaped(out, &tmp);
+        } else if raw_output {
+            out.push_str(&tmp);
+        } else {
+            push_text_escaped(out, &tmp);
+        }
+    }
 }
 
 /// Appends `format_value(val)` without the intermediate String.
@@ -1606,6 +1730,31 @@ fn push_attr_escaped(out: &mut String, value: &str) {
             c => out.push(c),
         }
     }
+}
+
+/// Text-context escaping. Braces are encoded too so user data containing
+/// `{{...}}` cannot be re-interpreted by a later interpolation pass.
+#[inline]
+fn push_text_escaped(out: &mut String, value: &str) {
+    out.reserve(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            '{' => out.push_str("&#123;"),
+            '}' => out.push_str("&#125;"),
+            c => out.push(c),
+        }
+    }
+}
+
+pub fn escape_html_text(value: &str) -> String {
+    let mut out = String::new();
+    push_text_escaped(&mut out, value);
+    out
 }
 
 pub fn escape_html_attribute(value: &str) -> String {
@@ -1695,18 +1844,14 @@ fn render_walk(
 
                 match chain {
                     Some(chain) => {
-                        let value = crate::modifier::apply(resolve_operand(base_key, context), chain);
-                        if quoted { push_attr_escaped(&mut result, &value) } else { result.push_str(&value) }
+                        let value = resolve_operand_stripped(base_key, context);
+                        let value = crate::modifier::apply(value, chain);
+                        let safe_output = crate::modifier::chain_is_html_output(chain);
+                        push_rendered_interpolation(&mut result, &value, quoted, safe_output);
                     }
                     None => {
                         let value = resolve_operand_cow(key, context);
-                        if quoted {
-                            let mut tmp = String::new();
-                            append_value(&mut tmp, &value);
-                            push_attr_escaped(&mut result, &tmp);
-                        } else {
-                            append_value(&mut result, &value);
-                        }
+                        push_value_interpolation(&mut result, &value, quoted, false);
                     }
                 }
                 cursor = end + 2;
@@ -1783,7 +1928,9 @@ fn strip_flow_markers(s: String) -> String {
     if !s.as_bytes().contains(&1) {
         return s;
     }
-    s.replace(BREAK_MARKER, "").replace(CONTINUE_MARKER, "")
+    s.replace(BREAK_MARKER, "")
+        .replace(CONTINUE_MARKER, "")
+        .replace(SAFE_HTML_MARKER, "")
 }
 
 fn is_runtime_var(var: &str) -> bool {

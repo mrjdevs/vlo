@@ -1,4 +1,4 @@
-<BaseLayout title="Your Shop" auth="true">
+<BaseLayout title="Your Shop" auth="true" roles="Admin, Editor, User">
 <div class="cart-page">
 
 <!-- ══════════════════════════ TABS ══════════════════════════ -->
@@ -73,11 +73,12 @@
     </div>
 
     <!-- ─── CART VIEW ─── -->
-    {if step == "" || step == null}
+   
       <!-- The AJAX wrapper -->
-      <div id="cart-wrapper">
-        {{ "" | ajax:",0,#cart-wrapper,html" }}
-        
+      <div id="cart-wrapper" data-soft>
+
+         {if step == "" || step == null}
+            {{ "" | ajax:",0,#cart-wrapper,html" }}
         <!-- The Data Source wraps EVERYTHING that uses cart_items -->
         <div data-source="/api/cart_items">
           <div class="cart-layout">
@@ -107,11 +108,15 @@
                       </div>
 
                       <!-- Quantity Update -->
-                      <form v-put="/api/cart_items/{{item.cart_item_id}}" class="cart-item-actions" alert="false">
+                      <form v-put="/api/cart_items/{{item.cart_item_id}}" v-auto class="cart-item-actions" alert="false" data-vlo-no-reload>
                         <label for="qty-{{item.cart_item_id}}">Quantity</label>
                         <input id="qty-{{item.cart_item_id}}" type="number" name="quantity"
-                               min="1" max="{{item.max_quantity}}" value="{{item.quantity}}"
-                               onchange="this.form.submit()" required>
+                               min="1" max="{{item.max_quantity}}" value="{{item.quantity}}" step="1"
+                               title="{{item.max_quantity}} in stock"
+                               oninput="this.setCustomValidity('')"
+                               oninvalid="this.setCustomValidity(this.value === '' ? 'Enter a quantity.' : (+this.value > +this.max ? 'Only ' + this.max + ' in stock.' : (+this.value < +this.min ? 'Quantity must be at least 1.' : '')))"
+                               required>
+                        <small class="cart-stock-note">{{item.max_quantity}} in stock</small>
                       </form>
 
                       <div class="cart-line-total">
@@ -129,9 +134,9 @@
                     </article>
                   {/for}
                 </div>
-                <form class="cart-clear-form">
-                  <button v-delete="/api/cart" v-confirm="Clear entire cart?" class="cart-clear">Clear Cart</button>
-                </form>
+                  <form class="cart-clear-form" data-vlo-no-reload>
+                    <button v-delete="/api/cart" v-confirm="Clear entire cart?" class="cart-clear">Clear Cart</button>
+                  </form>
               {else}
                 <div class="cart-empty">
                   <span class="cart-empty-icon">🛒</span>
@@ -663,6 +668,7 @@
 .cart-item-actions{display:flex;flex-direction:column;gap:6px}
 .cart-item-actions label,.cart-field label{color:#aaa;font-size:.8rem}
 .cart-item-actions input{width:76px}
+.cart-stock-note{color:#777;font-size:.72rem}
 .cart-page input,.cart-page select,.cart-page textarea{box-sizing:border-box;max-width:100%;padding:10px 12px;border:1px solid var(--border,#333);border-radius:7px;background:var(--background,#0b0b0b);color:var(--text,#eee);font:inherit}
 .cart-page input:focus,.cart-page select:focus,.cart-page textarea:focus{outline:2px solid var(--primary,#00f5ff);outline-offset:1px}
 .cart-line-total{display:flex;flex-direction:column;align-items:flex-end;gap:8px;white-space:nowrap}

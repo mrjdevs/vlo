@@ -22,6 +22,7 @@ use axum::{
         header::{CACHE_CONTROL, HeaderName, HeaderValue},
         StatusCode, Uri,
     },
+    response::Redirect,
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::get,
@@ -48,6 +49,7 @@ use tower_http::{
 // ─────────────────────────────────────────────────────────────
 struct BuildCache {
     manifest: serde_json::Value,
+    manifest_trusted: bool,
     pages: HashMap<String, Arc<str>>,
     initialized: bool,
 }
@@ -56,6 +58,7 @@ impl BuildCache {
     fn empty() -> Self {
         Self {
             manifest: serde_json::Value::Object(serde_json::Map::new()),
+            manifest_trusted: true,
             pages: HashMap::new(),
             initialized: false,
         }
@@ -63,15 +66,18 @@ impl BuildCache {
 
     fn load(build_dir: &Path) -> Self {
         let manifest_path = build_dir.join("routes.json");
-        let manifest = fs::read_to_string(&manifest_path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
+        let (manifest, manifest_trusted) = match fs::read_to_string(&manifest_path) {
+            Ok(raw) => match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(value) if value.is_object() => (value, true),
+                _ => (serde_json::Value::Object(serde_json::Map::new()), false),
+            },
+            Err(_) => (serde_json::Value::Object(serde_json::Map::new()), false),
+        };
 
         let mut pages = HashMap::new();
         walk_html_files(build_dir, build_dir, &mut pages);
 
-        Self { manifest, pages, initialized: true }
+        Self { manifest, manifest_trusted, pages, initialized: true }
     }
 }
 
@@ -152,6 +158,7 @@ fn ensure_build_cache(build_dir: &Path) -> Arc<BuildCache> {
 
 fn invalidate_build_cache() {
     *cache_cell().write().unwrap() = Arc::new(BuildCache::empty());
+    crate::state::clear_html_render_cache();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -235,11 +242,24 @@ async fn healthz_handler() -> impl IntoResponse {
     )
 }
 
-async fn broadcast_handler(axum::Json(payload): axum::Json<serde_json::Value>) -> impl IntoResponse {
+async fn broadcast_handler(
+    axum::Extension(auth): axum::Extension<crate::auth::AuthUser>,
+    connect_info: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    axum::Json(payload): axum::Json<serde_json::Value>,
+) -> Response {
+    let authorized = if is_enabled(Feature::Auth) {
+        auth.user.as_ref().is_some_and(|u| u.role == "Admin")
+    } else {
+        connect_info.is_some_and(|axum::extract::ConnectInfo(addr)| addr.ip().is_loopback())
+    };
+    if !authorized {
+        return (StatusCode::FORBIDDEN, axum::Json(serde_json::json!({ "success": false }))).into_response();
+    }
+
     let channel = payload.get("channel").and_then(|v| v.as_str()).unwrap_or("default");
     let value = payload.get("value").cloned().unwrap_or(serde_json::Value::Null);
     crate::router::broadcast_live(channel, &value);
-    (StatusCode::OK, axum::Json(serde_json::json!({ "success": true })))
+    (StatusCode::OK, axum::Json(serde_json::json!({ "success": true }))).into_response()
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -274,6 +294,34 @@ fn has_immutable_extension(path: &str) -> bool {
     EXTS.iter().any(|e| e.eq_ignore_ascii_case(ext))
 }
 
+async fn security_headers_middleware(req: Request, next: Next) -> Response {
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+    headers
+        .entry(HeaderName::from_static("x-content-type-options"))
+        .or_insert(HeaderValue::from_static("nosniff"));
+    headers
+        .entry(HeaderName::from_static("x-frame-options"))
+        .or_insert(HeaderValue::from_static("DENY"));
+    headers
+        .entry(HeaderName::from_static("referrer-policy"))
+        .or_insert(HeaderValue::from_static("strict-origin-when-cross-origin"));
+    headers
+        .entry(HeaderName::from_static("permissions-policy"))
+        .or_insert(HeaderValue::from_static(
+            "camera=(), microphone=(), geolocation=()",
+        ));
+    headers
+        .entry(HeaderName::from_static("content-security-policy"))
+        .or_insert(HeaderValue::from_static(
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' blob:; \
+             connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; \
+             frame-ancestors 'none'",
+        ));
+    response
+}
+
 async fn cache_middleware(req: Request, next: Next) -> Response {
     let path = req.uri().path();
     let is_sse = path.starts_with("/__vlo_sse");
@@ -284,13 +332,18 @@ async fn cache_middleware(req: Request, next: Next) -> Response {
 
     let mut response = next.run(req).await;
 
-    // SSE: no-store + defeat proxy buffering
     if is_sse {
         response.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
         response.headers_mut().insert(
             HeaderName::from_static("x-accel-buffering"),
             HeaderValue::from_static("no"),
         );
+        return response;
+    }
+
+    // 🔥 Don't clobber an explicit Cache-Control set by the handler
+    //    (e.g. Live-tier pages return "no-store, private").
+    if response.headers().contains_key(CACHE_CONTROL) {
         return response;
     }
 
@@ -340,6 +393,8 @@ fn build_common_routes() -> Router {
         .route("/__vlo/image", get(crate::files_api::optimize_image))
         .route("/uploads/*path", get(serve_file))
         .route("/healthz", get(healthz_handler))
+        // Legacy/entry URL used by older nav links and redirects.
+        .route("/dashboard", get(|| async { Redirect::to("/admin/dashboard") }))
         .route("/__vlo/ajax.js", get(crate::router::ajax_js_handler))
 
         // 🔥 GENERIC FILE API — admin-only, whitelisted dirs only.
@@ -363,18 +418,14 @@ fn build_common_routes() -> Router {
             .route("/api/files/upload", axum::routing::post(crate::files_api::upload_file))
             .route("/api/files/:id/download", get(crate::files_api::download_file))
             .route("/api/files/:id", get(crate::files_api::get_file).delete(crate::files_api::delete_file))
-            .nest_service(
-                "/storage",
-                tower_http::services::ServeDir::new(get_project_root().join("storage"))
-                    .append_index_html_on_directories(false),
-            );
+            .route("/storage/*path", get(crate::files_api::serve_file));
     }
     if is_enabled(Feature::Auth) {
         app = app
             .route("/api/auth/login", axum::routing::post(auth::login_handler))
             .route(
                 "/api/auth/logout",
-                axum::routing::post(auth::logout_handler).get(auth::logout_handler),
+                axum::routing::post(auth::logout_handler),
             )
             .route("/api/auth/me", axum::routing::get(auth::me_handler))
             .route("/api/auth/register", axum::routing::post(auth::register_handler))
@@ -429,9 +480,10 @@ fn build_common_routes() -> Router {
 
 fn apply_common_layers(app: Router) -> Router {
     let mut app = app
-        .layer(DefaultBodyLimit::max(1024 * 1024 * 1024))
+        .layer(DefaultBodyLimit::max(25 * 1024 * 1024))
         .layer(CompressionLayer::new().compress_when(NotForContentType::new("text/event-stream")))
         .layer(middleware::from_fn(cache_middleware))
+        .layer(middleware::from_fn(security_headers_middleware))
         .layer(middleware::from_fn(request_id_middleware));
 
     if is_enabled(Feature::Auth) {
@@ -480,7 +532,7 @@ async fn run_server(
         .map(str::to_owned)
         .or_else(|| std::env::var("HOST").ok())
         .or_else(|| std::env::var("VLO_HOST").ok())
-        .unwrap_or_else(|| "0.0.0.0".to_string());
+        .unwrap_or_else(|| "127.0.0.1".to_string());
 
     let port_num = port
         .or_else(|| std::env::var("PORT").ok().and_then(|v| v.parse().ok()))
@@ -503,10 +555,13 @@ async fn run_server(
         tokio::spawn(session_cleanup_task());
     }
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .map_err(|e| format!("VLO {} server stopped unexpectedly.\n   Error: {}", server_type, e))
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .map_err(|e| format!("VLO {} server stopped unexpectedly.\n   Error: {}", server_type, e))
 }
 
 pub async fn dev(host: Option<&str>, port: Option<u16>) -> Result<(), String> {
@@ -709,9 +764,15 @@ fn extract_flash(cookie_header: Option<&str>) -> (Option<serde_json::Value>, Str
     };
 
     let variant = flash.get("variant").and_then(|v| v.as_str()).unwrap_or("success");
-    let icon = flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅");
-    let title = flash.get("title").and_then(|v| v.as_str()).unwrap_or("");
-    let description = flash.get("description").and_then(|v| v.as_str()).unwrap_or("");
+    let icon = crate::template::escape_html_text(
+        flash.get("icon").and_then(|v| v.as_str()).unwrap_or("✅"),
+    );
+    let title = crate::template::escape_html_text(
+        flash.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+    );
+    let description = crate::template::escape_html_text(
+        flash.get("description").and_then(|v| v.as_str()).unwrap_or(""),
+    );
     let border_color = match variant {
         "success" => "#00ff88",
         "error" => "#ff4444",
@@ -727,24 +788,61 @@ fn extract_flash(cookie_header: Option<&str>) -> (Option<serde_json::Value>, Str
     (Some(flash), html, true)
 }
 
+fn invalid_manifest_response() -> Response {
+    eprintln!("[VLO] routes.json contains an invalid guard entry — refusing to serve.");
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Html("500 - Invalid build manifest. Run `vlo build`.".to_string()),
+    )
+        .into_response()
+}
+
+/// Missing keys default to false; present-but-wrong-typed keys fail closed.
+fn manifest_bool(cfg: &serde_json::Value, key: &str) -> Result<bool, ()> {
+    match cfg.get(key) {
+        None => Ok(false),
+        Some(value) => value.as_bool().ok_or(()),
+    }
+}
+
 fn check_guard(
     cache: &BuildCache, path: &str, auth: &Option<crate::auth::AuthUser>, next: Option<&str>,
 ) -> Option<Response> {
     let cfg = cache.manifest.as_object()?.get(path)?;
-    let req_auth = cfg.get("auth").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !cfg.is_object() {
+        return Some(invalid_manifest_response());
+    }
+
+    let req_auth = match manifest_bool(cfg, "auth") {
+        Ok(v) => v,
+        Err(_) => return Some(invalid_manifest_response()),
+    };
 
     if !is_enabled(Feature::Auth) {
         return req_auth.then(|| (StatusCode::NOT_FOUND, Html("404 - Page Not Found".to_string())).into_response());
     }
 
-    let guard = crate::auth::PageGuard {
-        auth: req_auth,
-        guest: cfg.get("guest").and_then(|v| v.as_bool()).unwrap_or(false),
-        roles: cfg.get("roles").and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-            .unwrap_or_default(),
+    let guest = match manifest_bool(cfg, "guest") {
+        Ok(v) => v,
+        Err(_) => return Some(invalid_manifest_response()),
     };
-    
+    let roles = match cfg.get("roles") {
+        None => Vec::new(),
+        Some(serde_json::Value::Array(items)) => {
+            let mut roles = Vec::with_capacity(items.len());
+            for item in items {
+                match item.as_str() {
+                    Some(role) => roles.push(role.to_string()),
+                    None => return Some(invalid_manifest_response()),
+                }
+            }
+            roles
+        }
+        Some(_) => return Some(invalid_manifest_response()),
+    };
+
+    let guard = crate::auth::PageGuard { auth: req_auth, guest, roles };
+
     crate::auth::check_page_guard(&guard, &auth.as_ref().and_then(|a| a.user.clone()), path, next)
 }
 
@@ -898,7 +996,9 @@ fn parse_cache_policy(raw: &str) -> CachePolicy {
     CachePolicy { tier, browser_ttl, server_ttl }
 }
 
-fn apply_cache_headers(response: &mut Response, policy: &CachePolicy) {
+const HTML_RENDER_CACHE_MAX: usize = 512;
+
+fn apply_cache_headers(response: &mut Response, policy: &CachePolicy, personalized: bool) {
     let cache_control = match policy.tier {
         CacheTier::Static => {
             if policy.browser_ttl > 0 {
@@ -916,6 +1016,13 @@ fn apply_cache_headers(response: &mut Response, policy: &CachePolicy) {
         }
         CacheTier::Live => "no-store, private".to_string(),
         CacheTier::Auto => "private, no-store".to_string(),
+    };
+    // Personalized HTML (logged-in nav, flash toast, query-driven output) must
+    // never enter a shared/public cache.
+    let cache_control = if personalized && cache_control.starts_with("public") {
+        "private, no-cache, must-revalidate".to_string()
+    } else {
+        cache_control
     };
 
     response.headers_mut().insert(
@@ -945,12 +1052,38 @@ fn inject_per_request_dynamic(html: &mut String, auth: &Option<crate::auth::Auth
 
     // 3. SSE
     inject_sse_script(html, auth);
+
+    // 4. AJAX core for targets that only exist after runtime control-flow
+    //    rendering (e.g. shop cart). Build-time pages already carry it.
+    if html.contains("__VLO_AJAX_Q") && !html.contains("__VLO_AJAX_READY") {
+        let mut scripts = format!("<script>{}</script>", crate::modifier::AJAX_CORE_BASE);
+        if html.contains("data-load-more") || html.contains("data-append") {
+            scripts.push_str(&format!(
+                "\n<script>{}</script>",
+                crate::modifier::AJAX_CORE_LOADMORE
+            ));
+        }
+        if let Some(i) = html.rfind("</body>") {
+            html.insert_str(i, &scripts);
+        }
+    }
 }
 // ─────────────────────────────────────────────────────────────
 // serve_build_page — production page renderer with HTML caching
 // ─────────────────────────────────────────────────────────────
 async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Response {
     let cache = ensure_build_cache(&build_dir);
+
+    // Fail closed: a missing or unparsable routes.json must never silently
+    // disable page guards. Rebuild to regenerate it.
+    if is_enabled(Feature::Auth) && !cache.manifest_trusted {
+        eprintln!("[VLO] routes.json is missing or invalid — refusing to serve guarded pages. Run `vlo build`.");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Html("500 - Build manifest missing or invalid. Run `vlo build`.".to_string()),
+        )
+            .into_response();
+    }
 
     // 🔥 Normalize trailing slash: /admin/ → /admin (but keep "/" as "/")
     let raw_path = uri.path();
@@ -1007,14 +1140,29 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
             }
         });
 
-    // Cache key includes user role to prevent cross-user cache poisoning
-    let user_role = auth.as_ref()
-        .and_then(|a| a.user.as_ref().map(|u| u.role.as_str()))
-        .unwrap_or("guest");
-    let cache_key = format!("{}|{}", lookup, user_role);
+    // Cache key includes the full identity (id + role) and the query string so
+    // personalized HTML and query-driven pages can never collide.
+    let user_key = auth.as_ref()
+        .and_then(|a| a.user.as_ref())
+        .map(|u| format!("{}:{}", u.id, u.role))
+        .unwrap_or_else(|| "guest".to_string());
+    let raw_query = uri.query().unwrap_or("");
+    let query_cacheable = raw_query.len() <= 512;
+    let query_key = if raw_query.is_empty() {
+        String::new()
+    } else if query_cacheable {
+        format!("?{}", raw_query)
+    } else {
+        "?__oversized__".to_string()
+    };
+    let cache_key = format!("{}|{}|{}", lookup, user_key, query_key);
+    let cacheable = cache_policy.server_ttl > 0 && query_cacheable;
+    let personalized = auth.as_ref().and_then(|a| a.user.as_ref()).is_some()
+        || flash_value.is_some()
+        || !raw_query.is_empty();
 
     // ─── 2. Try Server Cache ───
-    if cache_policy.server_ttl > 0 {
+    if cacheable {
         if let Ok(cache_guard) = crate::state::HTML_RENDER_CACHE.lock() {
             if let Some(entry) = cache_guard.get(&cache_key) {
                 if entry.created_at.elapsed() < entry.ttl {
@@ -1022,7 +1170,7 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
                     inject_per_request_dynamic(&mut cached_html, &auth, &flash_html);
                     
                     let mut response = (StatusCode::OK, Html(cached_html)).into_response();
-                    apply_cache_headers(&mut response, &cache_policy);
+                    apply_cache_headers(&mut response, &cache_policy, personalized);
                     
                     if expire_cookie && is_enabled(Feature::Flash) {
                         if let Ok(v) = HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
@@ -1076,13 +1224,16 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
     let mut pre_injection_html = crate::template::render_control_flow(&page.html, &page.template_context);
 
     // ─── 4. Write to Server Cache ───
-    if cache_policy.server_ttl > 0 {
+    if cacheable {
         if let Ok(mut cache_guard) = crate::state::HTML_RENDER_CACHE.lock() {
-            cache_guard.insert(cache_key, crate::state::CachedHtml {
-                html: pre_injection_html.clone(),
-                created_at: std::time::Instant::now(),
-                ttl: std::time::Duration::from_secs(cache_policy.server_ttl),
-            });
+            cache_guard.retain(|_, entry| entry.created_at.elapsed() < entry.ttl);
+            if cache_guard.len() < HTML_RENDER_CACHE_MAX {
+                cache_guard.insert(cache_key, crate::state::CachedHtml {
+                    html: pre_injection_html.clone(),
+                    created_at: std::time::Instant::now(),
+                    ttl: std::time::Duration::from_secs(cache_policy.server_ttl),
+                });
+            }
         }
     }
 
@@ -1090,7 +1241,7 @@ async fn serve_build_page(build_dir: PathBuf, uri: Uri, req: Request) -> Respons
     inject_per_request_dynamic(&mut pre_injection_html, &auth, &flash_html);
     
     let mut response = (StatusCode::OK, Html(pre_injection_html)).into_response();
-    apply_cache_headers(&mut response, &cache_policy);
+    apply_cache_headers(&mut response, &cache_policy, personalized);
 
     if expire_cookie && is_enabled(Feature::Flash) {
         if let Ok(v) = HeaderValue::from_str(&crate::auth::expire_flash_cookie()) {
@@ -1143,15 +1294,15 @@ pub fn build(release: bool) -> Result<(), String> {
     let mut routes_manifest = serde_json::Map::new();
     build_pages_recursive(&pages, &pages, &build_dir, &mut routes_manifest)?;
 
-    if !routes_manifest.is_empty() {
-        let count = routes_manifest.len();
-        let manifest_path = build_dir.join("routes.json");
-        let json = serde_json::to_string_pretty(&serde_json::Value::Object(routes_manifest))
-            .map_err(|e| format!("Failed to serialize routes manifest: {}", e))?;
-        fs::write(&manifest_path, json)
-            .map_err(|e| format!("Failed to write routes manifest: {}", e))?;
-        println!("  ├─ Routes manifest: {} guards", count);
-    }
+    // Always write routes.json — serve treats a missing/invalid manifest as
+    // fail-closed, so its presence is part of the build contract.
+    let count = routes_manifest.len();
+    let manifest_path = build_dir.join("routes.json");
+    let json = serde_json::to_string_pretty(&serde_json::Value::Object(routes_manifest))
+        .map_err(|e| format!("Failed to serialize routes manifest: {}", e))?;
+    fs::write(&manifest_path, json)
+        .map_err(|e| format!("Failed to write routes manifest: {}", e))?;
+    println!("  ├─ Routes manifest: {} guards", count);
 
     if public.exists() {
         copy_dir_all(&public, &build_dir.join("static"))
@@ -1341,8 +1492,17 @@ static RE_STRIP: LazyLock<regex::Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+static RE_STRIP_AUTO: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?is)\s+v-auto(?:\s*=\s*["'][^"']*["'])?(\s|$)"#).unwrap()
+});
+
+static RE_HAS_AUTO: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?is)(?:^|\s)v-auto(?:\s|=|$)"#).unwrap()
+});
+
 pub fn strip_vlo_directive_attrs(attrs: &str) -> String {
-    RE_STRIP.replace_all(attrs, "").into_owned()
+    let stripped = RE_STRIP.replace_all(attrs, "");
+    RE_STRIP_AUTO.replace_all(&stripped, "$1").into_owned()
 }
 
 /// Word-boundary aware attribute lookup. Avoids `v-param` matching
@@ -1393,7 +1553,11 @@ pub fn resolve_directives(source: &str) -> String {
             }
             "put" => {
                 let mut s = format!("data-vlo-put=\"{}\"", escape_html_attribute(&url));
-                if !tag.eq_ignore_ascii_case("form") {
+                if tag.eq_ignore_ascii_case("form") {
+                    if RE_HAS_AUTO.is_match(&all_attrs) {
+                        s.push_str(" data-vlo-auto");
+                    }
+                } else {
                     let param = attr_val(&all_attrs, "v-param").unwrap_or("value");
                     let prompt = attr_val(&all_attrs, "v-prompt").unwrap_or("Enter new value:");
                     s.push_str(&format!(" data-vlo-param=\"{}\"", escape_html_attribute(param)));
@@ -1468,53 +1632,60 @@ pub fn inject_conditional_scripts(source: &str) -> String {
 // JS constants (unchanged — full feature coverage)
 // ─────────────────────────────────────────────────────────────
 const VLO_SHARED_RESPONSE_HANDLER_JS: &str = r##"
-function vloParseAlert(form){if(!form)return null;var v=form.getAttribute('data-vlo-alert')||form.getAttribute('alert');if(v===null||v==='')return null;if(v==='true'||v==='1')return{tag:'div',selector:null};if(v==='false'||v==='0')return null;var c=v.indexOf(':');if(c===-1)return{tag:'div',selector:v.trim()};var tag=v.slice(0,c).trim().toLowerCase()||'div';var sel=v.slice(c+1).trim();return{tag:tag,selector:sel||null}}
+function vloParseAlert(f){if(!f)return null;var v=f.getAttribute('data-vlo-alert')||f.getAttribute('alert');if(v===null||v==='')return null;if(v==='true'||v==='1')return{tag:'div',selector:null};if(v==='false'||v==='0')return null;var c=v.indexOf(':');if(c===-1)return{tag:'div',selector:v.trim()};var t=v.slice(0,c).trim().toLowerCase()||'div';var s=v.slice(c+1).trim();return{tag:t,selector:s||null}}
 
-function vloInsertAlert(form,config,className,styleCss,innerHtml){if(!config||!form)return;var el=document.createElement(config.tag);el.className=className;el.style.cssText=styleCss;el.innerHTML=innerHtml;if(config.selector){var t=document.querySelector(config.selector);if(t){t.appendChild(el);return}}var btn=form.querySelector('button[type="submit"]');if(btn)btn.parentNode.insertBefore(el,btn);else form.appendChild(el)}
+function vloEsc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 
-function vloHandleResponse(r,form){
-    return r.json().then(function(d){
-        var alertConfig=vloParseAlert(form);
-        if(!r.ok){
-            if(d.activation_required){
-                if(alertConfig&&form){var o=form.querySelector('.vlo-inline-error');if(o)o.remove();vloInsertAlert(form,alertConfig,'auth-alert vlo-inline-error','display:flex;flex-direction:column;gap:10px;margin-bottom:15px;padding:16px;background:rgba(0,245,255,0.05);border:1px solid rgba(0,245,255,0.25);border-radius:8px;font-size:0.9rem;','<div style="display:flex;align-items:center;gap:10px"><span style="background:rgba(0,245,255,0.1);color:#00f5ff;font-weight:bold;font-size:1.2rem;width:24px;height:24px;display:grid;place-items:center;border-radius:7px">i</span><p style="margin:0;color:#80f0ff">'+(d.error||'Account is not active')+' Please check your email.</p></div><button type="button" onclick="openResendActivationModal()" style="margin-top:8px;padding:8px 12px;background:#00f5ff;color:#000;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:0.8rem;">Resend Activation Email</button>')}
-                throw new Error("activation_required")
-            }
-            if(d.warning||(r.ok&&d.success&&d.warning)){
-                if(alertConfig&&form){var o=form.querySelector('.vlo-inline-error');if(o)o.remove();vloInsertAlert(form,alertConfig,'auth-alert vlo-inline-error','display:flex;align-items:center;gap:10px;margin-bottom:15px;padding:12px;background:rgba(255,170,0,0.1);border:1px solid rgba(255,170,0,0.3);border-radius:8px;font-size:0.9rem;','<span style="font-weight:bold;font-size:1.2rem">!</span><p style="margin:0;color:#ffaa00">'+(d.message||'Warning')+'</p>')}
-                if(form)setTimeout(function(){var m=form.closest('.vlo-modal-overlay');if(m)m.classList.remove('active');else window.location.reload()},4000);
-                throw new Error("warning")
-            }
-            throw new Error(d.error||d.details||d.message||'Request failed')
-        }
-        if(d.redirect){window.location.href=d.redirect;return}
-        if(Array.isArray(d.data)&&d.data[0]&&d.data[0].redirect){window.location.href=d.data[0].redirect;return}
-        if(form){
-            var o=form.querySelector('.vlo-inline-error');if(o)o.remove();
-            if(d.message&&alertConfig)vloInsertAlert(form,alertConfig,'auth-alert vlo-inline-error','display:flex;align-items:center;gap:10px;color:#00ff88;margin-bottom:15px;padding:12px;background:rgba(0,255,136,0.1);border:1px solid rgba(0,255,136,0.3);border-radius:8px;font-size:0.9rem;','<span style="font-weight:bold;font-size:1.2rem">OK</span><p style="margin:0;color:#00ff88">'+d.message+'</p>');
-            form.reset();
-            setTimeout(function(){var m=form.closest('.vlo-modal-overlay');if(m)m.classList.remove('active');else window.location.reload()},2000)
-        }
-        window.dispatchEvent(new CustomEvent('vlo:mutation'));
-        return d
-    })
-}
-function vloShowError(e,form){
-    if(e.message==="activation_required"||e.message==="warning")return;
-    console.error('[VLO API]',e);
-    if(!form){
-        var t=document.createElement('div');t.className='vlo-flash';t.style.cssText='position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';
-        t.innerHTML='<span style="font-size:1.4rem">!</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">'+(e.message||'Request failed')+'</span></div>';
-        document.body.appendChild(t);
-        setTimeout(function(){t.style.transition='opacity 0.4s';t.style.opacity='0';setTimeout(function(){t.remove()},400)},4000);
-        return
+function vloInsertAlert(f,cfg,cls,css,html){if(!cfg||!f)return;var el=document.createElement(cfg.tag);el.className=cls;el.style.cssText=css;el.innerHTML=html;if(cfg.selector){var t=document.querySelector(cfg.selector);if(t){t.appendChild(el);return}}var b=f.querySelector('button[type="submit"]');if(b)b.parentNode.insertBefore(el,b);else f.appendChild(el)}
+
+function vloShouldReload(f){return f&&!f.hasAttribute('data-vlo-no-reload')&&!f.hasAttribute('data-vlo-auto')}
+
+function vloSafeRedirect(v){if(!v)return null;if(typeof v==='object'&&v.redirect)return vloSafeRedirect(v.redirect);if(typeof v==='string'){var s=v.trim();if(s.charAt(0)==='{'){try{var o=JSON.parse(s);if(o&&o.redirect)return vloSafeRedirect(o.redirect)}catch(_){}}if(s.charAt(0)==='/'&&s.charAt(1)!=='/'&&s.indexOf('://')===-1)return s}return null}
+
+function vloHandleResponse(r,f){
+  return r.json().then(function(d){
+    var ac=vloParseAlert(f);
+    if(!r.ok){
+      if(d.activation_required){
+        if(ac&&f){var o=f.querySelector('.vlo-inline-error');if(o)o.remove();vloInsertAlert(f,ac,'auth-alert vlo-inline-error','display:flex;flex-direction:column;gap:10px;margin-bottom:15px;padding:16px;background:rgba(0,245,255,0.05);border:1px solid rgba(0,245,255,0.25);border-radius:8px;font-size:0.9rem;','<div style="display:flex;align-items:center;gap:10px"><span style="background:rgba(0,245,255,0.1);color:#00f5ff;font-weight:bold;font-size:1.2rem;width:24px;height:24px;display:grid;place-items:center;border-radius:7px">i</span><p style="margin:0;color:#80f0ff">'+vloEsc(d.error||'Account is not active')+' Please check your email.</p></div><button type="button" onclick="openResendActivationModal()" style="margin-top:8px;padding:8px 12px;background:#00f5ff;color:#000;border:none;border-radius:6px;font-weight:700;cursor:pointer;font-size:0.8rem;">Resend Activation Email</button>')}
+        throw new Error("activation_required")
+      }
+      if(d.warning||(r.ok&&d.success&&d.warning)){
+        if(ac&&f){var o=f.querySelector('.vlo-inline-error');if(o)o.remove();vloInsertAlert(f,ac,'auth-alert vlo-inline-error','display:flex;align-items:center;gap:10px;margin-bottom:15px;padding:12px;background:rgba(255,170,0,0.1);border:1px solid rgba(255,170,0,0.3);border-radius:8px;font-size:0.9rem;','<span style="font-weight:bold;font-size:1.2rem">!</span><p style="margin:0;color:#ffaa00">'+vloEsc(d.message||'Warning')+'</p>')}
+        if(f)setTimeout(function(){var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active');else if(vloShouldReload(f))window.location.reload()},4000);
+        throw new Error("warning")
+      }
+      throw new Error(d.error||d.details||d.message||'Request failed')
     }
-    var o=form.querySelector('.vlo-inline-error');if(o)o.remove();
-    var err=document.createElement('div');err.className='auth-alert vlo-inline-error';
-    err.style.cssText='display:flex;align-items:center;gap:10px;color:#ff4444;margin-bottom:15px;padding:12px;background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);border-radius:8px;font-size:0.9rem;';
-    err.innerHTML='<span style="font-weight:bold;font-size:1.2rem">!</span><p style="margin:0;color:#ff4444">'+(e.message||'Request failed')+'</p>';
-    var btn=form.querySelector('button[type="submit"]');
-    if(btn)btn.parentNode.insertBefore(err,btn);else form.appendChild(err)
+    var u=vloSafeRedirect(d.redirect)||(Array.isArray(d.data)&&d.data[0]&&vloSafeRedirect(d.data[0].redirect));
+    if(u){window.location.href=u;return}
+    if(f){
+      var o=f.querySelector('.vlo-inline-error');if(o)o.remove();
+      if(d.message&&ac)vloInsertAlert(f,ac,'auth-alert vlo-inline-error','display:flex;align-items:center;gap:10px;color:#00ff88;margin-bottom:15px;padding:12px;background:rgba(0,255,136,0.1);border:1px solid rgba(0,255,136,0.3);border-radius:8px;font-size:0.9rem;','<span style="font-weight:bold;font-size:1.2rem">OK</span><p style="margin:0;color:#00ff88">'+vloEsc(d.message)+'</p>')
+      if(!f.hasAttribute('data-vlo-auto'))f.reset();
+      setTimeout(function(){var m=f.closest('.vlo-modal-overlay');if(m)m.classList.remove('active');else if(vloShouldReload(f))window.location.reload()},2000)
+    }
+    window.dispatchEvent(new CustomEvent('vlo:mutation'));
+    return d
+  })
+}
+
+function vloShowError(e,f){
+  if(e.message==="activation_required"||e.message==="warning")return;
+  console.error('[VLO API]',e);
+  if(!f){
+    var t=document.createElement('div');t.className='vlo-flash';t.style.cssText='position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';
+    t.innerHTML='<span style="font-size:1.4rem">!</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">'+vloEsc(e.message||'Request failed')+'</span></div>';
+    document.body.appendChild(t);
+    setTimeout(function(){t.style.transition='opacity 0.4s';t.style.opacity='0';setTimeout(function(){t.remove()},400)},4000);
+    return
+  }
+  var o=f.querySelector('.vlo-inline-error');if(o)o.remove();
+  var err=document.createElement('div');err.className='auth-alert vlo-inline-error';
+  err.style.cssText='display:flex;align-items:center;gap:10px;color:#ff4444;margin-bottom:15px;padding:12px;background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);border-radius:8px;font-size:0.9rem;';
+  err.innerHTML='<span style="font-weight:bold;font-size:1.2rem">!</span><p style="margin:0;color:#ff4444">'+vloEsc(e.message||'Request failed')+'</p>';
+  var b=f.querySelector('button[type="submit"]');
+  if(b)b.parentNode.insertBefore(err,b);else f.appendChild(err)
 }
 "##;
 
@@ -1540,7 +1711,7 @@ document.addEventListener('click', function(e) {
         var t = document.createElement('div');
         t.className = 'vlo-flash';
         t.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';
-        t.innerHTML = '<span style="font-size:1.4rem">⚠️</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">' + (e.message || 'Request failed') + '</span></div>';
+        t.innerHTML = '<span style="font-size:1.4rem">⚠️</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">' + vloEsc(e.message || 'Request failed') + '</span></div>';
         document.body.appendChild(t);
         setTimeout(function() { t.style.transition = 'opacity 0.4s'; t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 400); }, 4000);
     })
@@ -1571,12 +1742,27 @@ document.addEventListener('submit', function(e) {
 "#;
 
 const VLO_PUT_HANDLER_JS: &str = r#"
+document.addEventListener('change', function(e) {
+    var form = e.target && e.target.closest ? e.target.closest('form[data-vlo-put][data-vlo-auto]') : null;
+    if (!form) return;
+    clearTimeout(form.__vloAutoTimer);
+    form.__vloAutoTimer = setTimeout(function() {
+        if (!form.isConnected) return;
+        if (form.requestSubmit) form.requestSubmit();
+        else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    }, 350);
+});
+
 document.addEventListener('submit', function(e) {
     const form = e.target;
     const url = form.getAttribute('data-vlo-put');
     if (!url) return;
     e.preventDefault();
+    if (form.__vloBusy) { form.__vloPending = true; return; }
     if (!form.checkValidity()) { form.reportValidity(); return; }
+    form.__vloBusy = true;
+    form.__vloPending = false;
+    if (form.hasAttribute('data-vlo-auto')) form.setAttribute('aria-busy', 'true');
     const submitBtn = form.querySelector('button[type="submit"]');
     if (submitBtn) { submitBtn.disabled = true; submitBtn.dataset.origText = submitBtn.innerText; submitBtn.innerText = 'Saving...'; }
     const mp = form.enctype === 'multipart/form-data';
@@ -1586,7 +1772,16 @@ document.addEventListener('submit', function(e) {
     fetch(url, { credentials: 'same-origin', method: 'PUT', headers: h, body: bd })
         .then(function(r) { return vloHandleResponse(r, form); })
         .catch(function(e) { vloShowError(e, form); })
-        .finally(function() { if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = submitBtn.dataset.origText || 'Save'; } });
+        .finally(function() {
+            form.__vloBusy = false;
+            form.removeAttribute('aria-busy');
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.innerText = submitBtn.dataset.origText || 'Save'; }
+            if (form.__vloPending && form.isConnected) {
+                form.__vloPending = false;
+                if (form.requestSubmit) form.requestSubmit();
+                else form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            }
+        });
 });
 
 document.addEventListener('click', function(e) {
@@ -1612,7 +1807,7 @@ document.addEventListener('click', function(e) {
         var t = document.createElement('div');
         t.className = 'vlo-flash';
         t.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;padding:16px 22px;border-radius:10px;background:#1a1a2e;border-left:4px solid #ff4444;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;max-width:380px;animation:vloFlashIn 0.35s ease';
-        t.innerHTML = '<span style="font-size:1.4rem">⚠️</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">' + (e.message || 'Request failed') + '</span></div>';
+        t.innerHTML = '<span style="font-size:1.4rem">⚠️</span><div><strong style="display:block;font-size:0.9rem;margin-bottom:2px">Error</strong><span style="color:#aaa;font-size:0.78rem">' + vloEsc(e.message || 'Request failed') + '</span></div>';
         document.body.appendChild(t);
         setTimeout(function() { t.style.transition = 'opacity 0.4s'; t.style.opacity = '0'; setTimeout(function() { t.remove(); }, 400); }, 4000);
     })
@@ -1681,7 +1876,7 @@ const SSE_SCRIPT: &str = r#"<script id="__VLO_SSE__">
         if (typeof data.value === 'object' && data.value !== null) {
           window.dispatchEvent(new CustomEvent('vlo:mutation'));
         } else {
-          els[i].innerHTML = data.value;
+          els[i].textContent = data.value;
           els[i].classList.add('vlo-sync-updated');
           (function(el){ setTimeout(function(){ el.classList.remove('vlo-sync-updated'); }, 600); })(els[i]);
         }
@@ -1691,3 +1886,55 @@ const SSE_SCRIPT: &str = r#"<script id="__VLO_SSE__">
   window.__VLO_SSE__.onerror = function(e) { console.error('VLO SSE connection error', e); };
 })();
 </script>"#;
+
+#[cfg(test)]
+mod directive_tests {
+    use super::*;
+
+    #[test]
+    fn v_auto_on_put_form_compiles_and_is_stripped() {
+        let out = resolve_directives(
+            r#"<form v-put="/api/cart_items/7" v-auto class="cart-item-actions" alert="false"><input name="quantity" value="1"></form>"#,
+        );
+        assert!(out.contains(r#"data-vlo-put="/api/cart_items/7""#), "{out}");
+        assert!(out.contains("data-vlo-auto"), "{out}");
+        assert!(!out.contains("v-auto"), "{out}");
+        assert!(out.contains(r#"class="cart-item-actions""#), "{out}");
+        assert!(out.contains(r#"alert="false""#), "{out}");
+    }
+
+    #[test]
+    fn v_auto_accepts_explicit_value() {
+        let out = resolve_directives(r#"<form v-auto="true" v-put="/api/x">"#);
+        assert!(out.contains("data-vlo-auto"), "{out}");
+        assert!(!out.contains("v-auto"), "{out}");
+    }
+
+    #[test]
+    fn v_auto_ignored_outside_put_forms() {
+        let out = resolve_directives(r#"<button v-put="/api/x" v-auto>Save</button>"#);
+        assert!(out.contains(r#"data-vlo-put="/api/x""#), "{out}");
+        assert!(!out.contains("data-vlo-auto"), "{out}");
+        assert!(!out.contains("v-auto"), "{out}");
+    }
+
+    #[test]
+    fn plain_put_form_has_no_auto_flag() {
+        let out = resolve_directives(r#"<form v-put="/api/x" class="f">"#);
+        assert!(out.contains(r#"data-vlo-put="/api/x""#), "{out}");
+        assert!(!out.contains("data-vlo-auto"), "{out}");
+    }
+
+    #[test]
+    fn v_auto_prefix_is_not_overmatched() {
+        let out = resolve_directives(r#"<form v-put="/api/x" data-v-autofocus="1">"#);
+        assert!(!out.contains("data-vlo-auto"), "{out}");
+        assert!(out.contains(r#"data-v-autofocus="1""#), "{out}");
+    }
+
+    #[test]
+    fn strip_keeps_neighbouring_attributes() {
+        assert_eq!(strip_vlo_directive_attrs(" v-auto class=\"a\""), " class=\"a\"");
+        assert_eq!(strip_vlo_directive_attrs(" v-auto"), "");
+    }
+}

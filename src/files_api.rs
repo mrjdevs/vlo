@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::{Multipart, Path as AxumPath, Query},
+    extract::{Extension, Multipart, Path as AxumPath, Query},
     http::{header, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -15,13 +15,23 @@ use std::{
 };
 use tokio::fs as tokio_fs;
 
+use crate::auth::AuthUser;
+use crate::features::{is_enabled, Feature};
 use crate::files;
 use crate::state::{get_project_root, max_upload_bytes};
 
 // ===========================================================================
-// 1. UPLOAD (unchanged)
+// 1. UPLOAD
 // ===========================================================================
-pub async fn upload_file(mut multipart: Multipart) -> impl IntoResponse {
+pub async fn upload_file(
+    Extension(auth): Extension<AuthUser>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let owner_id = match upload_owner(&auth) {
+        Ok(owner_id) => owner_id,
+        Err(response) => return response,
+    };
+
     if let Err(error) = files::ensure_storage() {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -56,10 +66,21 @@ pub async fn upload_file(mut multipart: Multipart) -> impl IntoResponse {
             .filter(|name| !name.is_empty())
             .unwrap_or_else(|| "upload".to_string());
 
-        let mime_type = field
-            .content_type()
-            .unwrap_or("application/octet-stream")
-            .to_string();
+        let extension = Path::new(&original_name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| sanitize_extension(ext).to_ascii_lowercase())
+            .filter(|ext| is_allowed_upload_extension(ext));
+
+        let Some(extension) = extension else {
+            return (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                Json(json!({
+                    "success": false,
+                    "error": "Unsupported file type. Allowed: images (jpg, png, gif, webp), pdf, txt, csv, audio, video, docx, xlsx"
+                })),
+            ).into_response();
+        };
 
         let data = match field.bytes().await {
             Ok(data) => data,
@@ -84,13 +105,17 @@ pub async fn upload_file(mut multipart: Multipart) -> impl IntoResponse {
             ).into_response();
         }
 
-        let extension = Path::new(&original_name)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(sanitize_extension)
-            .filter(|ext| !ext.is_empty());
+        if let Err(error) = validate_upload_content(&extension, &data) {
+            return (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                Json(json!({
+                    "success": false,
+                    "error": error
+                })),
+            ).into_response();
+        }
 
-        let stored_name = generate_stored_name(extension.as_deref());
+        let stored_name = generate_stored_name(owner_id, &extension);
         let save_path = stored_name.clone();
         let save_data = data.clone();
 
@@ -127,7 +152,7 @@ pub async fn upload_file(mut multipart: Multipart) -> impl IntoResponse {
             "path": stored_name.clone(),
             "url": format!("/storage/uploads/{}", url_path(&stored_name)),
             "download_url": format!("/api/files/{}/download", stored_name),
-            "mime_type": mime_type,
+            "mime_type": mime_from_path(Path::new(&stored_name)),
             "size": data.len()
         }));
     }
@@ -196,13 +221,11 @@ async fn serve_file_by_id(id: &str, download: bool) -> Response {
     *response.status_mut() = StatusCode::OK;
 
     response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
-    response.headers_mut().insert(
-        header::CONTENT_LENGTH,
-        HeaderValue::from_str(&metadata.len().to_string())
-            .unwrap_or_else(|_| HeaderValue::from_static("0")),
-    );
+    response.headers_mut().insert(header::CONTENT_LENGTH, HeaderValue::from_str(&metadata.len().to_string()).unwrap_or_else(|_| HeaderValue::from_static("0")));
+    response.headers_mut().insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
 
-    let disposition = if download {
+    let force_attachment = requires_attachment(&full_path);
+    let disposition = if download || force_attachment {
         format!(
             "attachment; filename=\"{}\"",
             full_path.file_name().and_then(|n| n.to_str()).unwrap_or("download")
@@ -223,10 +246,23 @@ async fn serve_file_by_id(id: &str, download: bool) -> Response {
     response
 }
 
+fn requires_attachment(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .as_deref(),
+        Some("html" | "htm" | "xhtml" | "svg" | "xml" | "js" | "mjs" | "cjs")
+    )
+}
+
 // ===========================================================================
 // 3. DELETE
 // ===========================================================================
-pub async fn delete_file(AxumPath(id): AxumPath<String>) -> impl IntoResponse {
+pub async fn delete_file(
+    Extension(auth): Extension<AuthUser>,
+    AxumPath(id): AxumPath<String>,
+) -> impl IntoResponse {
     let bare = id
         .trim_start_matches('/')
         .trim_start_matches("storage/uploads/")
@@ -235,6 +271,15 @@ pub async fn delete_file(AxumPath(id): AxumPath<String>) -> impl IntoResponse {
     let Some(relative_path) = safe_relative_path(bare) else {
         return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid file path"})));
     };
+
+    if is_enabled(Feature::Auth) {
+        let Some(user) = auth.user.as_ref() else {
+            return (StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"})));
+        };
+        if user.role != "Admin" && file_owner(&relative_path) != Some(user.id) {
+            return (StatusCode::FORBIDDEN, Json(json!({"success": false, "error": "You can only delete your own files"})));
+        }
+    }
 
     if !files::exists(&relative_path) {
         return (StatusCode::NOT_FOUND, Json(json!({"success": false, "error": "File not found"})));
@@ -265,6 +310,8 @@ pub struct OptimizeQuery {
 
 const MAX_IMAGE_DIM: u32 = 4096;
 const MAX_IMAGE_QUALITY: u8 = 100;
+const MAX_IMAGE_SOURCE_BYTES: u64 = 20 * 1024 * 1024;
+const MAX_IMAGE_PIXELS: u64 = 40_000_000;
 
 pub async fn optimize_image(Query(params): Query<OptimizeQuery>) -> Response {
     // ── 1. Path validation ────────────────────────────────────────
@@ -329,6 +376,22 @@ pub async fn optimize_image(Query(params): Query<OptimizeQuery>) -> Response {
     let fit_owned = fit.to_string();
     let process_result = tokio::task::spawn_blocking(
         move || -> Result<(Vec<u8>, &'static str), StatusCode> {
+            let source_len = std::fs::metadata(&full_path)
+                .map_err(|_| StatusCode::NOT_FOUND)?
+                .len();
+            if source_len > MAX_IMAGE_SOURCE_BYTES {
+                return Err(StatusCode::PAYLOAD_TOO_LARGE);
+            }
+
+            let (source_width, source_height) = image::ImageReader::open(&full_path)
+                .and_then(|reader| reader.with_guessed_format())
+                .map_err(|_| StatusCode::BAD_REQUEST)?
+                .into_dimensions()
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+            if source_width as u64 * source_height as u64 > MAX_IMAGE_PIXELS {
+                return Err(StatusCode::PAYLOAD_TOO_LARGE);
+            }
+
             let img = image::open(&full_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
             // Resize strategy:
@@ -479,13 +542,70 @@ fn sanitize_extension(extension: &str) -> String {
     extension.chars().filter(|ch| ch.is_ascii_alphanumeric()).take(16).collect()
 }
 
-fn generate_stored_name(extension: Option<&str>) -> String {
+fn generate_stored_name(owner_id: i64, extension: &str) -> String {
     let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
     let process_id = std::process::id();
-    match extension {
-        Some(extension) if !extension.is_empty() => format!("vlo_{timestamp}_{process_id}.{extension}"),
-        _ => format!("vlo_{timestamp}_{process_id}"),
+    format!("vlo_u{owner_id}_{timestamp}_{process_id}.{extension}")
+}
+
+fn upload_owner(auth: &AuthUser) -> Result<i64, Response> {
+    if !is_enabled(Feature::Auth) {
+        return Ok(0);
     }
+    match auth.user.as_ref() {
+        Some(user) => Ok(user.id),
+        None => Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "success": false, "error": "Authentication required" })),
+        )
+            .into_response()),
+    }
+}
+
+fn is_allowed_upload_extension(extension: &str) -> bool {
+    matches!(
+        extension,
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "pdf" | "txt" | "csv"
+            | "mp3" | "wav" | "ogg" | "mp4" | "webm" | "docx" | "xlsx"
+    )
+}
+
+fn validate_upload_content(extension: &str, data: &[u8]) -> Result<(), &'static str> {
+    if data.is_empty() {
+        return Err("File is empty");
+    }
+
+    let matches_extension = match extension {
+        "jpg" | "jpeg" => data.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "png" => data.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "gif" => data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a"),
+        "webp" => data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WEBP".as_slice()),
+        "pdf" => data.starts_with(b"%PDF-"),
+        "txt" | "csv" => std::str::from_utf8(data).is_ok_and(|text| !text.contains('\0')),
+        "mp3" => {
+            data.starts_with(b"ID3")
+                || (data.len() >= 2 && data[0] == 0xFF && (data[1] & 0xE0) == 0xE0)
+        }
+        "wav" => data.starts_with(b"RIFF") && data.get(8..12) == Some(b"WAVE".as_slice()),
+        "ogg" => data.starts_with(b"OggS"),
+        "mp4" => data.get(4..8) == Some(b"ftyp".as_slice()),
+        "webm" => data.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]),
+        "docx" | "xlsx" => data.starts_with(b"PK\x03\x04"),
+        _ => false,
+    };
+
+    if matches_extension {
+        Ok(())
+    } else {
+        Err("File content does not match its extension")
+    }
+}
+
+fn file_owner(relative_path: &str) -> Option<i64> {
+    let name = relative_path.rsplit('/').next().unwrap_or(relative_path);
+    let rest = name.strip_prefix("vlo_u")?;
+    let (id, _) = rest.split_once('_')?;
+    id.parse().ok()
 }
 
 fn url_path(path: &str) -> String {

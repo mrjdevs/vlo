@@ -66,8 +66,8 @@ async fn init_enabled_features(is_build: bool) -> Result<(), String> {
             .map_err(|e| format!("Database init failed: {}", e))?;
     }
     if is_enabled(Feature::Auth) {
-        auth::init_auth_config();
-        auth::init_session_secret();
+        auth::init_auth_config()?;
+        auth::init_session_secret()?;
     }
     if is_enabled(Feature::Modules) {
         modules::init_modules().map_err(|e| format!("Modules init failed: {}", e))?;
@@ -92,7 +92,7 @@ async fn init_enabled_features(is_build: bool) -> Result<(), String> {
 }
 
 async fn run() -> Result<(), String> {
-    init_features();
+    init_features()?;
 
     let cli = Cli::parse();
 

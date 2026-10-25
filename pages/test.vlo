@@ -421,7 +421,9 @@
         </div>
         <div class="kv">
           <span>Logout</span>
-          <a href="/api/auth/logout" class="vlo-btn vlo-btn-secondary">Logout</a>
+          <form data-vlo-post="/api/auth/logout">
+            <button type="submit" class="vlo-btn vlo-btn-secondary">Logout</button>
+          </form>
         </div>
       </div>
     </Card>
@@ -431,7 +433,7 @@
       <div class="grid-2">
         <div class="kv">
           <span>Upload File</span>
-          <form v-post="/api/files/upload" enctype="multipart/form-data">
+          <form data-vlo-post="/api/files/upload" enctype="multipart/form-data">
             <FileInput name="file" button="Choose File" />
             <button type="submit" class="vlo-btn vlo-btn-primary">Upload</button>
           </form>

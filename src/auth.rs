@@ -41,7 +41,7 @@ pub struct AuthConfig {
     pub user_table: String, pub user_id: String, pub user_identifier: String, pub user_password: String,
     pub user_name: String, pub user_email: String, pub user_role: String, pub user_status: String,
     pub session_table: String, pub session_token: String, pub session_user_id: String, pub session_expires_at: String,
-    pub session_lifetime: i64, pub cookie_name: String, pub identifier_field: String, pub password_field: String,
+    pub session_lifetime: i64, pub cookie_name: String, pub cookie_secure: bool, pub identifier_field: String, pub password_field: String,
 }
 
 impl Default for AuthConfig {
@@ -50,7 +50,8 @@ impl Default for AuthConfig {
             user_table: "users".into(), user_id: "id".into(), user_identifier: "email".into(), user_password: "password_hash".into(),
             user_name: String::new(), user_email: String::new(), user_role: String::new(), user_status: String::new(),
             session_table: "sessions".into(), session_token: "token".into(), session_user_id: "user_id".into(), session_expires_at: "expires_at".into(),
-            session_lifetime: 86_400, cookie_name: "vlo_session".into(), identifier_field: "email".into(), password_field: "password".into(),
+            session_lifetime: 86_400, cookie_name: "vlo_session".into(), cookie_secure: false,
+            identifier_field: "email".into(), password_field: "password".into(),
         }
     }
 }
@@ -68,7 +69,9 @@ impl AuthConfig {
             session_table: env("AUTH_SESSION_TABLE", d.session_table), session_token: env("AUTH_SESSION_TOKEN", d.session_token),
             session_user_id: env("AUTH_SESSION_USER_ID", d.session_user_id), session_expires_at: env("AUTH_SESSION_EXPIRES_AT", d.session_expires_at),
             session_lifetime: env_i64("AUTH_SESSION_LIFETIME", d.session_lifetime)?,
-            cookie_name: env("AUTH_COOKIE", d.cookie_name), identifier_field: env("AUTH_IDENTIFIER_FIELD", d.identifier_field),
+            cookie_name: env("AUTH_COOKIE", d.cookie_name),
+            cookie_secure: env_bool("AUTH_COOKIE_SECURE", default_cookie_secure()),
+            identifier_field: env("AUTH_IDENTIFIER_FIELD", d.identifier_field),
             password_field: env("AUTH_PASSWORD_FIELD", d.password_field),
         };
         cfg.validate()?;
@@ -105,31 +108,56 @@ fn env_i64(name: &str, default: i64) -> Result<i64, String> {
         _ => Ok(default),
     }
 }
+fn env_bool(name: &str, default: bool) -> bool {
+    match std::env::var(name) {
+        Ok(v) if !v.trim().is_empty() => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        _ => default,
+    }
+}
+fn default_cookie_secure() -> bool {
+    std::env::var("APP_URL")
+        .map(|url| url.trim().to_ascii_lowercase().starts_with("https://"))
+        .unwrap_or(false)
+}
 fn validate_identifier(name: &str, value: &str) -> Result<(), String> {
     static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
     if RE.is_match(value) { Ok(()) } else { Err(format!("Invalid {name} value '{value}'.")) }
 }
 
 static AUTH_CONFIG: OnceLock<AuthConfig> = OnceLock::new();
-pub fn init_auth_config() {
-    match AuthConfig::from_env() {
-        Ok(cfg) => { AUTH_CONFIG.set(cfg).ok(); crate::vlo_debug!("✅ Auth config loaded"); }
-        Err(e) => { eprintln!("❌ Auth config error: {e}"); std::process::exit(1); }
-    }
+pub fn init_auth_config() -> Result<(), String> {
+    let cfg = AuthConfig::from_env()?;
+    AUTH_CONFIG.set(cfg).map_err(|_| "Auth config was already initialized".to_string())?;
+    crate::vlo_debug!("✅ Auth config loaded");
+    Ok(())
 }
 pub fn auth_config() -> &'static AuthConfig { AUTH_CONFIG.get().expect("Auth config not initialized") }
 
 static SESSION_SECRET: OnceLock<String> = OnceLock::new();
-pub fn init_session_secret() {
-    let secret = std::env::var("SESSION_SECRET").unwrap_or_else(|_| {
-        let mut bytes = [0u8; 32]; OsRng.fill_bytes(&mut bytes);
-        let secret = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
-        crate::vlo_debug!("⚠️ Generated random SESSION_SECRET");
-        secret
-    });
-    SESSION_SECRET.set(secret).ok();
+pub fn init_session_secret() -> Result<(), String> {
+    let secret = std::env::var("SESSION_SECRET")
+        .map_err(|_| "SESSION_SECRET must be set when the auth feature is enabled".to_string())?;
+    let secret = secret.trim().to_owned();
+    if secret.len() < 32 {
+        return Err("SESSION_SECRET must be at least 32 characters".to_string());
+    }
+    SESSION_SECRET
+        .set(secret)
+        .map_err(|_| "SESSION_SECRET was already initialized".to_string())
 }
-pub fn get_secret() -> &'static str { SESSION_SECRET.get().map(String::as_str).unwrap_or("default_secret") }
+pub fn get_secret() -> &'static str {
+    SESSION_SECRET.get().map(String::as_str).expect("SESSION_SECRET not initialized")
+}
+pub fn session_cookie_header(cfg: &AuthConfig, token: &str, max_age: i64) -> String {
+    let secure = if cfg.cookie_secure { "; Secure" } else { "" };
+    format!(
+        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}{}",
+        cfg.cookie_name, token, max_age, secure
+    )
+}
 
 pub fn compute_csrf_token(session_token: &str) -> String {
     let mut mac = HmacSha256::new_from_slice(get_secret().as_bytes()).expect("HMAC accepts any key size");
@@ -247,35 +275,135 @@ pub async fn session_middleware(mut req: Request, next: Next) -> Response {
 pub async fn csrf_middleware(req: Request, next: Next) -> Response {
     let method = req.method().clone();
     let path = req.uri().path().to_owned();
-    if matches!(method, Method::GET | Method::HEAD | Method::OPTIONS) || path.starts_with("/api/auth/") || path.starts_with("/api/files/upload") {
+    if matches!(method, Method::GET | Method::HEAD | Method::OPTIONS) || csrf_exempt_path(&path) {
         return next.run(req).await;
     }
-    let token = match req.extensions().get::<AuthUser>() {
-        Some(AuthUser { session_token: Some(token), user: Some(_), .. }) => token.clone(),
-        _ => return next.run(req).await,
-    };
-    let submitted = req.headers().get("X-CSRF-Token").and_then(|v| v.to_str().ok()).unwrap_or("");
-    if !verify_csrf_token(&token, submitted) {
-        return (StatusCode::FORBIDDEN, Json(json!({"success": false, "error": "CSRF token invalid or missing"}))).into_response();
+
+    let session_token = req
+        .extensions()
+        .get::<AuthUser>()
+        .and_then(|a| match (&a.user, &a.session_token) {
+            (Some(_), Some(token)) => Some(token.clone()),
+            _ => None,
+        });
+
+    if let Some(token) = session_token {
+        let submitted = req
+            .headers()
+            .get("X-CSRF-Token")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if !verify_csrf_token(&token, submitted) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"success": false, "error": "CSRF token invalid or missing"})),
+            )
+                .into_response();
+        }
+        return next.run(req).await;
+    }
+
+    // Sessionless mutations (login, register, public API reads) still reject
+    // cross-site browser requests. Non-browser clients without Origin pass.
+    if !origin_allowed(&req) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"success": false, "error": "Cross-site request rejected"})),
+        )
+            .into_response();
     }
     next.run(req).await
 }
 
+fn csrf_exempt_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/api/auth/login"
+            | "/api/auth/register"
+            | "/api/auth/activate"
+            | "/api/auth/resend-activation"
+            | "/api/auth/forgot-password"
+            | "/api/auth/reset-password"
+    )
+}
+
+fn origin_allowed(req: &Request) -> bool {
+    if let Some(site) = req
+        .headers()
+        .get("sec-fetch-site")
+        .and_then(|v| v.to_str().ok())
+    {
+        match site.trim().to_ascii_lowercase().as_str() {
+            "cross-site" => return false,
+            "none" | "same-origin" => return true,
+            _ => {}
+        }
+    }
+
+    let Some(origin) = req.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
+        return true;
+    };
+    let authority = origin.split_once("://").map(|(_, a)| a).unwrap_or(origin);
+    let Some(host) = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    authority.eq_ignore_ascii_case(host)
+}
+
 pub async fn api_auth_middleware(req: Request, next: Next) -> Response {
     let path = req.uri().path().to_owned();
-    if !path.starts_with("/api/") || path.starts_with("/api/auth/") || path == "/api" || path.starts_with("/api/files/") {
+    if (path != "/api" && !path.starts_with("/api/")) || path.starts_with("/api/auth/") {
         return next.run(req).await;
     }
-    let public_routes = std::env::var("AUTH_API_PUBLIC_ROUTES").unwrap_or_default();
-    let is_public = public_routes.split(',').map(str::trim).filter(|s| !s.is_empty()).any(|r| {
-        if let Some(prefix) = r.strip_suffix('*') { path.starts_with(prefix) } 
-        else { path == r || path.starts_with(&format!("{r}/")) }
-    });
-    if is_public { return next.run(req).await; }
+
+    let is_public = std::env::var("AUTH_API_PUBLIC_ROUTES")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .any(|r| {
+            if let Some(prefix) = r.strip_suffix('*') {
+                path.starts_with(prefix)
+            } else {
+                path == r || path.starts_with(&format!("{r}/"))
+            }
+        });
+
+    // Public API routes are read-only. Writes always require a session.
+    let read_only = matches!(*req.method(), Method::GET | Method::HEAD);
+    if is_public && read_only && public_route_matches_action(&req, &path) {
+        return next.run(req).await;
+    }
     if req.extensions().get::<AuthUser>().and_then(|a| a.user.as_ref()).is_none() {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"}))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"success": false, "error": "Authentication required"})),
+        )
+            .into_response();
     }
     next.run(req).await
+}
+
+/// A whitelisted public path must not act as a proxy for unrelated actions.
+/// `?action=` may only name the read action for that same resource.
+fn public_route_matches_action(req: &Request, path: &str) -> bool {
+    let Some(query) = req.uri().query() else {
+        return true;
+    };
+    let params: HashMap<String, String> = match serde_urlencoded::from_str(query) {
+        Ok(params) => params,
+        Err(_) => return false,
+    };
+    let Some(action) = params.get("action") else {
+        return true;
+    };
+
+    let resource = path
+        .trim_start_matches('/')
+        .strip_prefix("api/")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or("");
+    !resource.is_empty() && action.trim().trim_matches('/') == format!("get_{resource}")
 }
 
 fn login_error(status: StatusCode, error: &str, db_status: Option<&str>) -> Response {
@@ -299,8 +427,7 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
             if let (Some(k), Some(v)) = (p.next(), p.next()) { if k == "next" { next_url = urlencoding::decode(v).unwrap_or_default().into_owned(); } }
         }
     }
-    let client_ip = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok()).map(|s| s.split(',').next().unwrap_or("unknown").trim().to_owned())
-        .or_else(|| req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip().to_string())).unwrap_or_else(|| "unknown".into());
+    let client_ip = client_ip(&req);
 
     if !check_rate_limit(&client_ip) {
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"success": false, "error": "Too many login attempts. Please try again in 60 seconds."}))).into_response();
@@ -353,10 +480,17 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
     if identifier.is_empty() || password.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Credentials required"}))).into_response();
     }
+    if password.len() > 1024 {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Credentials required"}))).into_response();
+    }
 
     let user = match find_user_by_identifier(&identifier).await {
         Some(user) => user,
-        None => return login_error(StatusCode::UNAUTHORIZED, "Invalid credentials", None),
+        None => {
+            // Equalize timing with the successful-lookup path.
+            let _ = hash_password(&password).await;
+            return login_error(StatusCode::UNAUTHORIZED, "Invalid credentials", None);
+        }
     };
 
     let hash = match fetch_password_hash(user.id).await {
@@ -380,7 +514,7 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
 
     if !next_url.starts_with('/') || next_url.starts_with("//") || next_url.contains("://") { next_url = "/".into(); }
 
-    let cookie = format!("{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age={}", auth_cfg.cookie_name, token, lifetime);
+    let cookie = session_cookie_header(&auth_cfg, &token, lifetime);
     let mut response = Json(json!({
         "success": true, "user": { "id": user.id, "name": user.name, "email": user.email, "role": user.role, "status": user.status }, "redirect": next_url
     })).into_response();
@@ -390,11 +524,18 @@ pub async fn login_handler(req: Request) -> impl IntoResponse {
 }
 
 pub async fn logout_handler(req: Request) -> impl IntoResponse {
-    let auth_cfg = auth_config(); // 🔥 FIX: Renamed from `cfg`
+    let auth_cfg = auth_config();
+    // v-post submits expect JSON; a plain form post needs the redirect.
+    let wants_json = req.headers().get(header::ACCEPT).and_then(|v| v.to_str().ok()).is_some_and(|v| v.contains("application/json"))
+        || req.headers().contains_key("x-csrf-token");
     let token = req.headers().get(header::COOKIE).and_then(|v| v.to_str().ok()).and_then(|v| parse_cookie_header(v, &auth_cfg.cookie_name));
     if let Some(token) = token { let _ = delete_session(&token).await; }
-    let cookie = format!("{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0", auth_cfg.cookie_name);
-    let mut response = Redirect::to("/").into_response();
+    let cookie = session_cookie_header(&auth_cfg, "", 0);
+    let mut response = if wants_json {
+        Json(json!({"success": true, "redirect": "/"})).into_response()
+    } else {
+        Redirect::to("/").into_response()
+    };
     if let Ok(value) = HeaderValue::from_str(&cookie) { response.headers_mut().append(header::SET_COOKIE, value); }
     response
 }
@@ -414,6 +555,10 @@ pub async fn me_handler(axum::Extension(auth): axum::Extension<AuthUser>) -> imp
 #[allow(dead_code)] pub fn require_role(auth: &AuthUser, role: &str) -> Result<(), Response> { if !is_authenticated(auth) { return Err((StatusCode::UNAUTHORIZED, Json(json!({"success": false, "error": "Authentication required"}))).into_response()); } if has_role(auth, role) { Ok(()) } else { Err((StatusCode::FORBIDDEN, Json(json!({"success": false, "error": "Insufficient permissions"}))).into_response()) } }
 
 pub async fn register_handler(req: Request) -> impl IntoResponse {
+    let ip = client_ip(&req);
+    if !check_rate_limit_for(&ip, "register", 5) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"success": false, "error": "Too many registration attempts. Please try again in 60 seconds."}))).into_response();
+    }
     let auth_cfg = auth_config();
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
     let mut name = String::new(); let mut email = String::new(); let mut password = String::new();
@@ -441,6 +586,12 @@ pub async fn register_handler(req: Request) -> impl IntoResponse {
     if name.is_empty() || email.is_empty() || password.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Name, email, and password are required"}))).into_response();
     }
+    if name.len() > 200 || email.len() > 320 || password.len() > 1024 {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid registration details"}))).into_response();
+    }
+    if password.chars().count() < 8 {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Password must be at least 8 characters"}))).into_response();
+    }
 
     let pool = match DB_POOL.get() { Some(p) => p, None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response() };
     let hash = match hash_password(&password).await { Ok(h) => h, Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": e}))).into_response() };
@@ -451,12 +602,13 @@ pub async fn register_handler(req: Request) -> impl IntoResponse {
         auth_cfg.user_table, name_col, auth_cfg.user_identifier, auth_cfg.user_password, status_col,
         auth_cfg.placeholder(pool, 1), auth_cfg.placeholder(pool, 2), auth_cfg.placeholder(pool, 3));
     
-    if let Err(_) = crate::db_execute!(pool, &sql, &name, &email, &hash).map(|_| ()) {  
-        return (StatusCode::CONFLICT, Json(json!({
-            "success": false, 
-            "error": "Email already registered or DB error",
-            "message": "Email already registered or DB error"
-        }))).into_response();  
+    if let Err(err) = crate::db_execute!(pool, &sql, &name, &email, &hash).map(|_| ()) {
+        // Never reveal whether the address is already registered.
+        crate::vlo_debug!("Registration insert failed: {}", err);
+        return (StatusCode::CREATED, Json(json!({
+            "success": true,
+            "message": "Registration successful. Please check your email."
+        }))).into_response();
     }
 
     let fetch_sql = format!("SELECT {} FROM {} WHERE {} = {}", auth_cfg.user_id, auth_cfg.user_table, auth_cfg.user_identifier, auth_cfg.placeholder(pool, 1));
@@ -538,6 +690,10 @@ pub async fn activate_handler(req: Request) -> impl IntoResponse {
 }
 
 pub async fn forgot_password_handler(req: Request) -> impl IntoResponse {
+    let ip = client_ip(&req);
+    if !check_rate_limit_for(&ip, "forgot-password", 5) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"success": false, "error": "Too many password reset requests. Please try again in 60 seconds."}))).into_response();
+    }
     let cfg = auth_config();
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
     let client_ip = req.headers().get("x-forwarded-for").and_then(|v| v.to_str().ok()).map(|s| s.split(',').next().unwrap_or("unknown").trim().to_owned())
@@ -562,6 +718,7 @@ pub async fn forgot_password_handler(req: Request) -> impl IntoResponse {
     }
 
     if identifier.is_empty() { return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Email is required"}))).into_response(); }
+    if identifier.len() > 320 { return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Email is required"}))).into_response(); }
     let pool = match DB_POOL.get() { Some(p) => p, None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response() };
 
     let user = match find_user_by_identifier(&identifier).await {
@@ -607,6 +764,10 @@ pub async fn forgot_password_handler(req: Request) -> impl IntoResponse {
 }
 
 pub async fn reset_password_handler(req: Request) -> impl IntoResponse {
+    let ip = client_ip(&req);
+    if !check_rate_limit_for(&ip, "reset-password", 5) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"success": false, "error": "Too many password reset attempts. Please try again in 60 seconds."}))).into_response();
+    }
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
     let mut token = String::new(); let mut new_password = String::new();
 
@@ -630,6 +791,12 @@ pub async fn reset_password_handler(req: Request) -> impl IntoResponse {
     } else { return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Unsupported content type"}))).into_response(); }
 
     if token.is_empty() || new_password.is_empty() { return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Token and new password are required"}))).into_response(); }
+    if new_password.chars().count() < 8 {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Password must be at least 8 characters"}))).into_response();
+    }
+    if new_password.len() > 1024 {
+        return (StatusCode::BAD_REQUEST, Json(json!({"success": false, "error": "Invalid password"}))).into_response();
+    }
     let pool = match DB_POOL.get() { Some(p) => p, None => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"success": false, "error": "Database not configured"}))).into_response() };
 
     let auth_cfg = auth_config(); // 🔥 FIX: Renamed from `cfg` to `auth_cfg`
@@ -655,6 +822,10 @@ pub async fn reset_password_handler(req: Request) -> impl IntoResponse {
 }
 
 pub async fn resend_activation_handler(req: Request) -> impl IntoResponse {
+    let ip = client_ip(&req);
+    if !check_rate_limit_for(&ip, "resend-activation", 5) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"success": false, "error": "Too many activation requests. Please try again in 60 seconds."}))).into_response();
+    }
     let cfg = auth_config();
     let content_type = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
     let mut identifier = String::new();
@@ -681,7 +852,9 @@ pub async fn resend_activation_handler(req: Request) -> impl IntoResponse {
         None => return (StatusCode::OK, Json(json!({"success": true, "message": "If an account exists, an activation link has been sent."}))).into_response(),
     };
 
-    if user.status.to_lowercase() == "active" { return (StatusCode::OK, Json(json!({"success": true, "message": "Your account is already active. You can log in."}))).into_response(); }
+    if user.status.to_lowercase() == "active" {
+        return (StatusCode::OK, Json(json!({"success": true, "message": "If an account exists, an activation link has been sent."}))).into_response();
+    }
 
     let token = generate_token();
     let expires_at = now_timestamp() + (7 * 24 * 60 * 60);
@@ -731,7 +904,22 @@ pub fn extract_page_guard(source: &str) -> Option<PageGuard> {
     for key in ["roles", "role"] { if let Some(serde_json::Value::String(value)) = props.get(key) { roles.extend(value.split(',').map(str::trim).filter(|v| !v.is_empty()).map(String::from)); } }
     (auth || guest || !roles.is_empty()).then_some(PageGuard { auth, roles, guest })
 }
-fn safe_next(next: Option<&str>) -> String { match next { Some(v) if v.starts_with('/') && !v.starts_with("/login") && !v.contains("://") => v.into(), _ => "/dashboard".into() } }
+fn safe_next(next: Option<&str>) -> String {
+    match next {
+        Some(v)
+            if v.starts_with('/')
+                && !v.starts_with("//")
+                && !v.starts_with("/\\")
+                && !v.contains("://")
+                && !v.contains('\\')
+                && !v.contains('\r')
+                && !v.contains('\n') =>
+        {
+            v.into()
+        }
+        _ => "/admin/dashboard".into(),
+    }
+}
 pub fn check_page_guard(guard: &PageGuard, user: &Option<User>, current_path: &str, next: Option<&str>) -> Option<Response> {
     if guard.guest && user.is_some() { return Some(Redirect::to(&safe_next(next)).into_response()); }
     if guard.auth && user.is_none() { return Some(Redirect::to(&format!("/login?next={current_path}")).into_response()); }
@@ -755,9 +943,40 @@ static RATE_LIMITS: LazyLock<Mutex<HashMap<String, Vec<SystemTime>>>> = LazyLock
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 const RATE_LIMIT_MAX_ATTEMPTS: usize = 5;
 pub fn check_rate_limit(ip: &str) -> bool {
-    let now = SystemTime::now(); let mut limits = RATE_LIMITS.lock().unwrap(); let entries = limits.entry(ip.into()).or_default();
+    check_rate_limit_for(ip, "login", RATE_LIMIT_MAX_ATTEMPTS)
+}
+
+fn check_rate_limit_for(ip: &str, bucket: &str, max_attempts: usize) -> bool {
+    let now = SystemTime::now();
+    let key = format!("{bucket}:{ip}");
+    let mut limits = RATE_LIMITS.lock().unwrap();
+    let entries = limits.entry(key).or_default();
     entries.retain(|time| now.duration_since(*time).unwrap_or_default() < Duration::from_secs(RATE_LIMIT_WINDOW_SECS));
-    if entries.len() >= RATE_LIMIT_MAX_ATTEMPTS { return false; } entries.push(now); true
+    if entries.len() >= max_attempts { return false; }
+    entries.push(now);
+    true
+}
+
+fn client_ip(req: &Request) -> String {
+    let trust_proxy = std::env::var("VLO_TRUST_PROXY")
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+    if trust_proxy {
+        if let Some(forwarded) = req
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            return forwarded.to_owned();
+        }
+    }
+    req.extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|c| c.0.ip().to_string())
+        .unwrap_or_else(|| "unknown".into())
 }
 #[allow(dead_code)] pub fn cleanup_rate_limits() {
     let now = SystemTime::now(); let mut limits = RATE_LIMITS.lock().unwrap();

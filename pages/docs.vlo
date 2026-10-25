@@ -382,7 +382,9 @@ footer='<Footer />' >
                         <div class="naming-row"><span>v-post</span><span>&lt;form v-post="/api/products"&gt;</span><span>data-vlo-post="/api/products"</span></div>
                         <div class="naming-row"><span>v-put</span><span>&lt;form v-put="/api/products/5"&gt;</span><span>data-vlo-put="/api/products/5"</span></div>
                         <div class="naming-row"><span>v-delete</span><span>&lt;button v-delete="/api/products/5"&gt;</span><span>data-vlo-delete="/api/products/5"</span></div>
+                        <div class="naming-row"><span>v-auto</span><span>&lt;form v-put="..." v-auto&gt;</span><span>data-vlo-auto (debounced save on change)</span></div>
                     </div>
+                    <p class="component-note">Add <code>v-auto</code> to a <code>v-put</code> form to save automatically 350&nbsp;ms after any field changes, without reloading the page. Submissions are serialized: changes made while a save is in flight are sent once it finishes.</p>
                     
                     <h3>Modal Directives</h3>
                     <p class="component-note">Open and close modals declaratively without writing custom JavaScript. VLO automatically injects the modal handler script, which supports ID lookup, class fallbacks, backdrop clicks, and ESC key dismissal.</p>
@@ -470,7 +472,7 @@ AUTH_API_PUBLIC_ROUTES=/api/products,/api/health</code></pre>
                     <div class="naming-table">
                         <div class="naming-row header"><span>Attribute</span><span>Values</span><span>Behavior</span></div>
                         <div class="naming-row"><span>auth</span><span>true / false</span><span>Requires authentication. Redirects to /login?next=/current-page if not logged in.</span></div>
-                        <div class="naming-row"><span>guest</span><span>true / false</span><span>Only accessible to guests. Redirects authenticated users to /dashboard.</span></div>
+                        <div class="naming-row"><span>guest</span><span>true / false</span><span>Only accessible to guests. Redirects authenticated users to /admin/dashboard.</span></div>
                         <div class="naming-row"><span>roles</span><span>Comma-separated</span><span>Requires specific roles. Returns 403 Forbidden if user lacks required role.</span></div>
                     </div>
 
