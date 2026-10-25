@@ -1,0 +1,7 @@
+<!-- subject: Order Confirmation — {{order_number}} -->
+<h1>Thank you for High Value Order, {{customer_name | proper}}!</h1>
+<p>Your order <strong>{{order_number}}</strong> is confirmed.</p>
+<p>Total: <strong>PKR {{total | number:2}}</strong></p>
+<p>
+    <a href="{{invoice_url}}">View your invoice</a>
+</p>
