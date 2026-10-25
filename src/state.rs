@@ -54,6 +54,15 @@ pub static VLO_DEBUG: LazyLock<bool> = LazyLock::new(|| {
         .unwrap_or(false)
 });
 
+// Debug logging is a development aid. In `serve`/`build` a single page can
+// emit dozens of lines per data-source, and on a Windows console that
+// synchronous output dominates request latency. Production must opt in again.
+static VLO_DEBUG_SERVE: LazyLock<bool> = LazyLock::new(|| {
+    std::env::var("VLO_DEBUG_SERVE")
+        .map(|value| env_bool_from_value(&value))
+        .unwrap_or(false)
+});
+
 pub fn env_bool_from_value(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
@@ -61,10 +70,15 @@ pub fn env_bool_from_value(value: &str) -> bool {
     )
 }
 
+#[inline]
+pub fn debug_logging_active() -> bool {
+    *VLO_DEBUG && (app_mode().is_dev() || *VLO_DEBUG_SERVE)
+}
+
 #[macro_export]
 macro_rules! vlo_debug {
     ($($arg:tt)*) => {
-        if *$crate::state::VLO_DEBUG {
+        if $crate::state::debug_logging_active() {
             println!($($arg)*);
         }
     };

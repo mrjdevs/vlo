@@ -182,6 +182,9 @@ pub fn resolve_data_sources(
     let mut result = String::with_capacity(source.len());
     let mut last_end = 0usize;
     let mut all_computed: HashMap<String, Value> = HashMap::new();
+    // Identical requests (same action + inline params) within one render hit
+    // the database once; the page context is shared across every block.
+    let mut response_cache: HashMap<(String, Vec<(String, String)>), Value> = HashMap::new();
 
     for cap in re.captures_iter(source) {
         let full = cap.get(0).unwrap();
@@ -261,8 +264,19 @@ pub fn resolve_data_sources(
             ctx
         };
 
-        let (rendered, computed) =
-            evaluate_data_source_block(inner, &action_path, &variable_name, &block_context);
+        let mut cache_params: Vec<(String, String)> =
+            inline_params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        cache_params.sort();
+        let cache_key = (action_path.clone(), cache_params);
+
+        let (rendered, computed) = evaluate_data_source_block(
+            inner,
+            &action_path,
+            &variable_name,
+            &block_context,
+            &cache_key,
+            &mut response_cache,
+        );
 
         for (key, value) in computed {
             all_computed.insert(key, value);
@@ -421,28 +435,43 @@ pub fn fetch_api_data_sync(action: &str, params: &HashMap<String, Value>) -> Val
 
         // Pagination metadata for get_* actions.
         if action.starts_with("get_") {
-            let count_sql = crate::api::generate_count_sql(&sql);
-            if !count_sql.is_empty() {
-                if let Ok(count_res) = execute_api_sql(pool, &count_sql, &sql_params).await {
-                    if let Some(total) = count_res
-                        .get("data")
-                        .and_then(|d| d.as_array())
-                        .and_then(|rows| rows.first())
-                        .and_then(|row| row.get("total"))
-                        .and_then(|v| v.as_i64())
-                    {
-                        let page = sql_params.get("page").and_then(|v| v.as_i64()).unwrap_or(1);
-                        let limit = sql_params.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
-                        let total_pages = (total as f64 / limit as f64).ceil() as i64;
-                        let pagination = serde_json::json!({
-                            "total": total, "page": page, "limit": limit,
-                            "total_pages": total_pages,
-                            "has_next": page < total_pages, "has_prev": page > 1
-                        });
-                        if let Some(obj) = res.as_object_mut() {
-                            obj.insert("pagination".to_string(), pagination);
-                        }
-                    }
+            // A query without LIMIT already returned every row, so its length
+            // is the exact total — running the COUNT wrapper again just
+            // executes the same joins twice.
+            let total = if !sql.to_ascii_uppercase().contains("LIMIT") {
+                res.get("data")
+                    .and_then(|d| d.as_array())
+                    .map(|rows| rows.len() as i64)
+            } else {
+                let count_sql = crate::api::generate_count_sql(&sql);
+                if count_sql.is_empty() {
+                    None
+                } else {
+                    execute_api_sql(pool, &count_sql, &sql_params)
+                        .await
+                        .ok()
+                        .and_then(|count_res| {
+                            count_res
+                                .get("data")
+                                .and_then(|d| d.as_array())
+                                .and_then(|rows| rows.first())
+                                .and_then(|row| row.get("total"))
+                                .and_then(|v| v.as_i64())
+                        })
+                }
+            };
+
+            if let Some(total) = total {
+                let page = sql_params.get("page").and_then(|v| v.as_i64()).unwrap_or(1);
+                let limit = sql_params.get("limit").and_then(|v| v.as_i64()).unwrap_or(20);
+                let total_pages = (total as f64 / limit as f64).ceil() as i64;
+                let pagination = serde_json::json!({
+                    "total": total, "page": page, "limit": limit,
+                    "total_pages": total_pages,
+                    "has_next": page < total_pages, "has_prev": page > 1
+                });
+                if let Some(obj) = res.as_object_mut() {
+                    obj.insert("pagination".to_string(), pagination);
                 }
             }
         }
@@ -506,15 +535,9 @@ pub fn evaluate_data_source_block(
     action_path: &str,
     variable_name: &str,
     page_context: &HashMap<String, Value>,
+    cache_key: &(String, Vec<(String, String)>),
+    response_cache: &mut HashMap<(String, Vec<(String, String)>), Value>,
 ) -> (String, HashMap<String, Value>) {
-        // ─── TEMP DEBUG ───
-    eprintln!(
-        "🔍 [DS] action_path={:?} variable_name={:?} context_keys={:?}",
-        action_path,
-        variable_name,
-        page_context.keys().collect::<Vec<_>>()
-    );
-    // ──────────────────
     // Infer action name if given a RESTful path.
     let action_name = if action_path.contains('/')
         || action_path.starts_with("get_")
@@ -527,7 +550,19 @@ pub fn evaluate_data_source_block(
         format!("get_{}", action_path)
     };
 
-    let api_response = fetch_api_data_sync(&action_name, page_context);
+    // Only reads are shared; a mutation action must run per block.
+    let api_response = if action_name.starts_with("get_") {
+        match response_cache.get(cache_key) {
+            Some(cached) => cached.clone(),
+            None => {
+                let response = fetch_api_data_sync(&action_name, page_context);
+                response_cache.insert(cache_key.clone(), response.clone());
+                response
+            }
+        }
+    } else {
+        fetch_api_data_sync(&action_name, page_context)
+    };
     let mut context = page_context.clone();
     let mut computed: HashMap<String, Value> = HashMap::new();
 
