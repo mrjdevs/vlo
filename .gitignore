@@ -12,4 +12,3 @@
 # Local secrets / session jars
 /.env
 /cookies.txt
-/c2.txt
