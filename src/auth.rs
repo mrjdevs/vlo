@@ -48,7 +48,7 @@ impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             user_table: "users".into(), user_id: "id".into(), user_identifier: "email".into(), user_password: "password_hash".into(),
-            user_name: String::new(), user_email: String::new(), user_role: String::new(), user_status: String::new(),
+            user_name: "name".into(), user_email: "email".into(), user_role: "role".into(), user_status: "status".into(),
             session_table: "sessions".into(), session_token: "token".into(), session_user_id: "user_id".into(), session_expires_at: "expires_at".into(),
             session_lifetime: 86_400, cookie_name: "vlo_session".into(), cookie_secure: false,
             identifier_field: "email".into(), password_field: "password".into(),
@@ -64,8 +64,8 @@ impl AuthConfig {
             user_id: env_required("AUTH_USER_ID", d.user_id)?,
             user_identifier: env_required("AUTH_USER_IDENTIFIER", d.user_identifier)?,
             user_password: env_required("AUTH_USER_PASSWORD", d.user_password)?,
-            user_name: env_optional("AUTH_USER_NAME"), user_email: env_optional("AUTH_USER_EMAIL"),
-            user_role: env_optional("AUTH_USER_ROLE"), user_status: env_optional("AUTH_USER_STATUS"),
+            user_name: env_column("AUTH_USER_NAME", &d.user_name), user_email: env_column("AUTH_USER_EMAIL", &d.user_email),
+            user_role: env_column("AUTH_USER_ROLE", &d.user_role), user_status: env_column("AUTH_USER_STATUS", &d.user_status),
             session_table: env("AUTH_SESSION_TABLE", d.session_table), session_token: env("AUTH_SESSION_TOKEN", d.session_token),
             session_user_id: env("AUTH_SESSION_USER_ID", d.session_user_id), session_expires_at: env("AUTH_SESSION_EXPIRES_AT", d.session_expires_at),
             session_lifetime: env_i64("AUTH_SESSION_LIFETIME", d.session_lifetime)?,
@@ -85,6 +85,12 @@ impl AuthConfig {
             ("AUTH_SESSION_TABLE", &self.session_table), ("AUTH_SESSION_TOKEN", &self.session_token),
             ("AUTH_SESSION_USER_ID", &self.session_user_id), ("AUTH_SESSION_EXPIRES_AT", &self.session_expires_at),
         ] { validate_identifier(name, value)?; }
+        for (name, value) in &[
+            ("AUTH_USER_NAME", &self.user_name), ("AUTH_USER_EMAIL", &self.user_email),
+            ("AUTH_USER_ROLE", &self.user_role), ("AUTH_USER_STATUS", &self.user_status),
+        ] {
+            if !value.is_empty() { validate_identifier(name, value)?; }
+        }
         
         if self.session_lifetime <= 0 { return Err("AUTH_SESSION_LIFETIME must be > 0".into()); }
         if self.cookie_name.trim().is_empty() { return Err("AUTH_COOKIE cannot be empty".into()); }
@@ -97,7 +103,10 @@ impl AuthConfig {
 }
 
 fn env(name: &str, default: String) -> String { std::env::var(name).ok().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_owned()).unwrap_or(default) }
-fn env_optional(name: &str) -> String { std::env::var(name).ok().map(|v| v.trim().to_owned()).unwrap_or_default() }
+// Unset → framework default column; explicitly empty → column not mapped.
+fn env_column(name: &str, default: &str) -> String {
+    std::env::var(name).map(|v| v.trim().to_owned()).unwrap_or_else(|_| default.to_owned())
+}
 fn env_required(name: &str, default: String) -> Result<String, String> {
     let value = env(name, default);
     if value.trim().is_empty() { Err(format!("{name} cannot be empty")) } else { Ok(value) }
