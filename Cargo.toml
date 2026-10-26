@@ -32,21 +32,22 @@ dotenvy = "0.15"
 sqlx = {
     version = "0.8",
     default-features = false,
-    features = ["runtime-tokio", "tls-rustls", "sqlite", "postgres", "mysql", "json", "macros"]
+    features = ["runtime-tokio", "tls-rustls", "sqlite", "postgres", "mysql", "json", "macros", "chrono"]
 }
 
 tower-http = { version = "0.5.2", features = ["fs", "compression-gzip"] }
-chrono = { version = "0.4", features = ["clock"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Password hashing (includes OsRng for secure tokens)
 argon2 = "0.5"
 
 # Add or update this line:
-image = { version = "0.25", features = ["webp", "jpeg", "png"] }
+# Upload pipeline only accepts jpg/png/gif/webp; drop the other codecs
+image = { version = "0.25", default-features = false, features = ["webp", "jpeg", "png", "gif"] }
 
 # Add this to your for mailer
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls", "builder"] }
+lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "builder", "smtp-transport", "pool", "hostname"] }
 
 # Cryptographic primitives for CSRF tokens
 hmac = "0.12"

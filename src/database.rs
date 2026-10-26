@@ -189,6 +189,12 @@ macro_rules! convert_row_to_json {
                 $crate::database::DbColumnType::DateTime => {
                     if let Ok(v) = $row.try_get::<String, _>(i) {
                         serde_json::Value::String(v)
+                    } else if let Ok(v) = $row.try_get::<chrono::NaiveDateTime, _>(i) {
+                        serde_json::Value::String(v.format("%Y-%m-%d %H:%M:%S").to_string())
+                    } else if let Ok(v) = $row.try_get::<chrono::DateTime<chrono::Utc>, _>(i) {
+                        serde_json::Value::String(v.format("%Y-%m-%d %H:%M:%S").to_string())
+                    } else if let Ok(v) = $row.try_get::<chrono::NaiveDate, _>(i) {
+                        serde_json::Value::String(v.format("%Y-%m-%d").to_string())
                     } else {
                         serde_json::Value::Null
                     }
@@ -337,38 +343,85 @@ impl DbPool {
         }
     }
 
-    /// DB-specific suffix for an auto-incrementing primary key.
-    pub fn primary_key_suffix(&self) -> &'static str {
-        match self {
-            DbPool::Sqlite(_) => " PRIMARY KEY AUTOINCREMENT",
-            DbPool::Postgres(_) => " SERIAL PRIMARY KEY",
-            DbPool::MySql(_) => " AUTO_INCREMENT PRIMARY KEY",
-        }
-    }
-
     /// Translates VLO standard SQL (SQLite syntax) to the target database dialect.
     pub fn translate_sql(&self, sql: &str) -> String {
         match self {
             DbPool::Sqlite(_) => sql.to_string(),
             
             DbPool::Postgres(_) => {
+                static JSON_ARRAY_PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                    regex::Regex::new(r"json_extract\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*,\s*'\$\[(\d+)\]'\s*\)").unwrap()
+                });
+                static JSON_KEY_PATH_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                    regex::Regex::new(r"json_extract\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*,\s*'\$\.([A-Za-z_][A-Za-z0-9_]*)'\s*\)").unwrap()
+                });
+                static JSON_VALID_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                    regex::Regex::new(r"json_valid\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\)").unwrap()
+                });
+                static STRFTIME_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                    regex::Regex::new(r"strftime\(\s*'([^']*)'\s*,\s*([^()]+?)\s*\)").unwrap()
+                });
+
                 let mut out = sql.to_string();
+                out = JSON_ARRAY_PATH_RE.replace_all(&out, "($1::jsonb ->> $2)").into_owned();
+                out = JSON_KEY_PATH_RE.replace_all(&out, "($1::jsonb ->> '$2')").into_owned();
+                out = JSON_VALID_RE.replace_all(&out, "($1 IS NOT NULL AND LEFT($1::text, 1) IN ('[', '{'))").into_owned();
+                out = STRFTIME_RE.replace_all(&out, |caps: &regex::Captures| {
+                    let arg = caps[2].trim();
+                    let arg = if arg.eq_ignore_ascii_case("'now'") { "CURRENT_TIMESTAMP" } else { arg };
+                    format!("to_char({}, '{}')", arg, pg_date_format(&caps[1]))
+                }).into_owned();
                 out = out.replace("json_object(", "jsonb_build_object(");
+                out = pg_json_object_to_text(&out);
                 out = out.replace("json_extract(", "jsonb_extract_path_text(");
+                out = pg_nullif_empty_to_text(&out);
                 out
             }
             
             DbPool::MySql(_) => {
-                static CONCAT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-                    regex::Regex::new(r"'([^']*)'\s*\|\|\s*([a-zA-Z0-9_.\{\}]+)\s*\|\|\s*'([^']*)'").unwrap()
+                static JSON_EXTRACT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                    regex::Regex::new(r"JSON_EXTRACT\(\s*([A-Za-z_][A-Za-z0-9_.]*)\s*,\s*'(\$[^']*)'\s*\)").unwrap()
                 });
-                
+                static STRFTIME_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                    regex::Regex::new(r"strftime\(\s*'([^']*)'\s*,\s*([^()]+?)\s*\)").unwrap()
+                });
+                static ON_CONFLICT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                    regex::Regex::new(r"(?i)ON\s+CONFLICT\s*\([^)]*\)\s*DO\s+UPDATE\s+SET\s+").unwrap()
+                });
+                static EXCLUDED_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                    regex::Regex::new(r"(?i)\bexcluded\.([A-Za-z_][A-Za-z0-9_]*)").unwrap()
+                });
+
                 let mut out = sql.to_string();
                 out = out.replace("json_object(", "JSON_OBJECT(");
                 out = out.replace("json_extract(", "JSON_EXTRACT(");
-                out = CONCAT_RE.replace_all(&out, "CONCAT('$1', $2, '$3')").into_owned();
+                out = JSON_EXTRACT_RE.replace_all(&out, "JSON_UNQUOTE(JSON_EXTRACT($1, '$2'))").into_owned();
+                out = STRFTIME_RE.replace_all(&out, |caps: &regex::Captures| {
+                    let arg = caps[2].trim();
+                    let arg = if arg.eq_ignore_ascii_case("'now'") { "NOW()".to_string() } else { arg.to_string() };
+                    format!("DATE_FORMAT({}, '{}')", arg, mysql_date_format(&caps[1]))
+                }).into_owned();
+                out = mysql_concat(&out);
+                out = out.replace("AS INTEGER", "AS SIGNED");
+                out = ON_CONFLICT_RE.replace_all(&out, "ON DUPLICATE KEY UPDATE ").into_owned();
+                out = EXCLUDED_RE.replace_all(&out, "VALUES($1)").into_owned();
                 out
             }
+        }
+    }
+
+    /// Adapts one statement from a SQLite-flavored schema file to the active
+    /// dialect. Returns `None` for statements that have no meaning there.
+    pub fn prepare_schema_statement(&self, sql: &str) -> Option<String> {
+        translate_schema_statement(self.driver_name(), sql)
+    }
+
+    /// The driver name behind this pool: "sqlite" | "postgres" | "mysql".
+    pub fn driver_name(&self) -> &'static str {
+        match self {
+            DbPool::Sqlite(_) => "sqlite",
+            DbPool::Postgres(_) => "postgres",
+            DbPool::MySql(_) => "mysql",
         }
     }
 
@@ -380,6 +433,430 @@ impl DbPool {
             DbPool::MySql(c) => run_tx_mysql(c, statements).await,
         }
     }
+}
+
+/// Adapts one statement from the SQLite-flavored `schema.sql` to `driver`.
+/// This is the single place new database types are taught about our DDL.
+pub fn translate_schema_statement(driver: &str, sql: &str) -> Option<String> {
+    let code = sql
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("--"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let code = code.trim();
+    if code.is_empty() {
+        return None;
+    }
+
+    let upper = code.to_uppercase();
+    if driver == "sqlite" {
+        return Some(code.to_string());
+    }
+    if upper.starts_with("PRAGMA") {
+        return None;
+    }
+
+    match driver {
+        "postgres" => {
+            let mut s = code
+                .replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+                .replace("DATETIME", "TIMESTAMP")
+                .replace(" REAL ", " DOUBLE PRECISION ")
+                .replace(" NUMERIC ", " DOUBLE PRECISION ")
+                .replace(
+                    "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                    "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                );
+            if s.to_uppercase().starts_with("INSERT OR IGNORE INTO") {
+                s = s.replacen("INSERT OR IGNORE INTO", "INSERT INTO", 1);
+                s.push_str(" ON CONFLICT DO NOTHING");
+            }
+            Some(s)
+        }
+        "mysql" => {
+            static TEXT_TS_DEFAULT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                regex::Regex::new(r"(?i)\bTEXT\s+NOT\s+NULL\s+DEFAULT\s+CURRENT_TIMESTAMP\b").unwrap()
+            });
+            static TEXT_LITERAL_DEFAULT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+                regex::Regex::new(r"(?i)\bTEXT(\s+(?:NOT\s+NULL\s+)?DEFAULT\s+'[^']*')").unwrap()
+            });
+
+            // MySQL cannot index or default a bare TEXT column, and foreign
+            // keys must match the BIGINT primary keys one-for-one.
+            let mut s = code.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGINT AUTO_INCREMENT PRIMARY KEY");
+            s = s.replace("TEXT CHECK", "VARCHAR(255) CHECK");
+            s = TEXT_TS_DEFAULT_RE
+                .replace_all(&s, "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP")
+                .into_owned();
+            s = TEXT_LITERAL_DEFAULT_RE.replace_all(&s, "VARCHAR(255)$1").into_owned();
+            s = s.replace("TEXT UNIQUE NOT NULL", "VARCHAR(255) UNIQUE NOT NULL");
+            s = s.replace("TEXT NOT NULL UNIQUE", "VARCHAR(255) NOT NULL UNIQUE");
+            s = s.replace("TEXT PRIMARY KEY", "VARCHAR(255) PRIMARY KEY");
+            // Session ids are short and indexed; MySQL cannot index bare TEXT.
+            s = s.replace("session_id TEXT", "session_id VARCHAR(255)");
+            s = s.replace("INTEGER", "BIGINT");
+            s = s.replace(" REAL ", " DOUBLE ").replace(" NUMERIC ", " DOUBLE ");
+            s = s.replace("CREATE INDEX IF NOT EXISTS", "CREATE INDEX");
+            s = s.replace("INSERT OR IGNORE INTO", "INSERT IGNORE INTO");
+            Some(s)
+        }
+        _ => Some(code.to_string()),
+    }
+}
+
+/// Emits the project `schema.sql` translated for `driver`, including the seed
+/// rows. Used by `vlo schema --driver <db>`; the file is generated, not edited.
+pub fn dump_schema(driver: &str) -> Result<String, String> {
+    let path = get_project_root().join("schema.sql");
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+
+    let mut out = format!(
+        "-- Generated from schema.sql for {driver} by `vlo schema --driver {driver}`.\n\
+         -- Do not edit by hand: change schema.sql and regenerate.\n\n"
+    );
+
+    for stmt in raw.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(sql) = translate_schema_statement(driver, stmt) {
+            out.push_str(&sql);
+            out.push_str(";\n\n");
+        }
+    }
+
+    // Explicit ids in the seed rows do not advance a BIGSERIAL sequence.
+    if driver == "postgres" {
+        static SEEDED_ID_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+            regex::Regex::new(r"(?i)INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*id\b").unwrap()
+        });
+        let mut tables: Vec<String> = Vec::new();
+        for caps in SEEDED_ID_RE.captures_iter(&raw) {
+            let table = caps[1].to_string();
+            if !tables.contains(&table) {
+                tables.push(table);
+            }
+        }
+        if !tables.is_empty() {
+            out.push_str("-- Advance BIGSERIAL sequences past explicitly seeded ids\n");
+            for table in tables {
+                out.push_str(&format!(
+                    "SELECT setval(pg_get_serial_sequence('{t}', 'id'), COALESCE((SELECT MAX(id) FROM {t}), 1));\n",
+                    t = table
+                ));
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+/// SQLite's `json_object` yields TEXT; Postgres' `jsonb_build_object` yields
+/// JSONB, which cannot be assigned to a TEXT column without a cast. Appends
+/// `::text` to each *outermost* call so nested objects keep their type.
+fn pg_json_object_to_text(sql: &str) -> String {
+    const NEEDLE: &str = "jsonb_build_object(";
+    let mut out = String::with_capacity(sql.len() + 32);
+    let mut rest = sql;
+
+    while let Some(pos) = rest.find(NEEDLE) {
+        let body_start = pos + NEEDLE.len();
+        let Some(close) = matching_paren(rest.as_bytes(), body_start) else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..=close]);
+        out.push_str("::text");
+        rest = &rest[close + 1..];
+    }
+
+    out.push_str(rest);
+    out
+}
+
+/// `NULLIF(x, '')` relies on SQLite's dynamic typing. Postgres needs the
+/// compared values to share a type, so make the first side text explicitly.
+fn pg_nullif_empty_to_text(sql: &str) -> String {
+    const NEEDLE: &str = "NULLIF(";
+    let mut out = String::with_capacity(sql.len() + 32);
+    let mut rest = sql;
+
+    while let Some(pos) = rest.find(NEEDLE) {
+        let body_start = pos + NEEDLE.len();
+        let Some(close) = matching_paren(rest.as_bytes(), body_start) else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..pos]);
+        let inside = &rest[body_start..close];
+        let rewritten = split_top_level_comma(inside).and_then(|(first, second)| {
+            (second.trim() == "''").then(|| format!("NULLIF(CAST({} AS TEXT), '')", first.trim()))
+        });
+        match rewritten {
+            Some(call) => out.push_str(&call),
+            None => out.push_str(&rest[pos..=close]),
+        }
+        rest = &rest[close + 1..];
+    }
+
+    out.push_str(rest);
+    out
+}
+
+/// Index of the `)` matching the `(` at `open`, ignoring quoted text.
+fn matching_paren(bytes: &[u8], after_open: usize) -> Option<usize> {
+    let mut depth = 1usize;
+    let mut in_str = false;
+    let mut i = after_open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' if in_str => {
+                if bytes.get(i + 1) == Some(&b'\'') { i += 1; } else { in_str = false; }
+            }
+            b'\'' => in_str = true,
+            b'(' if !in_str => depth += 1,
+            b')' if !in_str => {
+                depth -= 1;
+                if depth == 0 { return Some(i); }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Splits `a, b` at the first top-level comma.
+fn split_top_level_comma(body: &str) -> Option<(&str, &str)> {
+    let bytes = body.as_bytes();
+    let mut depth = 0usize;
+    let mut in_str = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' if in_str => {
+                if bytes.get(i + 1) == Some(&b'\'') { i += 1; } else { in_str = false; }
+            }
+            b'\'' => in_str = true,
+            b'(' if !in_str => depth += 1,
+            b')' if !in_str => depth = depth.saturating_sub(1),
+            b',' if !in_str && depth == 0 => return Some((&body[..i], &body[i + 1..])),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Maps a SQLite `strftime` template to the equivalent Postgres `to_char` one.
+fn pg_date_format(fmt: &str) -> String {
+    fmt.replace("%Y", "YYYY")
+        .replace("%m", "MM")
+        .replace("%d", "DD")
+        .replace("%H", "HH24")
+        .replace("%M", "MI")
+        .replace("%S", "SS")
+}
+
+/// Maps a SQLite `strftime` template to MySQL's `DATE_FORMAT` template.
+/// Only the tokens differ: MySQL uses `%i` for minutes and `%s` for seconds.
+fn mysql_date_format(fmt: &str) -> String {
+    let mut out = String::with_capacity(fmt.len() + 4);
+    let mut chars = fmt.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('M') => out.push_str("%i"),
+            Some('S') => out.push_str("%s"),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
+            }
+            None => out.push('%'),
+        }
+    }
+    out
+}
+
+/// MySQL has no `||` concat operator (it means OR unless PIPES_AS_CONCAT is
+/// set), so top-level `a || b || c` chains become `CONCAT(a, b, c)`.
+fn mysql_concat(sql: &str) -> String {
+    let mut out = sql.to_string();
+    while let Some((start, end)) = find_concat_chain(&out) {
+        let args = split_concat_chain(&out[start..end]);
+        let replacement = format!("CONCAT({})", args.join(", "));
+        out.replace_range(start..end, &replacement);
+    }
+    out
+}
+
+/// Byte range of the first `operand || operand [|| operand...]` chain.
+/// VLO SQL uses `||` only for concatenation (logical OR is always `OR`), so
+/// this scans at any paren depth and only has to skip quoted literals.
+fn find_concat_chain(sql: &str) -> Option<(usize, usize)> {
+    let bytes = sql.as_bytes();
+    let mut in_str = false;
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        match bytes[i] {
+            b'\'' => in_str = !in_str,
+            b'|' if !in_str && bytes[i + 1] == b'|' => {
+                let start = operand_start(sql, i);
+                let mut end = operand_end(sql, i + 2);
+                loop {
+                    let mut next = end;
+                    while next < bytes.len() && bytes[next].is_ascii_whitespace() {
+                        next += 1;
+                    }
+                    if next + 1 < bytes.len() && bytes[next] == b'|' && bytes[next + 1] == b'|' {
+                        end = operand_end(sql, next + 2);
+                    } else {
+                        break;
+                    }
+                }
+                return Some((start, end));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Start of the operand that ends just before `end` (quoted literal, function
+/// call, parenthesised expression or bare identifier/number).
+fn operand_start(sql: &str, end: usize) -> usize {
+    let bytes = sql.as_bytes();
+    let mut i = end;
+    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    if i == 0 {
+        return 0;
+    }
+    match bytes[i - 1] {
+        b')' => {
+            let mut depth = 1usize;
+            let mut j = i - 1;
+            while j > 0 {
+                j -= 1;
+                if bytes[j] == b')' {
+                    depth += 1;
+                } else if bytes[j] == b'(' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+            }
+            let mut k = j;
+            while k > 0 && (bytes[k - 1].is_ascii_alphanumeric() || bytes[k - 1] == b'_') {
+                k -= 1;
+            }
+            k
+        }
+        b'\'' => {
+            let mut j = i - 1;
+            while j > 0 {
+                j -= 1;
+                if bytes[j] == b'\'' {
+                    break;
+                }
+            }
+            j
+        }
+        _ => {
+            let mut k = i;
+            while k > 0 && is_operand_byte(bytes[k - 1]) {
+                k -= 1;
+            }
+            k
+        }
+    }
+}
+
+/// End (exclusive) of the operand starting at `start`.
+fn operand_end(sql: &str, start: usize) -> usize {
+    let bytes = sql.as_bytes();
+    let mut i = start;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return i;
+    }
+    if bytes[i] == b'\'' {
+        i += 1;
+        while i < bytes.len() {
+            if bytes[i] == b'\'' {
+                i += 1;
+                break;
+            }
+            i += 1;
+        }
+        return i;
+    }
+    if bytes[i] == b'(' {
+        return skip_balanced_parens(bytes, i);
+    }
+    while i < bytes.len() && is_operand_byte(bytes[i]) {
+        i += 1;
+    }
+    if i < bytes.len() && bytes[i] == b'(' {
+        return skip_balanced_parens(bytes, i);
+    }
+    i
+}
+
+fn is_operand_byte(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'$' | b'?' | b'{' | b'}')
+}
+
+fn skip_balanced_parens(bytes: &[u8], open: usize) -> usize {
+    let mut depth = 0usize;
+    let mut i = open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
+/// Splits `a || b || c` into its top-level operands.
+fn split_concat_chain(chain: &str) -> Vec<String> {
+    let bytes = chain.as_bytes();
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut start = 0;
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        match bytes[i] {
+            b'\'' => in_str = !in_str,
+            b'(' if !in_str => depth += 1,
+            b')' if !in_str => depth -= 1,
+            b'|' if !in_str && depth == 0 && bytes[i + 1] == b'|' => {
+                parts.push(chain[start..i].trim().to_string());
+                i += 2;
+                start = i;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    parts.push(chain[start..].trim().to_string());
+    parts
 }
 
 // ===========================================================================
@@ -486,8 +963,9 @@ pub async fn init_db() -> Result<(), String> {
         let sql = fs::read_to_string(&schema_path).map_err(|e| format!("Failed to read {}: {}", schema_file, e))?;
         let mut count = 0;
         for stmt in sql.split(';').map(str::trim).filter(|s| !s.is_empty() && !s.to_uppercase().starts_with("INSERT")) {
+            let Some(stmt) = pool.prepare_schema_statement(stmt) else { continue };
             count += 1;
-            if let Err(err) = pool.execute(stmt).await { crate::vlo_debug!("⚠️ Schema statement failed: {}", err); }
+            if let Err(err) = pool.execute(&stmt).await { crate::vlo_debug!("⚠️ Schema statement failed: {}", err); }
         }
         crate::vlo_debug!("✅ {} processed ({} statements)", schema_file, count);
     }

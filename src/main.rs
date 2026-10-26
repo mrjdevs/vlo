@@ -119,6 +119,18 @@ async fn run() -> Result<(), String> {
             server::serve(host.as_deref(), port).await?;
         }
 
+        server::Commands::Schema { ref driver, ref out } => {
+            let sql = database::dump_schema(driver)?;
+            match out {
+                Some(file) => {
+                    std::fs::write(file, &sql)
+                        .map_err(|e| format!("Cannot write {}: {}", file, e))?;
+                    println!("✅ Wrote {} ({} bytes)", file, sql.len());
+                }
+                None => print!("{}", sql),
+            }
+        }
+
         server::Commands::Deploy { ref provider } => {
             state::set_app_mode(state::AppMode::Production);
             init_enabled_features(false).await?;

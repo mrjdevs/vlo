@@ -99,8 +99,21 @@ async fn current_columns(pool: &DbPool, table_name: &str) -> Result<Vec<String>,
 
 fn build_create(pool: &DbPool, table_name: &str, columns: &[ColumnDef]) -> String {
     let cols = columns.iter().map(|c| {
-        let mut s = format!("{} {}", c.name, c.sql_type);
-        if c.primary_key { s.push_str(pool.primary_key_suffix()); }
+        let auto_int = c.primary_key && c.sql_type.eq_ignore_ascii_case("INTEGER");
+        // Postgres spells auto-increment as a type; MySQL needs BIGINT so ids
+        // read as i64 and foreign keys match the referenced column type.
+        let mut s = match (pool, auto_int) {
+            (DbPool::Postgres(_), true) => format!("{} BIGSERIAL", c.name),
+            (DbPool::MySql(_), true) => format!("{} BIGINT", c.name),
+            _ => format!("{} {}", c.name, c.sql_type),
+        };
+        if c.primary_key {
+            match pool {
+                DbPool::Sqlite(_) if auto_int => s.push_str(" PRIMARY KEY AUTOINCREMENT"),
+                DbPool::MySql(_) if auto_int => s.push_str(" AUTO_INCREMENT PRIMARY KEY"),
+                _ => s.push_str(" PRIMARY KEY"),
+            }
+        }
         if !c.nullable && !c.primary_key { s.push_str(" NOT NULL"); }
         if let Some(d) = &c.default { s.push_str(&format!(" DEFAULT {}", d)); }
         if c.unique && !c.primary_key { s.push_str(" UNIQUE"); }

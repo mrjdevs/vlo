@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL DEFAULT '',
     role TEXT DEFAULT 'User',
+    status TEXT DEFAULT 'Pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -124,7 +125,7 @@ CREATE TABLE IF NOT EXISTS products (
     category TEXT,
     price REAL NOT NULL,
     stock INTEGER DEFAULT 0,
-    image TEXT,
+    images TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -586,11 +587,7 @@ CREATE TABLE IF NOT EXISTS carts (
         CHECK (status IN ('active', 'converted', 'abandoned')),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CHECK (
-        (user_id IS NOT NULL AND session_id IS NULL)
-        OR
-        (user_id IS NULL AND session_id IS NOT NULL)
-    )
+    CHECK (user_id IS NOT NULL OR session_id IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_carts_user
@@ -720,9 +717,7 @@ SELECT 'products', COUNT(*) FROM products
 UNION ALL
 SELECT 'tasks', COUNT(*) FROM tasks
 UNION ALL
-SELECT 'logs', COUNT(*) FROM logs
-UNION ALL
---SELECT 'cart', COUNT(*) FROM cart;
+SELECT 'logs', COUNT(*) FROM logs;
 
 
 

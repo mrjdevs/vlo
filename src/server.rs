@@ -197,6 +197,14 @@ pub enum Commands {
         host: Option<String>,
     },
 
+    /// Print or write schema.sql translated for a database driver
+    Schema {
+        #[arg(short, long, default_value = "sqlite", value_parser = ["sqlite", "postgres", "mysql"])]
+        driver: String,
+        #[arg(short, long)]
+        out: Option<String>,
+    },
+
     Cgi,
 
     Deploy {
