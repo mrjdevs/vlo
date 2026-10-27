@@ -5,7 +5,7 @@
   "description": "Chart components with dynamic data aggregation and date period support",
   "dependencies": [],
   "exports": {
-    "components": ["BarChart", "LineChart", "HorizontalBarChart", "ProgressChart", "LollipopChart"],
+    "components": ["AreaChart", "BarChart", "LineChart", "HorizontalBarChart", "ProgressChart", "LollipopChart", "PieChart"],
     "styles": ["charting.css"],
     "scripts": ["charting.js"]
   },

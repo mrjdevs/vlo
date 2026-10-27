@@ -1,10 +1,10 @@
 <div class="card">
-    {{#if title}}
+    {if title}
     <h3>{{title}}</h3>
-    {{/if}}
-    {{#if description}}
+    {/if}
+    {if description}
     <p class="card-desc">{{description}}</p>
-    {{/if}}
+    {/if}
     {{children}}
 </div>
 

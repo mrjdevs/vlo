@@ -158,6 +158,24 @@ vlo serve</code></pre>
         </div>
         <p class="component-note">Stop a running server with <Kbd>Ctrl</Kbd> + <Kbd>C</Kbd>. API definitions are cached at startup, so restart after editing <code>api.vlo</code>.</p>
 
+        <h3>Static checks</h3>
+        <p class="component-note">Run <code>vlo check</code> before a build or a commit. It validates pages, layouts, components, modules and API definitions without starting a server or touching the database.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Validate the project</span><span>Terminal</span></div>
+            <pre><code># Human-readable report
+vlo check
+
+# CI: JSON output, warnings fail the run
+vlo check --json --strict</code></pre>
+        </div>
+        <div class="info-grid">
+            <div><strong>Components</strong><p>Unknown tags, unclosed tags and case-mismatched names such as <code>&lt;docslayout&gt;</code> are reported with file and line.</p></div>
+            <div><strong>Data sources</strong><p>Every <code>data-source</code> and module <code>source</code> URL must resolve to an action defined in <code>api.vlo</code> or a module.</p></div>
+            <div><strong>Template markers</strong><p>Stray closers, <code>{else}</code> outside a block and unsupported <code>{{#if}}</code> syntax are flagged.</p></div>
+            <div><strong>Modules</strong><p><code>module.json</code> exports are checked against the files on disk, including dependencies, styles and scripts.</p></div>
+        </div>
+        <p class="component-note">Intentional fixtures can opt out a single line with <code>&lt;!-- vlo-check-ignore --&gt;</code>. The command exits non-zero on errors; add <code>--strict</code> to fail on warnings as well.</p>
+
         <h3>Deployment</h3>
         <div class="number-list">
             <div><b>01</b><p>Set <code>APP_URL</code>, <code>SESSION_SECRET</code> and <code>DATABASE_URL</code> in the environment.</p></div>
@@ -205,6 +223,7 @@ VLO_FEATURES=auth,database,api,flash,pagination,directives</code></pre>
             <label><span>✓</span> Pagination checked on the first and last page</label>
             <label><span>✓</span> Page guards set for protected routes</label>
             <label><span>✓</span> Directives use data attributes, no inline handlers</label>
+            <label><span>✓</span> <code>vlo check</code> passes with no errors</label>
             <label><span>✓</span> Schema dumps regenerated after schema changes</label>
             <label><span>✓</span> VLO_FEATURES lists only the features in use</label>
         </div>

@@ -21,6 +21,7 @@ mod features;
 mod jobs;
 mod schema;
 mod fs_api;
+mod check;
 
 use clap::Parser;
 
@@ -129,6 +130,10 @@ async fn run() -> Result<(), String> {
                 }
                 None => print!("{}", sql),
             }
+        }
+
+        server::Commands::Check { json, strict } => {
+            check::run(json, strict)?;
         }
 
         server::Commands::Deploy { ref provider } => {

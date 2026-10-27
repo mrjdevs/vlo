@@ -1,6 +1,6 @@
 [package]
 name = "vlo"
-version = "0.8.7"
+version = "0.9.0"
 edition = "2021"
 authors = ["MRJDEV <mrjdev@gmail.com>"]
 description = "VLO - A zero-boilerplate full-stack web framework"

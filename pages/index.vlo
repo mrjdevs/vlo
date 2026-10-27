@@ -11,7 +11,7 @@
             <a href="/admin/dashboard">Dashboard</a>
         </Navbar>'
 
-    hero="<HeroLayout
+    hero="<Hero
         badge='v0.8.3 • Built in Rust'
         title='Build Web Apps Without the Framework Overhead'
         subtitle='VLO is a lightweight Rust-powered web framework with real components, hierarchical layouts, server-side rendering, APIs, live reload, and a simple developer experience.'

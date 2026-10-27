@@ -205,6 +205,16 @@ pub enum Commands {
         out: Option<String>,
     },
 
+    /// Validate templates, components, layouts, modules and API actions
+    Check {
+        /// Emit a machine-readable JSON report
+        #[arg(long)]
+        json: bool,
+        /// Fail on warnings as well as errors
+        #[arg(long)]
+        strict: bool,
+    },
+
     Cgi,
 
     Deploy {

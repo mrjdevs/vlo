@@ -1251,7 +1251,7 @@ fn extract_emit_markers(sql: &str) -> (String, Vec<String>) {
 
 /// Pre-processes the JSON block to allow raw multi-line strings.
 /// Escapes newlines inside string literals so serde_json doesn't crash.
-fn sanitize_json_multiline(input: &str) -> String {
+pub(crate) fn sanitize_json_multiline(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let mut in_string = false;
     let mut escape_next = false;

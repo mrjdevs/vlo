@@ -1,6 +1,6 @@
 # VLO Benchmark Report — serve performance and resource profile
 
-**Version:** VLO 0.8.7  
+**Version:** VLO 0.9.0  
 **Platform:** Windows 11 Pro x64, Intel Core i5-4210M (2C/4T, 2.6 GHz), 11.5 GiB RAM, localhost  
 **Runs:** 2026-10-25 (dev vs serve, debug vs release) and 2026-10-26 (standard benchmark, resource profile)
 

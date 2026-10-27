@@ -452,7 +452,7 @@
           <thead>
             <tr><th>ID</th><th>Category</th><th>Count</th></tr>
           </thead>
-          <tbody data-source="/api/test/stats/get_category_stats">
+          <tbody data-source="/api/admin/get_category_stats">
             {for stat in stats}
               <tr>
                 <td>{{stat.id}}</td>
@@ -481,7 +481,7 @@
       <div class="grid-2">
         <div class="kv">
           <span>Missing Component</span>
-          <NonExistentComponent prop="value" />
+          <NonExistentComponent prop="value" /> <!-- vlo-check-ignore -->
           <p class="hint">Expected: HTML comment about missing component.</p>
         </div>
         <div class="kv">
