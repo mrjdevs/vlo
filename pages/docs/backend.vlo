@@ -1,0 +1,226 @@
+<DocsLayout title="VLO Guide · Backend" heading="Backend" eyebrow="Chapter 03"
+    lede="Authentication, guarded routes, SQL-backed APIs, pagination, multi-database support and the module system. Everything that runs before a page is rendered.">
+    <section class="intro-card">
+        <div class="intro-icon">03</div>
+        <div>
+            <strong>The backend is declarative.</strong>
+            <p>Define SQL in <code>pages/api/api.vlo</code>, protect pages with attributes, and let the framework handle sessions, CSRF, pagination and dialect differences.</p>
+        </div>
+    </section>
+
+    <section class="doc-section" id="authentication">
+        <div class="section-number">01</div>
+        <h2>Authentication</h2>
+        <p class="section-lead">VLO includes registration, email verification, password reset, database-backed sessions and CSRF protection.</p>
+        <div class="principles-grid">
+            <article><div class="principle-icon">🔐</div><h3>User registration</h3><p>Email verification with Argon2 password hashing.</p></article>
+            <article><div class="principle-icon">✉️</div><h3>Email verification</h3><p>Token-based activation via the configured mail driver.</p></article>
+            <article><div class="principle-icon">🔑</div><h3>Password reset</h3><p>Time-limited reset tokens delivered by email.</p></article>
+            <article><div class="principle-icon">💾</div><h3>Session management</h3><p>Database sessions with configurable lifetime.</p></article>
+            <article><div class="principle-icon">🛡️</div><h3>CSRF protection</h3><p>HMAC-SHA256 tokens for state-changing requests.</p></article>
+            <article><div class="principle-icon">⚡</div><h3>Rate limiting</h3><p>Throttled login attempts to slow brute force.</p></article>
+        </div>
+
+        <h3>Configuration</h3>
+        <div class="code-card">
+            <div class="code-header"><span>.env</span><span>ENV</span></div>
+            <pre><code># Authentication tables and columns
+AUTH_USER_TABLE=users
+AUTH_USER_ID=id
+AUTH_USER_IDENTIFIER=email
+AUTH_USER_PASSWORD=password_hash
+AUTH_USER_NAME=name
+AUTH_USER_EMAIL=email
+AUTH_USER_ROLE=role
+AUTH_USER_STATUS=status
+
+# Session configuration
+AUTH_SESSION_TABLE=sessions
+AUTH_SESSION_TOKEN=token
+AUTH_SESSION_USER_ID=user_id
+AUTH_SESSION_EXPIRES_AT=expires_at
+AUTH_SESSION_LIFETIME=86400
+AUTH_COOKIE=vlo_session
+
+# Form field names
+AUTH_IDENTIFIER_FIELD=email
+AUTH_PASSWORD_FIELD=password
+
+# API prefixes that skip the session check
+AUTH_API_PUBLIC_ROUTES=/api/products,/api/health</code></pre>
+        </div>
+        <Callout variant="tip" title="Column defaults are safe">
+            When <code>AUTH_USER_NAME</code>, <code>AUTH_USER_EMAIL</code>, <code>AUTH_USER_ROLE</code> or <code>AUTH_USER_STATUS</code> is unset, VLO uses the default column names shown above. Set the variable to an empty value only when your users table has no such column.
+        </Callout>
+    </section>
+
+    <section class="doc-section" id="page-guards">
+        <div class="section-number">02</div>
+        <h2>Page Guards</h2>
+        <p class="section-lead">Protect a page with authentication and role checks by adding attributes to its root layout tag.</p>
+        <div class="naming-table">
+            <div class="naming-row header"><span>Attribute</span><span>Values</span><span>Behavior</span></div>
+            <div class="naming-row"><span>auth</span><span>true / false</span><span>Requires login. Redirects to /login?next=/current-page.</span></div>
+            <div class="naming-row"><span>guest</span><span>true / false</span><span>Guests only. Authenticated users are redirected to /admin/dashboard.</span></div>
+            <div class="naming-row"><span>roles</span><span>Comma-separated</span><span>Requires one of the listed roles, otherwise 403 Forbidden.</span></div>
+        </div>
+        <div class="code-card">
+            <div class="code-header"><span>pages/admin/dashboard.vlo</span><span>VLO</span></div>
+            <pre><code>&lt;BaseLayout title="Admin Dashboard" auth="true" roles="Admin"&gt;
+    &lt;h1&gt;Admin Dashboard&lt;/h1&gt;
+    &lt;p&gt;Only authenticated Admin users can view this page.&lt;/p&gt;
+&lt;/BaseLayout&gt;</code></pre>
+        </div>
+    </section>
+
+    <section class="doc-section" id="api-security">
+        <div class="section-number">03</div>
+        <h2>API Security</h2>
+        <p class="section-lead">Every <code>/api/*</code> route requires a valid session unless it is part of the public allowlist.</p>
+        <div class="code-card">
+            <div class="code-header"><span>.env — public API routes</span><span>ENV</span></div>
+            <pre><code># Comma-separated list of API prefixes that do not require auth
+AUTH_API_PUBLIC_ROUTES=/api/products,/api/health,/api/public</code></pre>
+        </div>
+        <div class="info-grid">
+            <div><strong>401 Unauthorized</strong><p>Requests without a valid session receive JSON <code>{"success":false}</code> with status 401.</p></div>
+            <div><strong>CSRF token</strong><p>State-changing requests must send the <code>X-CSRF-Token</code> header, available from the <code>csrf-token</code> meta tag.</p></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="api-database">
+        <div class="section-number">04</div>
+        <h2>API &amp; Database</h2>
+        <p class="section-lead">Write SQL in one file and it becomes a REST endpoint. Definitions are cached at startup, so restart the server after editing them.</p>
+        <div class="code-card">
+            <div class="code-header"><span>pages/api/api.vlo</span><span>JSON</span></div>
+            <pre><code>&lt;script server&gt;
+{
+  "get_products": "SELECT * FROM products ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}}",
+  "post_products": "INSERT INTO products (title, price) VALUES ({{title}}, {{price}})",
+  "put_products": "UPDATE products SET title = {{title}} WHERE id = {{id}}",
+  "delete_products": "DELETE FROM products WHERE id = {{id}}"
+}
+&lt;/script&gt;</code></pre>
+        </div>
+        <div class="info-grid">
+            <div><strong>Action naming</strong><p>The verb prefix picks the HTTP method: <code>get_</code>, <code>post_</code>, <code>put_</code> and <code>delete_</code>.</p></div>
+            <div><strong>Response shape</strong><p>Rows are returned as <code>data</code>; a <code>get_products</code> action also exposes <code>products</code> to the template context.</p></div>
+        </div>
+
+        <h3>Native JSON parsing</h3>
+        <p class="component-note">Columns that hold JSON strings are parsed into arrays and objects before the template sees them, with a safe fallback to the raw string when the JSON is malformed.</p>
+        <div class="info-grid">
+            <div><strong>Auto-detection</strong><p>Values starting with <code>[</code> or <code>{</code> are parsed automatically.</p></div>
+            <div><strong>Safe fallback</strong><p>Invalid JSON is passed through unchanged instead of failing the request.</p></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="pagination">
+        <div class="section-number">05</div>
+        <h2>Pagination</h2>
+        <p class="section-lead">Any <code>get_*</code> action with <code>LIMIT</code> and <code>OFFSET</code> is paginated automatically. No manual COUNT query and no page math.</p>
+        <div class="code-card">
+            <div class="code-header"><span>pages/api/api.vlo</span><span>JSON</span></div>
+            <pre><code>{
+  "get_users": "SELECT id, name, email, role FROM users ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}}"
+}</code></pre>
+        </div>
+        <div class="code-card">
+            <div class="code-header"><span>Usage</span><span>VLO</span></div>
+            <pre><code>&lt;!-- Place after the data table --&gt;
+&lt;Pagination /&gt;</code></pre>
+        </div>
+        <p class="component-note">The component reads the pagination context variables produced by the API layer, so it stays correct on the first page, the last page and on filtered result sets.</p>
+    </section>
+
+    <section class="doc-section" id="databases">
+        <div class="section-number">06</div>
+        <h2>Multi-Database Support</h2>
+        <p class="section-lead">The same project runs on SQLite, PostgreSQL and MySQL. Dialect handling lives entirely in the database layer, so pages and schemas stay portable.</p>
+        <div class="naming-table">
+            <div class="naming-row header"><span>Driver</span><span>Selection</span><span>Notes</span></div>
+            <div class="naming-row"><span>sqlite</span><span>sqlite://vlo_app.db</span><span>Default. Zero setup, file-based.</span></div>
+            <div class="naming-row"><span>postgres</span><span>postgres://user@host/db</span><span>Sequences, JSONB helpers and date formats handled automatically.</span></div>
+            <div class="naming-row"><span>mysql</span><span>mysql://user@host/db</span><span>Auto-increment keys, CONCAT and upserts translated automatically.</span></div>
+        </div>
+        <div class="code-card">
+            <div class="code-header"><span>.env — selecting a database</span><span>ENV</span></div>
+            <pre><code># DB_DRIVER wins over the URL scheme when both are set
+DB_DRIVER=postgres
+DATABASE_URL=postgres://user:password@127.0.0.1:5432/vlo_app</code></pre>
+        </div>
+        <h3>Schema dumps</h3>
+        <p class="component-note"><code>schema.sql</code> stays SQLite-flavored. Generate the other dialects after any schema change and commit the result.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Generate portable schemas</span><span>Terminal</span></div>
+            <pre><code># PostgreSQL dump
+vlo schema --driver postgres --out schema-pg.sql
+
+# MySQL dump
+vlo schema --driver mysql --out schema-mysql.sql</code></pre>
+        </div>
+        <Callout variant="warning" dismissible title="Write dialect-neutral SQL">
+            Prefer standard SQL such as <code>ON CONFLICT ... DO UPDATE</code> in API definitions. Known shims for <code>strftime</code>, <code>json_object</code>, <code>json_extract</code> and <code>||</code> are translated per driver, so avoid depending on database-specific syntax in pages.
+        </Callout>
+    </section>
+
+    <section class="doc-section" id="modules">
+        <div class="section-number">07</div>
+        <h2>Modules</h2>
+        <p class="section-lead">A module is a self-contained package under <code>modules/</code>. Drop it in, restart, and its components, styles, scripts and data handlers become available.</p>
+        <div class="code-card">
+            <div class="code-header"><span>modules/callout/module.json</span><span>JSON</span></div>
+            <pre><code>{
+  "name": "callout",
+  "version": "1.0.0",
+  "description": "Dismissible inline callout boxes",
+  "dependencies": [],
+  "exports": {
+    "components": ["Callout"],
+    "styles": ["callout.css"],
+    "scripts": ["callout.js"]
+  }
+}</code></pre>
+        </div>
+        <div class="number-list">
+            <div><b>01</b><p><strong>Discovery.</strong> Every directory with a <code>module.json</code> is loaded at startup.</p></div>
+            <div><b>02</b><p><strong>Resolution.</strong> Page components, then project components, then module components.</p></div>
+            <div><b>03</b><p><strong>Asset injection.</strong> Module CSS and JS are added only to pages that render one of its components.</p></div>
+            <div><b>04</b><p><strong>Handlers.</strong> Optional transform, meta and computed rules turn API rows into chart or report data.</p></div>
+        </div>
+
+        <h3>Example: Callout</h3>
+        <p class="component-note">The bundled <code>callout</code> module adds a dismissible box with variants. This guide uses it throughout.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Usage</span><span>VLO</span></div>
+            <pre><code>&lt;Callout variant="warning" title="Heads up" dismissible&gt;
+    Unchecking an existing image deletes it from the database and disk.
+&lt;/Callout&gt;</code></pre>
+        </div>
+
+        <h3>Example: Kbd</h3>
+        <p class="component-note">The <code>kbd</code> module adds a keyboard badge. Press <Kbd>Ctrl</Kbd> + <Kbd>C</Kbd> in the terminal to stop a development server.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Usage</span><span>VLO</span></div>
+            <pre><code>&lt;Kbd&gt;Esc&lt;/Kbd&gt; closes the active modal.</code></pre>
+        </div>
+
+        <h3>Data modules</h3>
+        <p class="component-note">Modules can also consume API data and shape it declaratively. The charting module is the reference example.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Charting example</span><span>VLO</span></div>
+            <pre><code>&lt;BarChart
+    source="/api/dash/get_category_stats"
+    title="Revenue by Category"
+    label_column="category"
+    value_column="total_revenue"
+    limit="8"
+    color="#00f5ff"
+/&gt;</code></pre>
+        </div>
+        <Callout variant="tip" title="Keep modules boring">
+            A good module owns one concern, declares its component names in the manifest and ships its own styles. If a module needs core changes, it probably belongs in <code>components/</code> instead.
+        </Callout>
+    </section>
+</DocsLayout>

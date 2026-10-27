@@ -1,156 +1,126 @@
-<BaseLayout title="Project Guidelines"
-footer='<Footer />' >
-    <div class="guidelines-page">
-        <header class="guidelines-hero">
-            <div class="hero-badge"><span class="pulse"></span> VLO PROJECT GUIDELINES</div>
-            <h1>Build with <span>VLO</span>.</h1>
-            <p>A practical guide for building, maintaining and extending VLO projects while keeping the codebase consistent, reusable and unmistakably VLO.</p>
-            <div class="hero-meta">
-                <span>✦ Architecture</span>
-                <span>✦ Components</span>
-                <span>✦ Templating</span>
-                <span>✦ Modules</span>
-                <span>✦ Authentication</span>
-                <span>✦ Media & Files</span>
-                <span>✦ Flash Messages</span>
-                <span>✦ Pagination</span>
-                <span>✦ Configurable Features</span>
-                <span>✦ Branding</span>
-            </div>
-        </header>
+<DocsLayout title="VLO Guide · Overview" heading="Build with VLO." eyebrow="Overview"
+    lede="The complete guide to building, extending and shipping VLO projects. Five chapters cover the templating engine, the backend, media and mail, and the day-to-day workflow.">
+    <section class="intro-card">
+        <div class="intro-icon">V</div>
+        <div>
+            <strong>VLO is a component-first framework.</strong>
+            <p>Build interfaces from small reusable components instead of repeating markup and styles throughout the project. Every page in this guide is itself built with VLO components.</p>
+        </div>
+    </section>
 
-        <div class="docs-layout">
-            <aside class="docs-sidebar">
-                <div class="sidebar-title">On this page</div>
-                <nav class="docs-nav">
-                    <a href="#principles" class="active"><span>01</span> Core Principles</a>
-                    <a href="#structure"><span>02</span> Project Structure</a>
-                    <a href="#vlo-files"><span>03</span> .vlo Files</a>
-                    <a href="#components"><span>04</span> Components</a>
-                    <a href="#props"><span>05</span> Props</a>
-                    <a href="#templating"><span>06</span> Templating</a>
-                    <a href="#modifiers"><span>06a</span> Modifiers</a>
-                    <a href="#directives"><span>06b</span> Directives</a>
-                    <a href="#authentication"><span>07</span> Authentication</a>
-                    <a href="#page-guards"><span>08</span> Page Guards</a>
-                    <a href="#api-security"><span>09</span> API Security</a>
-                    <a href="#pages"><span>10</span> Pages</a>
-                    <a href="#layouts"><span>11</span> Layouts</a>
-                    <a href="#styling"><span>12</span> Styling</a>
-                    <a href="#navbar"><span>13</span> Navbar</a>
-                    <a href="#branding"><span>14</span> Branding</a>
-                    <a href="#performance"><span>15</span> Performance</a>
-                    <a href="#accessibility"><span>16</span> Accessibility</a>
-                    <a href="#security"><span>17</span> Security</a>
-                    <a href="#modules"><span>18</span> Modules & Charting</a>
-                    <a href="#api-database"><span>19</span> API & Database</a>
-                    <a href="#flash"><span>20</span> Flash Messages</a>
-                    <a href="#pagination"><span>21</span> Pagination</a>
-                    <a href="#uploads"><span>22</span> File Uploads & Media</a>
-                    <a href="#email"><span>23</span> Email & Mailer</a>
-                    <a href="#workflow"><span>24</span> Development Workflow</a>
-                    <a href="#checklist"><span>25</span> Checklist</a>
-                    <a href="#features"><span>26</span> Configurable Features</a>
-                </nav>
-                <div class="sidebar-card">
-                    <div class="sidebar-icon">✦</div>
-                    <strong>VLO philosophy</strong>
-                    <p>Simple code. Reusable components. Consistent experiences.</p>
-                </div>
-            </aside>
+    <Callout variant="tip" dismissible title="What is new in this guide">
+        The guide is now split into five chapters, documents multi-database support and schema dumps, and ships two example modules (<code>callout</code> and <code>kbd</code>) so the module system can be verified end to end.
+    </Callout>
 
-            <main class="docs-content">
-                <section class="intro-card">
-                    <div class="intro-icon">V</div>
-                    <div>
-                        <strong>VLO is a component-first framework.</strong>
-                        <p>Build interfaces from small reusable components instead of repeating markup and styles throughout the project.</p>
-                    </div>
-                </section>
+    <section class="doc-section" id="principles">
+        <div class="section-number">01</div>
+        <h2>Core Principles</h2>
+        <p class="section-lead">Every VLO project should follow a small set of principles. These principles matter more than any individual implementation.</p>
+        <div class="principles-grid">
+            <article><div class="principle-icon">◈</div><h3>Reusable</h3><p>Build components once and reuse them everywhere they are needed.</p></article>
+            <article><div class="principle-icon">⌘</div><h3>Simple</h3><p>Prefer straightforward implementations over unnecessary abstraction.</p></article>
+            <article><div class="principle-icon">◇</div><h3>Consistent</h3><p>Similar problems should have similar solutions throughout the project.</p></article>
+            <article><div class="principle-icon">✦</div><h3>Maintainable</h3><p>Write code that another developer can understand and modify quickly.</p></article>
+        </div>
+        <div class="rule-card">
+            <strong>Golden Rule</strong>
+            <p>If you have written the same UI pattern more than once, consider turning it into a component.</p>
+        </div>
+    </section>
 
-                <section class="doc-section" id="principles">
-                    <div class="section-number">01</div>
-                    <h2>Core Principles</h2>
-                    <p class="section-lead">Every VLO project should follow a small set of principles. These principles matter more than any individual implementation.</p>
-                    <div class="principles-grid">
-                        <article><div class="principle-icon">◈</div><h3>Reusable</h3><p>Build components once and reuse them everywhere they are needed.</p></article>
-                        <article><div class="principle-icon">⌘</div><h3>Simple</h3><p>Prefer straightforward implementations over unnecessary abstraction.</p></article>
-                        <article><div class="principle-icon">◇</div><h3>Consistent</h3><p>Similar problems should have similar solutions throughout the project.</p></article>
-                        <article><div class="principle-icon">✦</div><h3>Maintainable</h3><p>Write code that another developer can understand and modify quickly.</p></article>
-                    </div>
-                    <div class="rule-card">
-                        <strong>Golden Rule</strong>
-                        <p>If you have written the same UI pattern more than once, consider turning it into a component.</p>
-                    </div>
-                </section>
+    <section class="doc-section" id="chapters">
+        <div class="section-number">02</div>
+        <h2>The Guide</h2>
+        <p class="section-lead">Each chapter is a self-contained reference. Read them in order the first time, then jump straight to the section you need.</p>
+        <div class="chapter-grid">
+            <a class="chapter-card" href="/docs/templating">
+                <span class="chapter-no">CHAPTER 02</span>
+                <strong>Templating</strong>
+                <p>Interpolation, conditionals, loops, modifiers, directives, data sources, slots and AJAX navigation.</p>
+                <span class="chapter-go">Open chapter →</span>
+            </a>
+            <a class="chapter-card" href="/docs/backend">
+                <span class="chapter-no">CHAPTER 03</span>
+                <strong>Backend</strong>
+                <p>Authentication, page guards, API security, SQL-backed API definitions, pagination, multi-database support and modules.</p>
+                <span class="chapter-go">Open chapter →</span>
+            </a>
+            <a class="chapter-card" href="/docs/media">
+                <span class="chapter-no">CHAPTER 04</span>
+                <strong>Media &amp; Mail</strong>
+                <p>Flash messages, multi-file uploads, orphaned file cleanup, the image gallery and transactional email templates.</p>
+                <span class="chapter-go">Open chapter →</span>
+            </a>
+            <a class="chapter-card" href="/docs/workflow">
+                <span class="chapter-no">CHAPTER 05</span>
+                <strong>Workflow</strong>
+                <p>Pages, layouts, styling, branding, performance, accessibility, security, CLI commands and the release checklist.</p>
+                <span class="chapter-go">Open chapter →</span>
+            </a>
+        </div>
+    </section>
 
-                <section class="doc-section" id="structure">
-                    <div class="section-number">02</div>
-                    <h2>Project Structure</h2>
-                    <p class="section-lead">Keep project files organized by responsibility. Avoid putting unrelated functionality into one large file.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Recommended structure</span><span>VLO</span></div>
-                        <pre><code>project/
+    <section class="doc-section" id="structure">
+        <div class="section-number">03</div>
+        <h2>Project Structure</h2>
+        <p class="section-lead">Keep project files organized by responsibility. Avoid putting unrelated functionality into one large file.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Recommended structure</span><span>VLO</span></div>
+            <pre><code>project/
 ├── pages/
-│   ├── home.vlo
-│   ├── about.vlo
+│   ├── index.vlo
 │   ├── docs.vlo
+│   ├── docs/
+│   │   ├── templating.vlo
+│   │   ├── backend.vlo
+│   │   ├── media.vlo
+│   │   └── workflow.vlo
 │   ├── login.vlo
+│   ├── api/
+│   │   └── api.vlo
 │   └── admin/
 │       ├── users.vlo
 │       └── dashboard.vlo
 ├── components/
 │   ├── Alert.vlo
-│   ├── Badge.vlo
 │   ├── Button.vlo
 │   ├── Card.vlo
-│   ├── FileInput.vlo
-│   ├── ImageGallery.vlo
-│   ├── Input.vlo
-│   ├── Link.vlo
-│   ├── Modal.vlo
-│   ├── Navbar.vlo
-│   ├── Pagination.vlo
-│   ├── Sidebar.vlo
-│   ├── SlotCard.vlo
-│   └── Toast.vlo
+│   └── ...
 ├── layouts/
 │   ├── BaseLayout.vlo
-│   ├── DocsLayout.vlo
-│   ├── MainNav.vlo
-│   └── admin/
-│       └── AdminLayout.vlo
-├── email_templates/
-│   ├── welcome.html
-│   ├── reset_password.html
-│   └── activation_reminder.html
+│   └── DocsLayout.vlo
 ├── modules/
-│   └── charting/
-│       ├── module.json
-│       ├── components/
-│       ├── styles/
-│       └── scripts/
+│   ├── charting/
+│   │   ├── module.json
+│   │   ├── components/
+│   │   ├── styles/
+│   │   └── scripts/
+│   ├── callout/
+│   └── kbd/
+├── email_templates/
+│   └── welcome.html
 ├── schema.sql
+├── schema-pg.sql
+├── schema-mysql.sql
 └── .env</code></pre>
-                    </div>
-                    <div class="info-grid">
-                        <div><strong>pages/</strong><p>Application routes and complete pages. Supports subdirectories.</p></div>
-                        <div><strong>components/</strong><p>Reusable UI building blocks.</p></div>
-                        <div><strong>layouts/</strong><p>Shared page structures with automatic hierarchical resolution.</p></div>
-                        <div><strong>email_templates/</strong><p>HTML email templates with subject extraction and modifier support.</p></div>
-                        <div><strong>modules/</strong><p>Self-contained extension packages (components, styles, handlers).</p></div>
-                        <div><strong>schema.sql</strong><p>Database schema (DDL statements for all tables).</p></div>
-                    </div>
-                </section>
+        </div>
+        <div class="info-grid">
+            <div><strong>pages/</strong><p>Application routes and complete pages. Subdirectories map to URL paths.</p></div>
+            <div><strong>components/</strong><p>Reusable UI building blocks available to every page.</p></div>
+            <div><strong>layouts/</strong><p>Shared page structures with automatic hierarchical resolution.</p></div>
+            <div><strong>modules/</strong><p>Self-contained packages of components, styles, scripts and data handlers.</p></div>
+            <div><strong>email_templates/</strong><p>HTML email templates with subject extraction and modifier support.</p></div>
+            <div><strong>schema*.sql</strong><p>Canonical SQLite schema plus generated PostgreSQL and MySQL dumps.</p></div>
+        </div>
+    </section>
 
-                <section class="doc-section" id="vlo-files">
-                    <div class="section-number">03</div>
-                    <h2>.vlo Files</h2>
-                    <p class="section-lead">A VLO file should have one clear responsibility. Keep markup, styling and behavior close to the component they belong to.</p>
-                    <h3>Basic structure</h3>
-                    <div class="code-card">
-                        <div class="code-header"><span>ExampleComponent.vlo</span><span>.vlo</span></div>
-                        <pre><code>&lt;div class="example"&gt;
+    <section class="doc-section" id="vlo-files">
+        <div class="section-number">04</div>
+        <h2>.vlo Files</h2>
+        <p class="section-lead">A VLO file has one clear responsibility. Keep markup, styling and behavior close to the component they belong to.</p>
+        <div class="code-card">
+            <div class="code-header"><span>components/ExampleComponent.vlo</span><span>.vlo</span></div>
+            <pre><code>&lt;div class="example"&gt;
     &lt;h2&gt;{{title}}&lt;/h2&gt;
     &lt;p&gt;{{description}}&lt;/p&gt;
 &lt;/div&gt;
@@ -158,820 +128,129 @@ footer='<Footer />' >
 &lt;style&gt;
 .example { padding: 20px; }
 &lt;/style&gt;</code></pre>
-                    </div>
-                    <div class="do-grid">
-                        <div class="do-card good">
-                            <div class="do-title"><span>✓</span> Do</div>
-                            <ul><li>Keep components focused.</li><li>Use meaningful names.</li><li>Keep styles scoped.</li><li>Document unusual behavior.</li></ul>
-                        </div>
-                        <div class="do-card avoid">
-                            <div class="do-title"><span>×</span> Avoid</div>
-                            <ul><li>Huge monolithic components.</li><li>Duplicated markup.</li><li>Unused props.</li><li>Unexplained magic values.</li></ul>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="components">
-                    <div class="section-number">04</div>
-                    <h2>Components</h2>
-                    <p class="section-lead">Components are the foundation of VLO. A component should represent a reusable piece of interface or behavior.</p>
-                    <h3>Component catalog</h3>
-                    <p class="component-note">VLO ships with a ready-to-use component library. Every component accepts props, supports scoped styles, and can be extended.</p>
-                    <div class="principles-grid">
-                        <article><div class="principle-icon">🔔</div><h3>Alert</h3><p>Inline status messages for success, error, warning and info states.</p></article>
-                        <article><div class="principle-icon">🏷️</div><h3>Badge</h3><p>Compact label pills for statuses, tags and metadata.</p></article>
-                        <article><div class="principle-icon">🔘</div><h3>Button</h3><p>Primary, secondary, ghost and danger actions with href support.</p></article>
-                        <article><div class="principle-icon">🗂️</div><h3>Card</h3><p>Titled content container with description and default slot.</p></article>
-                        <article><div class="principle-icon">📎</div><h3>FileInput</h3><p>Styled file picker for multipart uploads with custom button label.</p></article>
-                        <article><div class="principle-icon">🖼️</div><h3>ImageGallery</h3><p>Pure CSS zoomable image gallery with thumbnails and native download support.</p></article>
-                        <article><div class="principle-icon">⌨️</div><h3>Input</h3><p>Form field with label, placeholder and validation attributes.</p></article>
-                        <article><div class="principle-icon">🔗</div><h3>Link</h3><p>Consistently styled anchor with variants and active state.</p></article>
-                        <article><div class="principle-icon">🪟</div><h3>Modal</h3><p>Dialog overlay for edit forms and delete confirmations.</p></article>
-                        <article><div class="principle-icon">🧭</div><h3>Navbar</h3><p>Site navigation with variants, sizes, shadows, sticky and mobile modes.</p></article>
-                        <article><div class="principle-icon">📄</div><h3>Pagination</h3><p>Prev/Next navigation with page counter and clean URLs.</p></article>
-                        <article><div class="principle-icon">📑</div><h3>Sidebar</h3><p>Vertical navigation panel for dashboards and docs sections.</p></article>
-                        <article><div class="principle-icon">🧩</div><h3>SlotCard</h3><p>Card with named slots for header, body and footer content.</p></article>
-                        <article><div class="principle-icon">💬</div><h3>Toast</h3><p>Auto-dismissing notification for API action feedback.</p></article>
-                    </div>
-                    <h3>Component naming</h3>
-                    <div class="naming-table">
-                        <div class="naming-row header"><span>Type</span><span>Recommended</span><span>Avoid</span></div>
-                        <div class="naming-row"><span>Button</span><span>Button.vlo</span><span>button.vlo</span></div>
-                        <div class="naming-row"><span>Navigation</span><span>Navbar.vlo</span><span>navthing.vlo</span></div>
-                        <div class="naming-row"><span>Form</span><span>Input.vlo</span><span>inputThing.vlo</span></div>
-                    </div>
-                    <h3>Component responsibilities</h3>
-                    <div class="number-list">
-                        <div><b>01</b><p>A component owns its own presentation.</p></div>
-                        <div><b>02</b><p>Props control configurable behavior.</p></div>
-                        <div><b>03</b><p>Children and named slots provide flexible content.</p></div>
-                        <div><b>04</b><p>Avoid coupling components to specific pages.</p></div>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="props">
-                    <div class="section-number">05</div>
-                    <h2>Props</h2>
-                    <p class="section-lead">Props are the primary way to customize reusable VLO components.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Props example</span><span>VLO</span></div>
-                        <pre><code>&lt;Button text="Save Changes" href="/save" variant="primary" /&gt;</code></pre>
-                    </div>
-                    <h3>Prop rules</h3>
-                    <div class="rules-list">
-                        <div><span>01</span><p>Use clear, descriptive prop names.</p></div>
-                        <div><span>02</span><p>Provide sensible defaults when possible.</p></div>
-                        <div><span>03</span><p>Avoid props that only make sense for one page.</p></div>
-                        <div><span>04</span><p>Keep variant names predictable.</p></div>
-                    </div>
-                    <div class="rule-card">
-                        <strong>Good example</strong>
-                        <p><code>variant="primary"</code>, <code>variant="secondary"</code>, <code>variant="ghost"</code></p>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="templating">
-                    <div class="section-number">06</div>
-                    <h2>Templating</h2>
-                    <p class="section-lead">VLO includes a server-side templating engine with interpolation, conditionals, loops, and API data binding. All rendering happens on the server before HTML reaches the browser.</p>
-                    <h3>Interpolation</h3>
-                    <p class="component-note">Use double curly braces to render variables, props, and nested object properties. Dot notation is supported for accessing nested values.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Variable interpolation</span><span>VLO</span></div>
-                        <pre><code>&lt;h1&gt;{{title}}&lt;/h1&gt;
-&lt;p&gt;{{product.description}}&lt;/p&gt;
-&lt;span&gt;${{product.price}}&lt;/span&gt;
-&lt;img src="{{product.image}}" alt="{{product.title}}" /&gt;</code></pre>
-                    </div>
-                    <div class="info-grid">
-                        <div><strong>{{variable}}</strong><p>Renders a top-level context variable or prop value.</p></div>
-                        <div><strong>{{object.field}}</strong><p>Accesses nested properties using dot notation.</p></div>
-                    </div>
-                    
-                    <h3>Conditionals</h3>
-                    <p class="component-note">Use <code>{if}</code>, <code>{else}</code>, and <code>{/if}</code> blocks to conditionally render content. Supports comparison operators and truthy checks.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Conditional rendering</span><span>VLO</span></div>
-                        <pre><code>&lt;!-- Equality check --&gt;
-{if status == "success"}
-    &lt;Toast variant="success" title="Done!" /&gt;
-{/if}
-
-&lt;!-- Truthy check (renders if product.image exists) --&gt;
-{if product.image}
-    &lt;img src="{{product.image}}" /&gt;
-{else}
-    &lt;div class="placeholder"&gt;No image&lt;/div&gt;
-{/if}
-
-&lt;!-- Numeric comparisons --&gt;
-{if product.price &gt; 500}
-    &lt;span class="premium"&gt;Premium&lt;/span&gt;
-{/if}</code></pre>
-                    </div>
-                    <h3>Supported operators</h3>
-                    <div class="naming-table">
-                        <div class="naming-row header"><span>Operator</span><span>Example</span><span>Meaning</span></div>
-                        <div class="naming-row"><span>==</span><span>{if status == "success"}</span><span>Equal</span></div>
-                        <div class="naming-row"><span>!=</span><span>{if status != "error"}</span><span>Not equal</span></div>
-                        <div class="naming-row"><span>&gt;</span><span>{if product.price &gt; 500}</span><span>Greater than</span></div>
-                        <div class="naming-row"><span>&lt;</span><span>{if product.stock &lt; 5}</span><span>Less than</span></div>
-                        <div class="naming-row"><span>truthy</span><span>{if product.image}</span><span>Value exists / non-empty</span></div>
-                    </div>
-                    
-                    <h3>Loops & JSON Arrays</h3>
-                    <p class="component-note">Use <code>{for item in collection}</code> to iterate over arrays from API responses. VLO's database layer automatically parses JSON columns into native arrays, meaning <code>{for img in product.images}</code> works out of the box without needing <code>|json_decode</code>.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Loop rendering</span><span>VLO</span></div>
-                        <pre><code>&lt;tbody data-source="/api/products"&gt;
-    {for product in products}
-        &lt;tr&gt;
-            &lt;td&gt;#{{product.id}}&lt;/td&gt;
-            &lt;td&gt;
-                &lt;!-- product.images is a native JSON array --&gt;
-                {for img in product.images limit:1}
-                    &lt;img src="{{ img }}" /&gt;
-                {/for}
-            &lt;/td&gt;
-        &lt;/tr&gt;
-    {else}
-        &lt;tr&gt;&lt;td colspan="3"&gt;No products found.&lt;/td&gt;&lt;/tr&gt;
-    {/for}
-&lt;/tbody&gt;</code></pre>
-                    </div>
-                    
-                    <h3>Data Sources</h3>
-                    <p class="component-note">Bind an HTML element to an API endpoint using the <code>data-source</code> attribute. VLO fetches the data server-side and injects it into the template context before rendering.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Data binding</span><span>VLO</span></div>
-                        <pre><code>&lt;!-- Element receives data from /api/products --&gt;
-&lt;tbody data-source="/api/products"&gt;
-    {for product in products}
-        &lt;tr&gt;
-            &lt;td&gt;{{product.id}}&lt;/td&gt;
-            &lt;td&gt;{{product.title}}&lt;/td&gt;
-            &lt;td&gt;${{product.price}}&lt;/td&gt;
-        &lt;/tr&gt;
-    {else}
-        &lt;tr&gt;&lt;td colspan="4"&gt;Empty&lt;/td&gt;&lt;/tr&gt;
-    {/for}
-&lt;/tbody&gt;</code></pre>
-                    </div>
-                    
-                    <h3>AJAX & Seamless Navigation</h3>
-                    <p class="component-note">Turn any container into an AJAX-powered wrapper using the <code>|ajax</code> modifier. Links and forms inside the wrapper intercept clicks/submits and swap the HTML without a full page reload. VLO automatically syncs new <code>&lt;style&gt;</code> tags from the new page into the <code>&lt;head&gt;</code> during the swap.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>AJAX Wrapper</span><span>VLO</span></div>
-                        <pre><code>&lt;div id="products-list"&gt;
-    {{ "" | ajax:"" }} &lt;!-- Empty URL means "listen-only" wrapper --&gt;
-    &lt;a href="?page=2"&gt;Next Page&lt;/a&gt;
-&lt;/div&gt;</code></pre>
-                    </div>
-                    <div class="info-grid">
-                        <div><strong>Infinite Scroll</strong><p>Add <code>data-load-more</code> to a pagination link and <code>data-append</code> to your table body. VLO's IntersectionObserver will automatically fetch and append the next page.</p></div>
-                        <div><strong>State Preservation</strong><p>AJAX navigation preserves the browser history, updates the URL bar, and handles <code>popstate</code> seamlessly.</p></div>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="modifiers">
-                    <div class="section-number">06a</div>
-                    <h2>Modifiers</h2>
-                    <p class="section-lead">Transform and format data directly in the template using the pipe <code>|</code> syntax. Modifiers are applied from left to right, making it easy to chain operations.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Modifier examples</span><span>VLO</span></div>
-                        <pre><code>&lt;!-- Text formatting --&gt;
-&lt;p&gt;{{ product.title | upper | truncate:30 }}&lt;/p&gt;
-
-&lt;!-- Number formatting --&gt;
-&lt;p&gt;Price: {{ product.price | number:2 }}&lt;/p&gt;
-&lt;p&gt;Total: {{ total_revenue | currency:"$" }}&lt;/p&gt;
-
-&lt;!-- JSON & Arrays --&gt;
-&lt;p&gt;First Image: {{ product.images | first }}&lt;/p&gt;
-&lt;p&gt;Total Items: {{ product.images | count }}&lt;/p&gt;
-&lt;p&gt;Tags: {{ product.tags | join:", " }}&lt;/p&gt;</code></pre>
-                    </div>
-                    <div class="naming-table">
-                        <div class="naming-row header"><span>Modifier</span><span>Description</span><span>Example</span></div>
-                        <div class="naming-row"><span>upper / lower</span><span>Change text case</span><span>{{ text | upper }}</span></div>
-                        <div class="naming-row"><span>number:n</span><span>Format with 'n' decimals and thousands separators</span><span>{{ val | number:2 }}</span></div>
-                        <div class="naming-row"><span>currency:sym</span><span>Format as currency with custom symbol</span><span>{{ val | currency:"€" }}</span></div>
-                        <div class="naming-row"><span>truncate:n</span><span>Truncate to 'n' characters with ellipsis</span><span>{{ text | truncate:50 }}</span></div>
-                        <div class="naming-row"><span>default:val</span><span>Fallback if empty, null, or "null"</span><span>{{ val | default:"N/A" }}</span></div>
-                        <div class="naming-row"><span>nl2br</span><span>Convert newlines to &lt;br&gt; tags</span><span>{{ text | nl2br }}</span></div>
-                        <div class="naming-row"><span>escape</span><span>HTML-encode special characters</span><span>{{ text | escape }}</span></div>
-                        <div class="naming-row"><span>first / last</span><span>Extract the first or last item from a JSON array</span><span>{{ images | first }}</span></div>
-                        <div class="naming-row"><span>json_get:path</span><span>Extract a nested value (e.g., <code>0.url</code>)</span><span>{{ data | json_get:0.url }}</span></div>
-                        <div class="naming-row"><span>count</span><span>Return the length of an array or string</span><span>{{ items | count }}</span></div>
-                        <div class="naming-row"><span>join:delim</span><span>Join an array into a string</span><span>{{ tags | join:", " }}</span></div>
-                        <div class="naming-row"><span>split:delim</span><span>Split a string into a JSON array</span><span>{{ csv | split:"," }}</span></div>
-                        <div class="naming-row"><span>sync:channel</span><span>Real-time SSE synchronization</span><span>{{ stock | sync:"products" }}</span></div>
-                        <div class="naming-row"><span>ajax:url</span><span>Client-side fetch & DOM swap</span><span>{{ "" | ajax:"" }}</span></div>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="directives">
-                    <div class="section-number">06b</div>
-                    <h2>Directives</h2>
-                    <p class="section-lead">VLO provides declarative directives for form submission and actions using a zero-inline-JS architecture with event delegation.</p>
-                    
-                    <h3>Form & Action Directives</h3>
-                    <p class="component-note">Directives compile into standardized <code>data-vlo-*</code> attributes. VLO automatically injects a single, optimized event-delegation script at the bottom of the page only when needed.</p>
-                    <div class="naming-table">
-                        <div class="naming-row header"><span>Directive</span><span>Usage</span><span>Compiles to</span></div>
-                        <div class="naming-row"><span>v-post</span><span>&lt;form v-post="/api/products"&gt;</span><span>data-vlo-post="/api/products"</span></div>
-                        <div class="naming-row"><span>v-put</span><span>&lt;form v-put="/api/products/5"&gt;</span><span>data-vlo-put="/api/products/5"</span></div>
-                        <div class="naming-row"><span>v-delete</span><span>&lt;button v-delete="/api/products/5"&gt;</span><span>data-vlo-delete="/api/products/5"</span></div>
-                        <div class="naming-row"><span>v-auto</span><span>&lt;form v-put="..." v-auto&gt;</span><span>data-vlo-auto (debounced save on change)</span></div>
-                    </div>
-                    <p class="component-note">Add <code>v-auto</code> to a <code>v-put</code> form to save automatically 350&nbsp;ms after any field changes, without reloading the page. Submissions are serialized: changes made while a save is in flight are sent once it finishes.</p>
-                    
-                    <h3>Modal Directives</h3>
-                    <p class="component-note">Open and close modals declaratively without writing custom JavaScript. VLO automatically injects the modal handler script, which supports ID lookup, class fallbacks, backdrop clicks, and ESC key dismissal.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Modal usage</span><span>VLO</span></div>
-                        <pre><code>&lt;button data-modal-open="edit-modal"&gt;Edit&lt;/button&gt;
-
-&lt;div id="edit-modal" class="vlo-modal-overlay"&gt;
-    &lt;div class="vlo-modal-box"&gt;
-        &lt;button data-modal-close="edit-modal"&gt;Cancel&lt;/button&gt;
-    &lt;/div&gt;
-&lt;/div&gt;</code></pre>
-                    </div>
-
-                    <h3>Pure HTML Form Handling (Zero JS)</h3>
-                    <p class="component-note">VLO's backend is designed to handle complex form logic natively. For multi-file uploads and deletions, you do not need any JavaScript. Use a hidden input and native checkboxes.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Multi-File Edit Form</span><span>VLO</span></div>
-                        <pre><code>&lt;form v-put="/api/products/{{product.id}}" enctype="multipart/form-data"&gt;
-    &lt;!-- New uploads (baseline empty hidden field) --&gt;
-    &lt;input type="hidden" name="images" value=""&gt;
-    &lt;FileInput name="images" multiple /&gt;
-
-    &lt;!-- Existing files (Uncheck to delete from DB and Disk) --&gt;
-    {for img in product.images}
-        &lt;label&gt;
-            &lt;input type="checkbox" name="images" value="{{img}}" checked&gt;
-            &lt;img src="{{img}}"&gt;
-        &lt;/label&gt;
-    {/for}
-&lt;/form&gt;</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="authentication">
-                    <div class="section-number">07</div>
-                    <h2>Authentication</h2>
-                    <p class="section-lead">VLO includes a complete authentication system with user registration, email verification, password reset, and session management.</p>
-                    
-                    <h3>Authentication Features</h3>
-                    <div class="principles-grid">
-                        <article><div class="principle-icon">🔐</div><h3>User Registration</h3><p>Secure registration with email verification and Argon2 password hashing.</p></article>
-                        <article><div class="principle-icon">✉️</div><h3>Email Verification</h3><p>Token-based account activation sent via configurable email provider.</p></article>
-                        <article><div class="principle-icon">🔑</div><h3>Password Reset</h3><p>Secure password reset flow with time-limited tokens.</p></article>
-                        <article><div class="principle-icon">💾</div><h3>Session Management</h3><p>Database-backed sessions with configurable expiration and "remember me" support.</p></article>
-                        <article><div class="principle-icon">🛡️</div><h3>CSRF Protection</h3><p>Automatic HMAC-SHA256 CSRF tokens for all state-changing requests.</p></article>
-                        <article><div class="principle-icon">⚡</div><h3>Rate Limiting</h3><p>Built-in rate limiting for login attempts to prevent brute force attacks.</p></article>
-                    </div>
-
-                    <h3>Configuration</h3>
-                    <div class="code-card">
-                        <div class="code-header"><span>.env</span><span>ENV</span></div>
-                        <pre><code># Authentication tables and columns
-AUTH_USER_TABLE=users
-AUTH_USER_ID=id
-AUTH_USER_IDENTIFIER=email
-AUTH_USER_PASSWORD=password_hash
-AUTH_USER_NAME=name
-AUTH_USER_ROLE=role
-AUTH_USER_STATUS=status
-
-# Session configuration
-AUTH_SESSION_TABLE=sessions
-AUTH_SESSION_TOKEN=token
-AUTH_SESSION_USER_ID=user_id
-AUTH_SESSION_EXPIRES_AT=expires_at
-AUTH_SESSION_LIFETIME=86400
-AUTH_COOKIE=vlo_session
-
-# Form field names
-AUTH_IDENTIFIER_FIELD=email
-AUTH_PASSWORD_FIELD=password
-
-# Public API routes (no auth required)
-AUTH_API_PUBLIC_ROUTES=/api/products,/api/health</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="page-guards">
-                    <div class="section-number">08</div>
-                    <h2>Page Guards</h2>
-                    <p class="section-lead">Protect individual pages with authentication and role-based access control using layout attributes.</p>
-                    
-                    <h3>Guard Attributes</h3>
-                    <div class="naming-table">
-                        <div class="naming-row header"><span>Attribute</span><span>Values</span><span>Behavior</span></div>
-                        <div class="naming-row"><span>auth</span><span>true / false</span><span>Requires authentication. Redirects to /login?next=/current-page if not logged in.</span></div>
-                        <div class="naming-row"><span>guest</span><span>true / false</span><span>Only accessible to guests. Redirects authenticated users to /admin/dashboard.</span></div>
-                        <div class="naming-row"><span>roles</span><span>Comma-separated</span><span>Requires specific roles. Returns 403 Forbidden if user lacks required role.</span></div>
-                    </div>
-
-                    <h3>Usage Examples</h3>
-                    <div class="code-card">
-                        <div class="code-header"><span>pages/admin/dashboard.vlo</span><span>VLO</span></div>
-                        <pre><code>&lt;BaseLayout title="Admin Dashboard" auth="true" roles="Admin"&gt;
-    &lt;h1&gt;Admin Dashboard&lt;/h1&gt;
-    &lt;p&gt;Only authenticated Admin users can view this page.&lt;/p&gt;
-&lt;/BaseLayout&gt;</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="api-security">
-                    <div class="section-number">09</div>
-                    <h2>API Security</h2>
-                    <p class="section-lead">VLO provides comprehensive API security with session-based authentication, role-based access control, and CSRF protection.</p>
-                    
-                    <h3>API Authentication</h3>
-                    <p class="component-note">All <code>/api/*</code> routes (except auth and file endpoints) require a valid session. Unauthenticated requests receive <code>401 Unauthorized</code>.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>.env — Public API routes</span><span>ENV</span></div>
-                        <pre><code># Comma-separated list of API prefixes that don't require auth
-AUTH_API_PUBLIC_ROUTES=/api/products,/api/health,/api/public</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="pages">
-                    <div class="section-number">10</div>
-                    <h2>Pages</h2>
-                    <p class="section-lead">Pages compose components. They should not duplicate component implementations.</p>
-                    <div class="architecture-flow">
-                        <div><span>01</span><strong>Layout</strong><small>Auto-resolved</small></div>
-                        <i>→</i>
-                        <div><span>02</span><strong>Page</strong><small>Home.vlo</small></div>
-                        <i>→</i>
-                        <div><span>03</span><strong>Components</strong><small>Button / Card</small></div>
-                    </div>
-                    <div class="info-box">
-                        <strong>Keep pages readable.</strong>
-                        <p>If a page contains a large block of repeated UI, move that UI into a reusable component.</p>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="layouts">
-                    <div class="section-number">11</div>
-                    <h2>Layouts</h2>
-                    <p class="section-lead">VLO automatically resolves layouts based on page paths, creating a hierarchical system that reduces boilerplate.</p>
-                    <h3>Resolution order</h3>
-                    <div class="code-card">
-                        <div class="code-header"><span>Example: /admin/dashboard</span><span>Hierarchy</span></div>
-                        <pre><code>1. layouts/admin/dashboardLayout.vlo  (page-specific)
-   ↓
-2. layouts/adminLayout.vlo            (parent directory)
-   ↓
-3. layouts/BaseLayout.vlo             (global fallback)</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="styling">
-                    <div class="section-number">12</div>
-                    <h2>Styling</h2>
-                    <p class="section-lead">VLO uses a dark, modern visual language with cyan accents. Styles should reinforce that identity.</p>
-                    <h3>Design tokens</h3>
-                    <div class="tokens-grid">
-                        <div class="token"><span class="token-dot primary"></span><div><strong>Primary</strong><small>#00f5ff</small></div></div>
-                        <div class="token"><span class="token-dot success"></span><div><strong>Success</strong><small>#00ff88</small></div></div>
-                        <div class="token"><span class="token-dot background"></span><div><strong>Background</strong><small>#080808</small></div></div>
-                        <div class="token"><span class="token-dot card"></span><div><strong>Card</strong><small>#111111</small></div></div>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="navbar">
-                    <div class="section-number">13</div>
-                    <h2>Navbar</h2>
-                    <p class="section-lead">VLO includes a responsive Navbar component with built-in variants, sizing, shadows, sticky positioning, CSS-only mobile navigation, and server-side active link resolution.</p>
-                </section>
-
-                <section class="doc-section" id="branding">
-                    <div class="section-number">14</div>
-                    <h2>VLO Branding</h2>
-                    <p class="section-lead">Every VLO page should feel like part of the same product. Branding consistency is not optional.</p>
-                    <div class="brand-showcase">
-                        <div class="brand-logo">VLO</div>
-                        <p>Visual Language & Objects</p>
-                    </div>
-                    <div class="brand-grid">
-                        <div><strong>Primary color</strong><span>#00F5FF</span></div>
-                        <div><strong>Accent</strong><span>#00FF88</span></div>
-                        <div><strong>Background</strong><span>#080808</span></div>
-                        <div><strong>Surface</strong><span>#111111</span></div>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="performance">
-                    <div class="section-number">15</div>
-                    <h2>Performance</h2>
-                    <p class="section-lead">VLO includes built-in optimizations for both browser and server performance.</p>
-                    <div class="number-list">
-                        <div><b>01</b><p><strong>API action caching</strong> — <code>api.vlo</code> definitions are cached in memory and reload on file change.</p></div>
-                        <div><b>02</b><p><strong>Non-blocking I/O</strong> — File uploads and orphaned file cleanups use background threads via <code>spawn_blocking</code>.</p></div>
-                        <div><b>03</b><p><strong>Shared runtime</strong> — Data-source queries reuse a dedicated Tokio runtime.</p></div>
-                        <div><b>04</b><p><strong>CSS-only animations</strong> — Toast auto-dismiss and Gallery zoom use pure CSS, zero JavaScript.</p></div>
-                        <div><b>05</b><p><strong>Event Delegation</strong> — Form and Modal directives compile to <code>data-*</code> attributes, injecting a single shared JS block instead of inline handlers per row.</p></div>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="accessibility">
-                    <div class="section-number">16</div>
-                    <h2>Accessibility</h2>
-                    <p class="section-lead">Components should be usable by as many people as possible.</p>
-                    <div class="access-grid">
-                        <div><span>01</span><h3>Keyboard</h3><p>Interactive elements should be reachable and usable with a keyboard.</p></div>
-                        <div><span>02</span><h3>Contrast</h3><p>Text and interactive elements should have sufficient contrast.</p></div>
-                        <div><span>03</span><h3>Labels</h3><p>Form controls should have clear labels or meaningful placeholders.</p></div>
-                        <div><span>04</span><h3>Semantics</h3><p>Use appropriate HTML elements instead of relying entirely on generic containers.</p></div>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="security">
-                    <div class="section-number">17</div>
-                    <h2>Security</h2>
-                    <p class="section-lead">VLO projects should treat security as part of normal development rather than an afterthought.</p>
-                    <div class="security-list">
-                        <div><span>!</span><div><strong>Never expose secrets.</strong><p>API keys, passwords and private credentials must not be committed into project files.</p></div></div>
-                        <div><span>!</span><div><strong>Validate user input.</strong><p>Never assume data coming from users is safe or correctly formatted.</p></div></div>
-                        <div><span>!</span><div><strong>Keep dependencies controlled.</strong><p>Only add dependencies when they solve a real project requirement.</p></div></div>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="modules">
-                    <div class="section-number">18</div>
-                    <h2>Modules & Charting</h2>
-                    <p class="section-lead">VLO supports a modular extension system. Modules are self-contained packages of components, styles, scripts, and declarative data handlers that can be dropped into the <code>modules/</code> directory.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Charting examples</span><span>VLO</span></div>
-                        <pre><code>&lt;!-- Bar Chart: Grouped and aggregated automatically --&gt;
-&lt;BarChart 
-    source="/api/dash/get_category_stats"
-    title="Revenue by Category"
-    label_column="category"
-    value_column="total_revenue"
-    limit="8"
-    color="#00f5ff"
-/&gt;</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="api-database">
-                    <div class="section-number">19</div>
-                    <h2>API & Database</h2>
-                    <p class="section-lead">VLO provides a centralized API definition system backed by SQL. Write standard SQL queries in a single file and they become REST endpoints automatically.</p>
-                    
-                    <h3>Native JSON Parsing</h3>
-                    <p class="component-note">VLO's database layer is smart. If a column contains a JSON string (e.g., <code>["a.jpg","b.jpg"]</code>), VLO automatically parses it into a native JSON array before handing it to the template engine.</p>
-                    <div class="info-grid">
-                        <div><strong>Auto-Detection</strong><p>Columns starting with <code>[</code> or <code>{</code> are parsed automatically. No <code>|json_decode</code> needed in your templates.</p></div>
-                        <div><strong>Safe Fallback</strong><p>If the JSON is malformed, it falls back to returning it as a standard string.</p></div>
-                    </div>
-
-                    <h3>API Definitions</h3>
-                    <div class="code-card">
-                        <div class="code-header"><span>pages/api/api.vlo</span><span>JSON</span></div>
-                        <pre><code>&lt;script server&gt;
-{
-  "get_products": "SELECT * FROM products ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}}",
-  "post_products": "INSERT INTO products (title, price) VALUES ({{title}}, {{price}})",
-  "put_products": "UPDATE products SET title = {{title}} WHERE id = {{id}}",
-  "delete_products": "DELETE FROM products WHERE id = {{id}}"
-}
-&lt;/script&gt;</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="flash">
-                    <div class="section-number">20</div>
-                    <h2>Flash Messages</h2>
-                    <p class="section-lead">Flash messages provide one-time feedback after form submissions and API actions. They use cookie-based storage — no database table required, no URL pollution, and they auto-dismiss.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Basic usage</span><span>VLO</span></div>
-                        <pre><code>{if flash_messages}
-    &lt;Toast /&gt;
-{/if}</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="pagination">
-                    <div class="section-number">21</div>
-                    <h2>Pagination</h2>
-                    <p class="section-lead">VLO provides automatic pagination for any <code>get_*</code> API action that includes <code>LIMIT</code> and <code>OFFSET</code>. No manual COUNT queries, no math, no boilerplate.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>pages/api/api.vlo</span><span>JSON</span></div>
-                        <pre><code>{
-  "get_users": "SELECT id, name, email, role FROM users ORDER BY id DESC LIMIT {{limit}} OFFSET {{offset}}"
-}</code></pre>
-                    </div>
-                    <div class="code-card">
-                        <div class="code-header"><span>Usage</span><span>VLO</span></div>
-                        <pre><code>&lt;!-- Place after your data table --&gt;
-&lt;Pagination /&gt;</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="uploads">
-                    <div class="section-number">22</div>
-                    <h2>File Uploads & Media</h2>
-                    <p class="section-lead">VLO handles file uploads natively, automatically aggregating multiple files into JSON arrays and cleaning up disk space.</p>
-                    
-                    <h3>Multi-File Aggregation</h3>
-                    <p class="component-note">When a user uploads multiple files with the same input name (e.g., <code>name="images"</code>), VLO automatically aggregates them into a JSON array before saving to the database.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Database Column</span><span>JSON</span></div>
-                        <pre><code>["vlo_1234.jpg", "vlo_5678.png"]</code></pre>
-                    </div>
-
-                    <h3>Orphaned File Cleanup</h3>
-                    <p class="component-note">When you update a product and uncheck an existing image, VLO removes it from the JSON array and <strong>deletes the physical file</strong> from the <code>storage/uploads/</code> folder. This happens in a non-blocking background thread.</p>
-                    
-                    <h3>The ImageGallery Component</h3>
-                    <p class="component-note">A pure CSS, zero-JS image gallery featuring zoom, thumbnails, and download support.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Usage</span><span>VLO</span></div>
-                        <pre><code>&lt;!-- images is a native JSON array --&gt;
-&lt;ImageGallery images="{{prod.images}}" alt="Product Image" download="true" /&gt;</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="email">
-                    <div class="section-number">23</div>
-                    <h2>Email & Mailer</h2>
-                    <p class="section-lead">VLO includes a universal, zero-boilerplate mailer supporting both SMTP and API drivers for all major transactional email providers.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>email_templates/welcome.html</span><span>HTML</span></div>
-                        <pre><code>&lt;!-- subject: Welcome to {{app_name}}, {{name | proper}}! --&gt;
-&lt;h1&gt;Hello {{name | proper}}&lt;/h1&gt;
-&lt;p&gt;Click &lt;a href="{{activation_link}}"&gt;here&lt;/a&gt; to activate.&lt;/p&gt;</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="workflow">
-                    <div class="section-number">24</div>
-                    <h2>Development Workflow</h2>
-                    <p class="section-lead">Keep changes small, understandable and easy to review.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>Development</span><span>Terminal</span></div>
-                        <pre><code># Start dev server (default port 3000)
-vlo dev
-
-# Start dev server on custom port
-vlo dev --port 2006
-
-# Build for production
-vlo build</code></pre>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="checklist">
-                    <div class="section-number">25</div>
-                    <h2>Pre-Release Checklist</h2>
-                    <p class="section-lead">Before considering a feature complete, verify the following.</p>
-                    <div class="checklist">
-                        <label><span>✓</span> Component is reusable where appropriate</label>
-                        <label><span>✓</span> Props have clear names and defaults</label>
-                        <label><span>✓</span> No unnecessary duplicated markup</label>
-                        <label><span>✓</span> Styling follows VLO design language</label>
-                        <label><span>✓</span> Mobile layout has been considered</label>
-                        <label><span>✓</span> Interactive elements are accessible</label>
-                        <label><span>✓</span> Flash messages tested for success and error states</label>
-                        <label><span>✓</span> Pagination tested with edge cases (page 1, last page)</label>
-                        <label><span>✓</span> Page guards set for protected routes</label>
-                        <label><span>✓</span> Directives use data-attributes (no inline JS)</label>
-                        <label><span>✓</span> VLO_FEATURES configured with only needed features</label>
-                    </div>
-                </section>
-
-                <section class="doc-section" id="features">
-                    <div class="section-number">26</div>
-                    <h2>Configurable Features</h2>
-                    <p class="section-lead">VLO is a modular framework. Enable only what your project needs via a single environment variable, reducing memory usage, startup time, and attack surface.</p>
-                    <div class="code-card">
-                        <div class="code-header"><span>.env</span><span>ENV</span></div>
-                        <pre><code># Enable only the features your project needs
-VLO_FEATURES=auth,database,api,flash,pagination,directives</code></pre>
-                    </div>
-                    <div class="naming-table">
-                        <div class="naming-row header"><span>Feature</span><span>What it enables</span><span>Dependencies</span></div>
-                        <div class="naming-row"><span>auth</span><span>Session middleware, CSRF protection, login/register routes, page guards</span><span>database</span></div>
-                        <div class="naming-row"><span>database</span><span>Database connection pool, schema execution, data-source resolution</span><span>—</span></div>
-                        <div class="naming-row"><span>api</span><span>Generic CRUD routes (<code>/api/:resource</code>), auto-paginated queries</span><span>database</span></div>
-                        <div class="naming-row"><span>files</span><span>File upload/download endpoints, multipart handling</span><span>database</span></div>
-                        <div class="naming-row"><span>flash</span><span>Cookie-based flash messages, Toast component integration</span><span>—</span></div>
-                        <div class="naming-row"><span>pagination</span><span>Auto-COUNT, pagination context variables, Pagination component</span><span>api</span></div>
-                        <div class="naming-row"><span>directives</span><span><code>v-post</code>, <code>v-put</code>, <code>v-delete</code>, modal handlers, event delegation</span><span>—</span></div>
-                    </div>
-                </section>
-
-                <section class="final-card">
-                    <div class="final-mark">VLO</div>
-                    <h2>Build once. Reuse everywhere.</h2>
-                    <p>VLO is more than a collection of components. It is a shared language for building consistent, maintainable interfaces.</p>
-                    <div class="final-links">
-                        <a href="/components">Explore Components →</a>
-                        <a href="/">Back to VLO →</a>
-                    </div>
-                </section>
-            </main>
         </div>
-    </div>
-    <button id="backTop" class="back-top">↑</button>
-</BaseLayout>
+        <p class="component-note">A component may contain markup, a scoped <code>&lt;style&gt;</code> block and an optional <code>&lt;script&gt;</code> block. Styles are collected and injected into the page head once, no matter how many instances the page renders.</p>
+        <div class="do-grid">
+            <div class="do-card good">
+                <div class="do-title"><span>✓</span> Do</div>
+                <ul><li>Keep components focused.</li><li>Use meaningful names.</li><li>Keep styles scoped.</li><li>Document unusual behavior.</li></ul>
+            </div>
+            <div class="do-card avoid">
+                <div class="do-title"><span>×</span> Avoid</div>
+                <ul><li>Huge monolithic components.</li><li>Duplicated markup.</li><li>Unused props.</li><li>Unexplained magic values.</li></ul>
+            </div>
+        </div>
+    </section>
 
-<style>
-/* =========================================
-   ROOT & HERO
-========================================= */
-html { scroll-behavior: smooth; }
-.guidelines-page { min-height: 100vh; background: radial-gradient(circle at 50% -10%, rgba(0,245,255,.08), transparent 34%); }
-.guidelines-hero { max-width: 1120px; margin: auto; padding: 85px 24px 65px; }
-.hero-badge { display: inline-flex; align-items: center; gap: 9px; padding: 7px 13px; border: 1px solid rgba(0,245,255,.25); border-radius: 999px; background: rgba(0,245,255,.05); color: #00f5ff; font-size: .72rem; font-weight: 700; letter-spacing: .08em; }
-.pulse { width: 7px; height: 7px; border-radius: 50%; background: #00f5ff; box-shadow: 0 0 12px #00f5ff; }
-.guidelines-hero h1 { margin: 24px 0 18px; font-size: clamp(3.2rem, 8vw, 5.7rem); line-height: .95; letter-spacing: -.065em; color: #fff; }
-.guidelines-hero h1 span { color: #00f5ff; text-shadow: 0 0 30px rgba(0,245,255,.25); }
-.guidelines-hero > p { max-width: 720px; margin: 0; color: #8d8d8d; font-size: 1.12rem; line-height: 1.75; }
-.hero-meta { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 30px; color: #666; font-size: .8rem; }
+    <section class="doc-section" id="components">
+        <div class="section-number">05</div>
+        <h2>Components</h2>
+        <p class="section-lead">Components are the foundation of VLO. A component represents a reusable piece of interface or behavior.</p>
+        <h3>Component catalog</h3>
+        <p class="component-note">These components ship with the project. Every one accepts props, supports scoped styles and can be extended.</p>
+        <div class="principles-grid">
+            <article><div class="component-glyph">A</div><h3>Alert</h3><p>Inline status messages for success, error, warning and info states.</p></article>
+            <article><div class="component-glyph">B</div><h3>Badge</h3><p>Compact label pills for statuses, tags and metadata.</p></article>
+            <article><div class="component-glyph">Bt</div><h3>Button</h3><p>Primary, secondary, ghost and danger actions with href support.</p></article>
+            <article><div class="component-glyph">C</div><h3>Card</h3><p>Titled content container with description and default slot.</p></article>
+            <article><div class="component-glyph">Fi</div><h3>FileInput</h3><p>Styled file picker for multipart uploads with a custom button label.</p></article>
+            <article><div class="component-glyph">G</div><h3>ImageGallery</h3><p>Pure CSS zoomable gallery with thumbnails and native download support.</p></article>
+            <article><div class="component-glyph">I</div><h3>Input</h3><p>Form field with label, placeholder and validation attributes.</p></article>
+            <article><div class="component-glyph">L</div><h3>Link</h3><p>Consistently styled anchor with variants and active state.</p></article>
+            <article><div class="component-glyph">M</div><h3>Modal</h3><p>Dialog overlay for edit forms and delete confirmations.</p></article>
+            <article><div class="component-glyph">N</div><h3>Navbar</h3><p>Site navigation with variants, sizes, shadows, sticky and mobile modes.</p></article>
+            <article><div class="component-glyph">P</div><h3>Pagination</h3><p>Prev/Next navigation with page counter and clean URLs.</p></article>
+            <article><div class="component-glyph">S</div><h3>Sidebar</h3><p>Vertical navigation panel for dashboards and docs sections.</p></article>
+            <article><div class="component-glyph">Sc</div><h3>SlotCard</h3><p>Card with named slots for header, body and footer content.</p></article>
+            <article><div class="component-glyph">T</div><h3>Toast</h3><p>Auto-dismissing notification for API action feedback.</p></article>
+        </div>
+        <h3>Module components</h3>
+        <p class="component-note">Modules add components without touching the core. These come from the bundled example modules and are documented in <a href="/docs/backend#modules">chapter 03</a>.</p>
+        <div class="principles-grid">
+            <article><div class="component-glyph">Ca</div><h3>Callout</h3><p>Dismissible note, tip, warning and danger boxes from the <code>callout</code> module.</p></article>
+            <article><div class="component-glyph">K</div><h3>Kbd</h3><p>Keyboard badge for shortcuts from the <code>kbd</code> module.</p></article>
+        </div>
+        <h3>Component naming</h3>
+        <div class="naming-table">
+            <div class="naming-row header"><span>Type</span><span>Recommended</span><span>Avoid</span></div>
+            <div class="naming-row"><span>Button</span><span>Button.vlo</span><span>button.vlo</span></div>
+            <div class="naming-row"><span>Navigation</span><span>Navbar.vlo</span><span>navthing.vlo</span></div>
+            <div class="naming-row"><span>Form</span><span>Input.vlo</span><span>inputThing.vlo</span></div>
+        </div>
+        <h3>Component responsibilities</h3>
+        <div class="number-list">
+            <div><b>01</b><p>A component owns its own presentation.</p></div>
+            <div><b>02</b><p>Props control configurable behavior.</p></div>
+            <div><b>03</b><p>Children and named slots provide flexible content.</p></div>
+            <div><b>04</b><p>Avoid coupling components to specific pages.</p></div>
+        </div>
+    </section>
 
-/* =========================================
-   LAYOUT & SIDEBAR
-========================================= */
-.docs-layout { max-width: 1220px; margin: auto; padding: 0 24px 100px; display: grid; grid-template-columns: 225px minmax(0,1fr); gap: 65px; }
-.docs-sidebar { position: sticky; top: 90px; height: max-content; }
-.sidebar-title { margin-bottom: 15px; color: #fff; font-size: .85rem; font-weight: 700; }
-.docs-nav { display: flex; flex-direction: column; gap: 2px; }
-.docs-nav a { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border-radius: 7px; color: #777; text-decoration: none; font-size: .78rem; transition: color .2s ease, background .2s ease; }
-.docs-nav a span { width: 20px; color: #444; font-family: monospace; font-size: .65rem; }
-.docs-nav a:hover { color: #fff; background: rgba(255,255,255,.035); }
-.docs-nav a.active { color: #00f5ff; background: rgba(0,245,255,.07); }
-.docs-nav a.active span { color: #00f5ff; }
-.sidebar-card { margin-top: 35px; padding: 17px; border: 1px solid var(--border,#292929); border-radius: 12px; background: rgba(255,255,255,.02); }
-.sidebar-icon { margin-bottom: 9px; color: #00f5ff; font-size: 1.3rem; }
-.sidebar-card strong { color: #ddd; font-size: .8rem; }
-.sidebar-card p { margin: 7px 0 0; color: #686868; font-size: .72rem; line-height: 1.55; }
+    <section class="doc-section" id="props">
+        <div class="section-number">06</div>
+        <h2>Props</h2>
+        <p class="section-lead">Props are the primary way to customize reusable VLO components.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Props example</span><span>VLO</span></div>
+            <pre><code>&lt;Button text="Save Changes" href="/save" variant="primary" /&gt;
 
-.variant-color{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-radius:8px;color:black;font-weight:700}
-.variant-color.error{color:#fff}
-.variant-color.success{background:#00ff88}
-.variant-color.error{background:#ff4444}
-.variant-color.info{background:#00f5ff}
-.variant-color.warning{background:#ffaa00}
-.variant-color span{font-family:monospace;font-size:.8rem;color:black}
-/* =========================================
-   CONTENT & SECTIONS
-========================================= */
-.docs-content { min-width: 0; }
-.intro-card { display: flex; gap: 18px; padding: 20px; margin-bottom: 80px; border: 1px solid rgba(0,245,255,.18); border-radius: 13px; background: rgba(0,245,255,.035); }
-.intro-icon { flex-shrink: 0; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 10px; background: #00f5ff; color: #000; font-weight: 900; }
-.intro-card strong { color: #fff; font-size: .9rem; }
-.intro-card p { margin: 6px 0 0; color: #777; font-size: .8rem; line-height: 1.55; }
-.doc-section { margin-bottom: 110px; scroll-margin-top: 90px; }
-.section-number { margin-bottom: 8px; color: #00f5ff; font-family: monospace; font-size: .7rem; letter-spacing: .08em; }
-.doc-section h2 { margin: 0 0 13px; color: #fff; font-size: 2.15rem; letter-spacing: -.035em; }
-.section-lead { max-width: 720px; margin: 0 0 30px; color: #858585; font-size: .95rem; line-height: 1.75; }
-.doc-section h3 { margin: 35px 0 14px; color: #ccc; font-size: .95rem; }
+&lt;Callout variant="warning" title="Unsaved changes" dismissible&gt;
+    Your edits are stored automatically every 350 ms.
+&lt;/Callout&gt;</code></pre>
+        </div>
+        <h3>Prop rules</h3>
+        <div class="rules-list">
+            <div><span>01</span><p>Use clear, descriptive prop names.</p></div>
+            <div><span>02</span><p>Provide sensible defaults when possible.</p></div>
+            <div><span>03</span><p>Avoid props that only make sense for one page.</p></div>
+            <div><span>04</span><p>Keep variant names predictable.</p></div>
+        </div>
+        <div class="rule-card">
+            <strong>Good example</strong>
+            <p><code>variant="primary"</code>, <code>variant="secondary"</code>, <code>variant="ghost"</code></p>
+        </div>
+    </section>
 
-/* =========================================
-   GRIDS & CARDS
-========================================= */
-.principles-grid, .do-grid, .info-grid, .brand-rules, .access-grid, .tokens-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
-.principles-grid article, .do-card, .info-grid > div, .brand-rules > div, .access-grid > div, .token { padding: 21px; border: 1px solid var(--border,#292929); border-radius: 11px; background: rgba(255,255,255,.018); }
-.principle-icon { margin-bottom: 13px; color: #00f5ff; font-size: 1.2rem; }
-.principles-grid h3, .info-grid strong, .access-grid h3, .token strong { margin: 0 0 7px; color: #eee; font-size: .9rem; }
-.principles-grid p, .info-grid p, .access-grid p, .token small { margin: 0; color: #707070; font-size: .76rem; line-height: 1.6; }
-.rule-card { margin-top: 20px; padding: 19px; border-left: 2px solid #00f5ff; background: rgba(0,245,255,.035); }
-.rule-card strong { color: #00f5ff; font-size: .8rem; }
-.rule-card p { margin: 6px 0 0; color: #888; font-size: .8rem; line-height: 1.6; }
+    <section class="doc-section" id="features">
+        <div class="section-number">07</div>
+        <h2>Feature Index</h2>
+        <p class="section-lead">Every framework feature, and where to read about it.</p>
+        <div class="feature-table">
+            <div class="feature-row header"><span>Feature</span><span>Chapter</span><span>What it covers</span></div>
+            <div class="feature-row"><span>Interpolation</span><a href="/docs/templating#interpolation">02</a><span>Variables, dot notation and attribute-safe output</span></div>
+            <div class="feature-row"><span>Conditionals</span><a href="/docs/templating#conditionals">02</a><span><code>if</code>, <code>else</code>, comparison operators and truthy checks</span></div>
+            <div class="feature-row"><span>Loops</span><a href="/docs/templating#loops">02</a><span>Array iteration, JSON columns and empty states</span></div>
+            <div class="feature-row"><span>Modifiers</span><a href="/docs/templating#modifiers">02</a><span>Text, number, array, AJAX and live-update pipes</span></div>
+            <div class="feature-row"><span>Directives</span><a href="/docs/templating#directives">02</a><span><code>v-post</code>, <code>v-put</code>, <code>v-delete</code>, <code>v-auto</code>, modals</span></div>
+            <div class="feature-row"><span>Data sources</span><a href="/docs/templating#data-sources">02</a><span>Server-side API binding and AJAX navigation</span></div>
+            <div class="feature-row"><span>Slots</span><a href="/docs/templating#slots">02</a><span>Default and named slots in custom components</span></div>
+            <div class="feature-row"><span>Authentication</span><a href="/docs/backend#authentication">03</a><span>Registration, verification, reset, sessions, CSRF</span></div>
+            <div class="feature-row"><span>Page guards</span><a href="/docs/backend#page-guards">03</a><span><code>auth</code>, <code>guest</code> and <code>roles</code> attributes</span></div>
+            <div class="feature-row"><span>API security</span><a href="/docs/backend#api-security">03</a><span>Session enforcement and public route allowlist</span></div>
+            <div class="feature-row"><span>API definitions</span><a href="/docs/backend#api-database">03</a><span>SQL-backed REST endpoints in <code>api.vlo</code></span></div>
+            <div class="feature-row"><span>Pagination</span><a href="/docs/backend#pagination">03</a><span>Automatic counting and the Pagination component</span></div>
+            <div class="feature-row"><span>Multi-database</span><a href="/docs/backend#databases">03</a><span>SQLite, PostgreSQL and MySQL with schema dumps</span></div>
+            <div class="feature-row"><span>Modules</span><a href="/docs/backend#modules">03</a><span>Manifests, discovery, handler pipeline, asset injection</span></div>
+            <div class="feature-row"><span>Flash messages</span><a href="/docs/media#flash">04</a><span>One-time cookie-based feedback with Toast</span></div>
+            <div class="feature-row"><span>File uploads</span><a href="/docs/media#uploads">04</a><span>Multi-file JSON aggregation and orphan cleanup</span></div>
+            <div class="feature-row"><span>Image gallery</span><a href="/docs/media#gallery">04</a><span>Zero-JS zoom, thumbnails and downloads</span></div>
+            <div class="feature-row"><span>Email</span><a href="/docs/media#email">04</a><span>Templates, subjects, modifiers and mail drivers</span></div>
+            <div class="feature-row"><span>Pages &amp; layouts</span><a href="/docs/workflow#pages">05</a><span>Routing, hierarchy and automatic layout resolution</span></div>
+            <div class="feature-row"><span>Styling &amp; branding</span><a href="/docs/workflow#styling">05</a><span>Design tokens, navbar variants and visual identity</span></div>
+            <div class="feature-row"><span>Performance</span><a href="/docs/workflow#performance">05</a><span>Caching, background I/O and event delegation</span></div>
+            <div class="feature-row"><span>Accessibility</span><a href="/docs/workflow#accessibility">05</a><span>Keyboard, contrast, labels and semantics</span></div>
+            <div class="feature-row"><span>Security</span><a href="/docs/workflow#security">05</a><span>Secrets, input validation and dependency control</span></div>
+            <div class="feature-row"><span>Features &amp; CLI</span><a href="/docs/workflow#workflow">05</a><span><code>VLO_FEATURES</code>, dev, build, serve, schema</span></div>
+        </div>
+    </section>
 
-/* =========================================
-   CODE & TABLES
-========================================= */
-.code-card { overflow: hidden; border: 1px solid var(--border,#292929); border-radius: 11px; background: #090909; margin-bottom: 15px; }
-.code-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid #292929; color: #707070; font-size: .7rem; }
-.code-header span:last-child { color: #00f5ff; }
-.code-card pre { margin: 0; padding: 20px; overflow-x: auto; }
-.code-card code { color: #b9f8ff; font-family: "SFMono-Regular", Consolas, monospace; font-size: .78rem; line-height: 1.7; }
-.naming-table { overflow: hidden; border: 1px solid #292929; border-radius: 10px; margin-bottom: 15px; }
-.naming-row { display: grid; grid-template-columns: 1fr 1.3fr 1.3fr; border-bottom: 1px solid #292929; }
-.naming-row:last-child { border-bottom: 0; }
-.naming-row span { padding: 12px 14px; color: #777; font-family: monospace; font-size: .72rem; }
-.naming-row.header span { color: #555; background: rgba(255,255,255,.025); font-family: inherit; font-size: .65rem; text-transform: uppercase; }
-.naming-row span:nth-child(2) { color: #00ff88; }
-.naming-row span:nth-child(3) { color: #ff6680; }
-
-/* =========================================
-   LISTS & FLOWS
-========================================= */
-.number-list, .rules-list, .security-list, .workflow, .checklist { display: flex; flex-direction: column; gap: 8px; }
-.number-list div, .rules-list div, .checklist label { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid #292929; border-radius: 8px; background: rgba(255,255,255,.015); }
-.number-list b, .rules-list span { color: #00f5ff; font-family: monospace; font-size: .7rem; }
-.number-list p, .rules-list p, .checklist label { margin: 0; color: #888; font-size: .78rem; }
-.architecture-flow { display: flex; align-items: center; gap: 12px; overflow-x: auto; padding: 10px 0; }
-.architecture-flow > div { min-width: 145px; padding: 17px; border: 1px solid #292929; border-radius: 10px; background: rgba(255,255,255,.018); }
-.architecture-flow span { display: block; margin-bottom: 8px; color: #00f5ff; font-family: monospace; font-size: .65rem; }
-.architecture-flow strong { display: block; color: #eee; font-size: .8rem; }
-.architecture-flow small { display: block; margin-top: 4px; color: #666; font-size: .65rem; }
-.architecture-flow i { color: #444; font-style: normal; }
-
-/* =========================================
-   BRAND & STYLING
-========================================= */
-.brand-showcase { padding: 50px 20px; text-align: center; border: 1px solid rgba(0,245,255,.15); border-radius: 13px; background: radial-gradient(circle, rgba(0,245,255,.06), transparent 65%); }
-.brand-logo { color: #00f5ff; font-size: 4rem; font-weight: 900; letter-spacing: -.08em; text-shadow: 0 0 35px rgba(0,245,255,.25); }
-.brand-showcase p { margin: 7px 0 0; color: #666; font-size: .75rem; }
-.brand-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-top: 15px; }
-.brand-grid div { padding: 15px; border: 1px solid #292929; border-radius: 9px; }
-.brand-grid strong, .brand-grid span { display: block; }
-.brand-grid strong { color: #777; font-size: .7rem; }
-.brand-grid span { margin-top: 7px; color: #00f5ff; font-family: monospace; font-size: .72rem; }
-.token { display: flex; align-items: center; gap: 12px; }
-.token-dot { width: 28px; height: 28px; border-radius: 7px; }
-.token-dot.primary { background: #00f5ff; }
-.token-dot.success { background: #00ff88; }
-.token-dot.background { background: #080808; border: 1px solid #333; }
-.token-dot.card { background: #111; border: 1px solid #333; }
-.styled-list { margin: 0; padding: 0; list-style: none; }
-.styled-list li { position: relative; padding: 11px 0 11px 22px; border-bottom: 1px solid #222; color: #777; font-size: .78rem; }
-.styled-list li::before { content: "✦"; position: absolute; left: 0; color: #00f5ff; }
-
-/* =========================================
-   SECURITY & WORKFLOW
-========================================= */
-.security-list > div { border: 1px solid rgba(255,92,122,.15); background: rgba(255,92,122,.025); }
-.security-list > div > span { width: 25px; height: 25px; display: grid; place-items: center; flex-shrink: 0; border-radius: 7px; background: rgba(255,92,122,.08); color: #ff6680; font-weight: 700; }
-.security-list strong { color: #ddd; font-size: .78rem; }
-.security-list p { margin: 5px 0 0; color: #707070; font-size: .72rem; line-height: 1.55; }
-.workflow-step { display: flex; gap: 16px; padding: 5px 0; }
-.workflow-step > span { width: 34px; height: 34px; display: grid; place-items: center; flex-shrink: 0; border: 1px solid rgba(0,245,255,.2); border-radius: 8px; color: #00f5ff; font-family: monospace; font-size: .65rem; }
-.workflow-step strong { color: #ddd; font-size: .8rem; }
-.workflow-step p { margin: 4px 0 0; color: #707070; font-size: .72rem; line-height: 1.5; }
-.workflow-line { width: 1px; height: 18px; margin-left: 17px; background: #292929; }
-.checklist label span { color: #00ff88; font-weight: 700; }
-
-/* =========================================
-   FINAL & BACK TOP
-========================================= */
-.final-card { padding: 70px 30px; text-align: center; border: 1px solid rgba(0,245,255,.16); border-radius: 15px; background: radial-gradient(circle at center, rgba(0,245,255,.06), transparent 65%); }
-.final-mark { margin-bottom: 20px; color: #00f5ff; font-size: 2rem; font-weight: 900; letter-spacing: -.07em; }
-.final-card h2 { margin: 0 0 12px; color: #fff; font-size: 1.7rem; letter-spacing: -.03em; }
-.final-card > p { max-width: 570px; margin: 0 auto; color: #707070; font-size: .8rem; line-height: 1.7; }
-.final-links { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 25px; }
-.final-links a { padding: 9px 14px; border: 1px solid #333; border-radius: 7px; color: #aaa; text-decoration: none; font-size: .72rem; transition: .2s; }
-.final-links a:hover { border-color: #00f5ff; color: #00f5ff; }
-.back-top { position: fixed; right: 24px; bottom: 24px; width: 42px; height: 42px; border: 1px solid #333; border-radius: 9px; background: #111; color: #00f5ff; cursor: pointer; opacity: 0; pointer-events: none; transition: .25s; }
-.back-top.visible { opacity: 1; pointer-events: auto; }
-
-/* =========================================
-   NAVBAR DOCS SPECIFIC
-========================================= */
-.component-note { margin: -5px 0 20px; color: #777; font-size: .78rem; line-height: 1.6; }
-
-/* =========================================
-   RESPONSIVE
-========================================= */
-@media (max-width: 900px) {
-    .docs-layout { grid-template-columns: 1fr; gap: 30px; }
-    .docs-sidebar { position: static; }
-    .docs-nav { display: grid; grid-template-columns: repeat(3,1fr); }
-    .sidebar-card { display: none; }
-    .brand-grid { grid-template-columns: repeat(2,1fr); }
-}
-@media (max-width: 650px) {
-    .guidelines-hero { padding: 55px 18px 45px; }
-    .guidelines-hero h1 { font-size: 3.2rem; }
-    .docs-layout { padding: 0 15px 70px; }
-    .docs-nav { grid-template-columns: repeat(2,1fr); }
-    .principles-grid, .do-grid, .info-grid, .brand-rules, .access-grid, .tokens-grid { grid-template-columns: 1fr; }
-    .brand-grid { grid-template-columns: repeat(2,1fr); }
-    .architecture-flow { align-items: stretch; flex-direction: column; }
-    .architecture-flow i { text-align: center; transform: rotate(90deg); }
-    .naming-row { grid-template-columns: 1fr 1fr 1fr; }
-    .naming-row span { padding: 10px 8px; font-size: .62rem; }
-}
-</style>
-
-<script>
-const docSections = document.querySelectorAll(".doc-section");
-const docLinks = document.querySelectorAll(".docs-nav a");
-const docObserver = new IntersectionObserver(entries => {
-    entries.forEach(entry => {
-        if (!entry.isIntersecting) return;
-        docLinks.forEach(link => link.classList.remove("active"));
-        const active = document.querySelector(`.docs-nav a[href="#${entry.target.id}"]`);
-        active?.classList.add("active");
-    });
-}, { rootMargin: "-20% 0px -65% 0px" });
-docSections.forEach(section => docObserver.observe(section));
-
-const backTop = document.getElementById("backTop");
-window.addEventListener("scroll", () => {
-    if (window.scrollY > 500) backTop.classList.add("visible");
-    else backTop.classList.remove("visible");
-});
-backTop?.addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
-</script>
+    <section class="final-card">
+        <div class="final-mark">VLO</div>
+        <h2>Build once. Reuse everywhere.</h2>
+        <p>VLO is more than a collection of components. It is a shared language for building consistent, maintainable interfaces.</p>
+        <div class="final-links">
+            <a href="/docs/templating">Start with templating →</a>
+            <a href="/components">Explore components →</a>
+        </div>
+    </section>
+</DocsLayout>

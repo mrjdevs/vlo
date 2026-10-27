@@ -1,0 +1,11 @@
+{
+  "name": "kbd",
+  "version": "1.0.0",
+  "author": "vlo",
+  "description": "Keyboard key badges for shortcuts and terminal hints",
+  "dependencies": [],
+  "exports": {
+    "components": ["Kbd"],
+    "styles": ["kbd.css"]
+  }
+}

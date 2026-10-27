@@ -1,0 +1,102 @@
+<DocsLayout title="VLO Guide · Media and Mail" heading="Media & Mail" eyebrow="Chapter 04"
+    lede="One-time feedback, file uploads, image galleries and transactional email. These features share the same principle: the framework does the repetitive work, you describe the outcome.">
+    <section class="intro-card">
+        <div class="intro-icon">04</div>
+        <div>
+            <strong>Uploads, feedback and email without boilerplate.</strong>
+            <p>Flash messages need no table, uploads aggregate themselves into JSON arrays, and email templates live next to the rest of your project.</p>
+        </div>
+    </section>
+
+    <section class="doc-section" id="flash">
+        <div class="section-number">01</div>
+        <h2>Flash Messages</h2>
+        <p class="section-lead">Flash messages provide one-time feedback after form submissions and API actions. They use cookie-based storage: no database table, no URL pollution and automatic dismissal.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Basic usage</span><span>VLO</span></div>
+            <pre><code>&#123;if flash_messages&#125;
+    &lt;Toast /&gt;
+&#123;/if&#125;</code></pre>
+        </div>
+        <div class="number-list">
+            <div><b>01</b><p><strong>Set.</strong> The API response or redirect carries the message and variant.</p></div>
+            <div><b>02</b><p><strong>Render.</strong> The layout prints <code>&lt;Toast /&gt;</code> when flash data exists.</p></div>
+            <div><b>03</b><p><strong>Expire.</strong> The cookie is cleared after the first render, so a refresh never repeats it.</p></div>
+        </div>
+        <Callout variant="tip" title="Layouts, not pages">
+            Put the toast block in the layout once. Pages inherit the behavior without repeating the markup.
+        </Callout>
+    </section>
+
+    <section class="doc-section" id="uploads">
+        <div class="section-number">02</div>
+        <h2>File Uploads</h2>
+        <p class="section-lead">VLO handles uploads natively, aggregates multiple files into a JSON array and cleans up disk space when files are removed.</p>
+        <h3>Multi-file aggregation</h3>
+        <p class="component-note">When several files share the same input name, they are collected into a single JSON array before saving.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Database column</span><span>JSON</span></div>
+            <pre><code>["vlo_1234.jpg", "vlo_5678.png"]</code></pre>
+        </div>
+        <div class="code-card">
+            <div class="code-header"><span>Upload form</span><span>VLO</span></div>
+            <pre><code>&lt;form v-post="/api/products" enctype="multipart/form-data"&gt;
+    &lt;input type="hidden" name="images" value=""&gt;
+    &lt;FileInput name="images" multiple accept="image/*" /&gt;
+    &lt;Button text="Upload" /&gt;
+&lt;/form&gt;</code></pre>
+        </div>
+
+        <h3>Orphaned file cleanup</h3>
+        <p class="component-note">Unchecking an existing image removes it from the array and deletes the physical file from <code>storage/uploads/</code> in a non-blocking background thread.</p>
+        <Callout variant="warning" dismissible title="Keep the baseline field">
+            The empty hidden input guarantees that clearing every checkbox still submits the field, which is what tells VLO to remove the files.
+        </Callout>
+    </section>
+
+    <section class="doc-section" id="gallery">
+        <div class="section-number">03</div>
+        <h2>Image Gallery</h2>
+        <p class="section-lead">A pure CSS gallery with zoom, thumbnails and download links. No JavaScript and no external library.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Usage</span><span>VLO</span></div>
+            <pre><code>&lt;!-- images is a native JSON array --&gt;
+&lt;ImageGallery images="{{prod.images}}" alt="Product image" download="true" /&gt;</code></pre>
+        </div>
+        <div class="info-grid">
+            <div><strong>Responsive sources</strong><p>The gallery uses the <code>image</code> modifier to emit sized, modern-format sources.</p></div>
+            <div><strong>Download</strong><p>Add <code>download="true"</code> to render a native download button on each slide.</p></div>
+        </div>
+        <p class="component-note">When the array is empty the component renders an empty state instead of a broken gallery.</p>
+    </section>
+
+    <section class="doc-section" id="email">
+        <div class="section-number">04</div>
+        <h2>Email &amp; Mailer</h2>
+        <p class="section-lead">Templates live in <code>email_templates/</code> as HTML with a subject comment. The mailer supports SMTP and API drivers for transactional providers.</p>
+        <div class="code-card">
+            <div class="code-header"><span>email_templates/welcome.html</span><span>HTML</span></div>
+            <pre><code>&lt;!-- subject: Welcome to {{app_name}}, {{name | proper}}! --&gt;
+&lt;h1&gt;Hello {{name | proper}}&lt;/h1&gt;
+&lt;p&gt;Click &lt;a href="{{activation_link}}"&gt;here&lt;/a&gt; to activate your account.&lt;/p&gt;</code></pre>
+        </div>
+        <div class="number-list">
+            <div><b>01</b><p><strong>Subject extraction.</strong> The leading <code>subject:</code> comment becomes the email subject.</p></div>
+            <div><b>02</b><p><strong>Same modifiers.</strong> Templates use the same interpolation and modifier pipeline as pages.</p></div>
+            <div><b>03</b><p><strong>Driver choice.</strong> Configuration selects SMTP or an API provider without changing templates.</p></div>
+        </div>
+        <Callout variant="danger" dismissible title="Test with a real inbox">
+            Verification and reset emails are part of the login flow. Confirm both flows end to end before a release, including the link host in the message.
+        </Callout>
+    </section>
+
+    <section class="final-card">
+        <div class="final-mark">04</div>
+        <h2>One chapter left.</h2>
+        <p>Pages, layouts, styling, performance and the release workflow.</p>
+        <div class="final-links">
+            <a href="/docs/workflow">Continue to workflow →</a>
+            <a href="/docs">Back to overview →</a>
+        </div>
+    </section>
+</DocsLayout>

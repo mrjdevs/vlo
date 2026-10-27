@@ -1,0 +1,222 @@
+<DocsLayout title="VLO Guide · Workflow" heading="Workflow" eyebrow="Chapter 05"
+    lede="Pages, layouts, styling, branding and the habits that keep a VLO project healthy. Finish with the release checklist and the CLI commands you will use every day.">
+    <section class="intro-card">
+        <div class="intro-icon">05</div>
+        <div>
+            <strong>Ship small, keep it consistent.</strong>
+            <p>Every section in this chapter is a rule you can check in review. If a change cannot be explained in one sentence, split it.</p>
+        </div>
+    </section>
+
+    <section class="doc-section" id="pages">
+        <div class="section-number">01</div>
+        <h2>Pages</h2>
+        <p class="section-lead">Pages compose components. They should not duplicate component implementations.</p>
+        <div class="architecture-flow">
+            <div><span>01</span><strong>Layout</strong><small>Auto-resolved</small></div>
+            <i>→</i>
+            <div><span>02</span><strong>Page</strong><small>login.vlo</small></div>
+            <i>→</i>
+            <div><span>03</span><strong>Components</strong><small>Button / Card</small></div>
+        </div>
+        <div class="info-grid">
+            <div><strong>File path is the route</strong><p><code>pages/admin/users.vlo</code> serves <code>/admin/users</code>. A directory index is served from <code>index.vlo</code>.</p></div>
+            <div><strong>Subdirectories scale</strong><p>This guide is <code>pages/docs.vlo</code> plus four files in <code>pages/docs/</code>.</p></div>
+        </div>
+        <div class="rule-card">
+            <strong>Keep pages readable</strong>
+            <p>If a page contains a large block of repeated UI, move that UI into a reusable component.</p>
+        </div>
+    </section>
+
+    <section class="doc-section" id="layouts">
+        <div class="section-number">02</div>
+        <h2>Layouts</h2>
+        <p class="section-lead">Layouts wrap pages with shared chrome. VLO resolves them by path, so most pages need no configuration.</p>
+        <h3>Resolution order</h3>
+        <div class="code-card">
+            <div class="code-header"><span>Example: /admin/dashboard</span><span>Hierarchy</span></div>
+            <pre><code>1. layouts/admin/dashboardLayout.vlo  (page-specific)
+   ↓
+2. layouts/adminLayout.vlo            (parent directory)
+   ↓
+3. layouts/BaseLayout.vlo             (global fallback)</code></pre>
+        </div>
+        <p class="component-note">Pages may also use a layout explicitly as a wrapper. This guide does exactly that: every chapter is a <code>&lt;DocsLayout&gt;</code> inside <code>&lt;BaseLayout&gt;</code>, which keeps the sidebar and pager identical across five files.</p>
+        <Callout variant="tip" title="One shell per section">
+            When several pages share a sidebar, hero or pager, move that markup into a layout and pass the page-specific text as props.
+        </Callout>
+    </section>
+
+    <section class="doc-section" id="styling">
+        <div class="section-number">03</div>
+        <h2>Styling</h2>
+        <p class="section-lead">VLO uses a dark, modern visual language with cyan accents. Styles should reinforce that identity.</p>
+        <h3>Design tokens</h3>
+        <div class="tokens-grid">
+            <div class="token"><span class="token-dot primary"></span><div><strong>Primary</strong><small>#00f5ff</small></div></div>
+            <div class="token"><span class="token-dot success"></span><div><strong>Success</strong><small>#00ff88</small></div></div>
+            <div class="token"><span class="token-dot background"></span><div><strong>Background</strong><small>#080808</small></div></div>
+            <div class="token"><span class="token-dot card"></span><div><strong>Card</strong><small>#111111</small></div></div>
+        </div>
+        <div class="info-grid">
+            <div><strong>Scoped by default</strong><p>A component's <code>&lt;style&gt;</code> block is injected once per page and never duplicated.</p></div>
+            <div><strong>Prefix module classes</strong><p>Module styles are global. Prefix selectors with the module name, as <code>callout</code> does with <code>.vlo-callout</code>.</p></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="navbar">
+        <div class="section-number">04</div>
+        <h2>Navbar</h2>
+        <p class="section-lead">The Navbar component covers responsive navigation, variants, sizing, shadows, sticky positioning, CSS-only mobile mode and server-side active links.</p>
+        <div class="code-card">
+            <div class="code-header"><span>components/BaseNav.vlo</span><span>VLO</span></div>
+            <pre><code>&lt;Navbar brand="{{brand}}" variant="{{variant}}" class="sticky collapse"&gt;
+    &lt;a href="/"&gt;Home&lt;/a&gt;
+    &lt;a href="/docs"&gt;Docs&lt;/a&gt;
+    &#123;if logged_in&#125;
+        &lt;a href="/shop"&gt;Shop&lt;/a&gt;
+    &#123;else&#125;
+        &lt;a href="/login"&gt;Login&lt;/a&gt;
+    &#123;/if&#125;
+&lt;/Navbar&gt;</code></pre>
+        </div>
+        <p class="component-note">Links whose <code>href</code> matches the current path receive the <code>active</code> class automatically. The docs sidebar uses the same pattern with its chapter list.</p>
+    </section>
+
+    <section class="doc-section" id="branding">
+        <div class="section-number">05</div>
+        <h2>VLO Branding</h2>
+        <p class="section-lead">Every VLO page should feel like part of the same product. Branding consistency is not optional.</p>
+        <div class="brand-showcase">
+            <div class="brand-logo">VLO</div>
+            <p>Visual Language &amp; Objects</p>
+        </div>
+        <div class="brand-grid">
+            <div><strong>Primary color</strong><span>#00F5FF</span></div>
+            <div><strong>Accent</strong><span>#00FF88</span></div>
+            <div><strong>Background</strong><span>#080808</span></div>
+            <div><strong>Surface</strong><span>#111111</span></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="performance">
+        <div class="section-number">06</div>
+        <h2>Performance</h2>
+        <p class="section-lead">VLO includes built-in optimizations for both browser and server performance.</p>
+        <div class="number-list">
+            <div><b>01</b><p><strong>API action caching</strong> — <code>api.vlo</code> definitions are cached in memory after startup.</p></div>
+            <div><b>02</b><p><strong>Non-blocking I/O</strong> — uploads and orphaned file cleanup run on background threads.</p></div>
+            <div><b>03</b><p><strong>Shared runtime</strong> — data-source queries reuse a dedicated Tokio runtime.</p></div>
+            <div><b>04</b><p><strong>CSS-only animations</strong> — toast dismissal and gallery zoom need no JavaScript.</p></div>
+            <div><b>05</b><p><strong>Event delegation</strong> — directives compile to <code>data-*</code> attributes and one shared script block.</p></div>
+            <div><b>06</b><p><strong>Scoped assets</strong> — module CSS and JS are injected only on pages that use the module.</p></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="accessibility">
+        <div class="section-number">07</div>
+        <h2>Accessibility</h2>
+        <p class="section-lead">Components should be usable by as many people as possible.</p>
+        <div class="access-grid">
+            <div><span>01</span><h3>Keyboard</h3><p>Interactive elements should be reachable and usable with a keyboard.</p></div>
+            <div><span>02</span><h3>Contrast</h3><p>Text and interactive elements should have sufficient contrast.</p></div>
+            <div><span>03</span><h3>Labels</h3><p>Form controls should have clear labels or meaningful placeholders.</p></div>
+            <div><span>04</span><h3>Semantics</h3><p>Use appropriate HTML elements instead of generic containers.</p></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="security">
+        <div class="section-number">08</div>
+        <h2>Security</h2>
+        <p class="section-lead">Treat security as part of normal development rather than an afterthought.</p>
+        <div class="security-list">
+            <div><span>!</span><div><strong>Never expose secrets.</strong><p>API keys, passwords and private credentials must not be committed into project files.</p></div></div>
+            <div><span>!</span><div><strong>Validate user input.</strong><p>Never assume data coming from users is safe or correctly formatted.</p></div></div>
+            <div><span>!</span><div><strong>Keep dependencies controlled.</strong><p>Only add dependencies when they solve a real project requirement.</p></div></div>
+            <div><span>!</span><div><strong>Guard every protected route.</strong><p>Add <code>auth</code> or <code>roles</code> to the page and keep the API allowlist short.</p></div></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="workflow">
+        <div class="section-number">09</div>
+        <h2>Development Workflow</h2>
+        <p class="section-lead">Keep changes small, understandable and easy to review.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Development</span><span>Terminal</span></div>
+            <pre><code># Start the dev server (default port 3000)
+vlo dev
+
+# Start on another port
+vlo dev --port 2006
+
+# Build static pages into .vlo/build
+vlo build
+
+# Serve the project
+vlo serve</code></pre>
+        </div>
+        <p class="component-note">Stop a running server with <Kbd>Ctrl</Kbd> + <Kbd>C</Kbd>. API definitions are cached at startup, so restart after editing <code>api.vlo</code>.</p>
+
+        <h3>Deployment</h3>
+        <div class="number-list">
+            <div><b>01</b><p>Set <code>APP_URL</code>, <code>SESSION_SECRET</code> and <code>DATABASE_URL</code> in the environment.</p></div>
+            <div><b>02</b><p>Choose the database with <code>DB_DRIVER</code> and load the matching schema dump once.</p></div>
+            <div><b>03</b><p>Build, then run <code>vlo serve</code> behind a reverse proxy that forwards the original host.</p></div>
+        </div>
+        <Callout variant="warning" dismissible title="Never read .env aloud">
+            Keep secrets in the environment or an untracked <code>.env</code> file. Do not echo configuration files into logs, tickets or chat.
+        </Callout>
+    </section>
+
+    <section class="doc-section" id="features">
+        <div class="section-number">10</div>
+        <h2>Configurable Features</h2>
+        <p class="section-lead">VLO is modular. Enable only what the project needs to reduce memory use, startup time and attack surface.</p>
+        <div class="code-card">
+            <div class="code-header"><span>.env</span><span>ENV</span></div>
+            <pre><code># Enable only the features your project needs
+VLO_FEATURES=auth,database,api,flash,pagination,directives</code></pre>
+        </div>
+        <div class="naming-table">
+            <div class="naming-row header"><span>Feature</span><span>What it enables</span><span>Depends on</span></div>
+            <div class="naming-row"><span>auth</span><span>Sessions, CSRF, login and register routes, page guards</span><span>database</span></div>
+            <div class="naming-row"><span>database</span><span>Connection pool, schema execution, data sources</span><span>—</span></div>
+            <div class="naming-row"><span>api</span><span>CRUD routes and auto-paginated queries</span><span>database</span></div>
+            <div class="naming-row"><span>files</span><span>Upload and download endpoints, multipart handling</span><span>database</span></div>
+            <div class="naming-row"><span>flash</span><span>Cookie flash messages and Toast integration</span><span>—</span></div>
+            <div class="naming-row"><span>pagination</span><span>Auto-count and pagination context variables</span><span>api</span></div>
+            <div class="naming-row"><span>directives</span><span>Form, action and modal handlers</span><span>—</span></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="checklist">
+        <div class="section-number">11</div>
+        <h2>Pre-Release Checklist</h2>
+        <p class="section-lead">Before considering a feature complete, verify the following.</p>
+        <div class="checklist">
+            <label><span>✓</span> Component is reusable where appropriate</label>
+            <label><span>✓</span> Props have clear names and defaults</label>
+            <label><span>✓</span> No unnecessary duplicated markup</label>
+            <label><span>✓</span> Styling follows the VLO design language</label>
+            <label><span>✓</span> Mobile layout has been checked</label>
+            <label><span>✓</span> Interactive elements are accessible</label>
+            <label><span>✓</span> Flash messages work for success and error states</label>
+            <label><span>✓</span> Pagination checked on the first and last page</label>
+            <label><span>✓</span> Page guards set for protected routes</label>
+            <label><span>✓</span> Directives use data attributes, no inline handlers</label>
+            <label><span>✓</span> Schema dumps regenerated after schema changes</label>
+            <label><span>✓</span> VLO_FEATURES lists only the features in use</label>
+        </div>
+    </section>
+
+    <section class="final-card">
+        <div class="final-mark">VLO</div>
+        <h2>You finished the guide.</h2>
+        <p>Revisit a chapter when you need it, or copy the checklist into your next pull request.</p>
+        <div class="final-links">
+            <a href="/docs">Back to overview →</a>
+            <a href="/components">Explore components →</a>
+        </div>
+    </section>
+</DocsLayout>

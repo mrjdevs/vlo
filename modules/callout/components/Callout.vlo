@@ -1,0 +1,12 @@
+<div class="vlo-callout callout-{{ variant | default:info }}" data-variant="{{variant}}">
+    <div class="callout-mark" aria-hidden="true">✦</div>
+    <div class="callout-body">
+        {if title}
+        <div class="callout-title">{{title}}</div>
+        {/if}
+        <div class="callout-text">{{children}}</div>
+    </div>
+    {if dismissible}
+    <a href="#" class="callout-close" data-callout-dismiss="true" aria-label="Dismiss">×</a>
+    {/if}
+</div>

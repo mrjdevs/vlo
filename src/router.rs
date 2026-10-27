@@ -124,10 +124,30 @@ fn compute_layout_name(page_path: &str) -> String {
             format!("{}Layout", capitalize(base)),
             format!("{}Layout", base.to_ascii_lowercase()),
         ];
+        // Case-insensitive filesystems (Windows/macOS) accept the first probe
+        // even when the file on disk is cased differently, so map the real
+        // stem back from the directory listing before returning.
+        let on_disk: HashMap<String, String> = fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|entry| {
+                        entry.path().extension().and_then(|ext| ext.to_str()) == Some("vlo")
+                    })
+                    .filter_map(|entry| {
+                        let stem = entry.path().file_stem()?.to_str()?.to_string();
+                        Some((stem.to_ascii_lowercase(), stem))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         for variant in &variants {
             let path = dir.join(format!("{}.vlo", variant));
             if path.exists() {
-                return variant.clone();
+                return on_disk
+                    .get(&variant.to_ascii_lowercase())
+                    .cloned()
+                    .unwrap_or_else(|| variant.clone());
             }
         }
     }

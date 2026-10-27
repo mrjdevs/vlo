@@ -1,0 +1,12 @@
+{
+  "name": "callout",
+  "version": "1.0.0",
+  "author": "vlo",
+  "description": "Dismissible inline callout boxes for notes, tips and warnings",
+  "dependencies": [],
+  "exports": {
+    "components": ["Callout"],
+    "styles": ["callout.css"],
+    "scripts": ["callout.js"]
+  }
+}

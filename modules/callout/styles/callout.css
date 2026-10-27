@@ -1,0 +1,61 @@
+.vlo-callout {
+    display: flex;
+    gap: 14px;
+    position: relative;
+    margin: 22px 0;
+    padding: 17px 20px;
+    border: 1px solid #262626;
+    border-left: 2px solid #00f5ff;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .02);
+}
+.vlo-callout .callout-mark {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 7px;
+    background: rgba(0, 245, 255, .1);
+    color: #00f5ff;
+    font-size: .75rem;
+}
+.vlo-callout .callout-body { min-width: 0; }
+.vlo-callout .callout-title {
+    color: #e8e8e8;
+    font-size: .82rem;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+.vlo-callout .callout-text {
+    color: #8a8a8a;
+    font-size: .8rem;
+    line-height: 1.65;
+}
+.vlo-callout .callout-text code {
+    color: #b9f8ff;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: .76rem;
+}
+.vlo-callout .callout-close {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    color: #555;
+    font-size: 1rem;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color .2s ease;
+}
+.vlo-callout .callout-close:hover { color: #fff; }
+.vlo-callout.callout-tip { border-left-color: #00ff88; }
+.vlo-callout.callout-tip .callout-mark { background: rgba(0, 255, 136, .1); color: #00ff88; }
+.vlo-callout.callout-warning { border-left-color: #ffaa00; }
+.vlo-callout.callout-warning .callout-mark { background: rgba(255, 170, 0, .1); color: #ffaa00; }
+.vlo-callout.callout-danger { border-left-color: #ff4466; }
+.vlo-callout.callout-danger .callout-mark { background: rgba(255, 68, 102, .1); color: #ff6680; }

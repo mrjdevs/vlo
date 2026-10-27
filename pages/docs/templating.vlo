@@ -1,0 +1,233 @@
+<DocsLayout title="VLO Guide · Templating" heading="Templating" eyebrow="Chapter 02"
+    lede="VLO renders every page on the server before the HTML reaches the browser. Interpolation, conditionals, loops, modifiers, directives and data binding all run inside the same template engine.">
+    <section class="intro-card">
+        <div class="intro-icon">02</div>
+        <div>
+            <strong>One template language, no client-side build step.</strong>
+            <p>Templates are plain HTML with <code>{{ }}</code> interpolation, <code>{if}</code> blocks and <code>{for}</code> loops. Everything you learn here works in pages, layouts, components and module components.</p>
+        </div>
+    </section>
+
+    <section class="doc-section" id="interpolation">
+        <div class="section-number">01</div>
+        <h2>Interpolation</h2>
+        <p class="section-lead">Use double curly braces to render variables, props and nested object properties. Dot notation accesses nested values.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Variable interpolation</span><span>VLO</span></div>
+            <pre><code>&lt;h1&gt;{{title}}&lt;/h1&gt;
+&lt;p&gt;{{product.description}}&lt;/p&gt;
+&lt;span&gt;${{product.price}}&lt;/span&gt;
+&lt;img src="{{product.image}}" alt="{{product.title}}" /&gt;</code></pre>
+        </div>
+        <div class="info-grid">
+            <div><strong>{{variable}}</strong><p>Renders a top-level context variable or prop value.</p></div>
+            <div><strong>{{object.field}}</strong><p>Accesses nested properties using dot notation.</p></div>
+        </div>
+        <p class="component-note">Values are HTML-escaped by default and attribute-escaped automatically when the placeholder sits inside a quoted attribute. Components that output markup opt in explicitly, so you never have to remember which is which.</p>
+    </section>
+
+    <section class="doc-section" id="conditionals">
+        <div class="section-number">02</div>
+        <h2>Conditionals</h2>
+        <p class="section-lead">Use <code>{if}</code>, <code>{else}</code> and <code>{/if}</code> blocks to conditionally render content. Comparison operators and truthy checks are supported.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Conditional rendering</span><span>VLO</span></div>
+            <pre><code>&lt;!-- Equality check --&gt;
+{if status == "success"}
+    &lt;Toast variant="success" title="Done!" /&gt;
+{/if}
+
+&lt;!-- Truthy check (renders if product.image exists) --&gt;
+{if product.image}
+    &lt;img src="{{product.image}}" /&gt;
+{else}
+    &lt;div class="placeholder"&gt;No image&lt;/div&gt;
+{/if}
+
+&lt;!-- Numeric comparisons --&gt;
+{if product.price &gt; 500}
+    &lt;span class="premium"&gt;Premium&lt;/span&gt;
+{/if}</code></pre>
+        </div>
+        <h3>Supported operators</h3>
+        <div class="naming-table">
+            <div class="naming-row header"><span>Operator</span><span>Example</span><span>Meaning</span></div>
+            <div class="naming-row"><span>==</span><span>{if status == "success"}</span><span>Equal</span></div>
+            <div class="naming-row"><span>!=</span><span>{if status != "error"}</span><span>Not equal</span></div>
+            <div class="naming-row"><span>&gt;</span><span>{if product.price &gt; 500}</span><span>Greater than</span></div>
+            <div class="naming-row"><span>&lt;</span><span>{if product.stock &lt; 5}</span><span>Less than</span></div>
+            <div class="naming-row"><span>truthy</span><span>{if product.image}</span><span>Value exists and is non-empty</span></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="loops">
+        <div class="section-number">03</div>
+        <h2>Loops &amp; JSON Arrays</h2>
+        <p class="section-lead">Use <code>{for item in collection}</code> to iterate over API data. JSON columns are parsed into native arrays by the database layer.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Loop rendering</span><span>VLO</span></div>
+            <pre><code>&lt;tbody data-source="/api/products"&gt;
+    {for product in products}
+        &lt;tr&gt;
+            &lt;td&gt;#{{product.id}}&lt;/td&gt;
+            &lt;td&gt;
+                &lt;!-- product.images is a native JSON array --&gt;
+                {for img in product.images limit:1}
+                    &lt;img src="{{ img }}" /&gt;
+                {/for}
+            &lt;/td&gt;
+        &lt;/tr&gt;
+    {else}
+        &lt;tr&gt;&lt;td colspan="3"&gt;No products found.&lt;/td&gt;&lt;/tr&gt;
+    {/for}
+&lt;/tbody&gt;</code></pre>
+        </div>
+        <Callout variant="tip" title="No json_decode required">
+            Any column whose value starts with <code>[</code> or <code>{</code> is parsed before rendering. Nested loops therefore work directly on stored JSON without extra modifiers.
+        </Callout>
+    </section>
+
+    <section class="doc-section" id="data-sources">
+        <div class="section-number">04</div>
+        <h2>Data Sources</h2>
+        <p class="section-lead">Bind an element to an API endpoint with <code>data-source</code>. VLO fetches the data on the server and injects it into the template context before rendering.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Data binding</span><span>VLO</span></div>
+            <pre><code>&lt;!-- The element receives rows from /api/products --&gt;
+&lt;tbody data-source="/api/products"&gt;
+    {for product in products}
+        &lt;tr&gt;
+            &lt;td&gt;{{product.id}}&lt;/td&gt;
+            &lt;td&gt;{{product.title}}&lt;/td&gt;
+            &lt;td&gt;${{product.price}}&lt;/td&gt;
+        &lt;/tr&gt;
+    {else}
+        &lt;tr&gt;&lt;td colspan="4"&gt;Empty&lt;/td&gt;&lt;/tr&gt;
+    {/for}
+&lt;/tbody&gt;</code></pre>
+        </div>
+        <p class="component-note">The bound API action defines the row list name. A <code>get_products</code> action produces <code>products</code>; a module handler may expose additional <code>data</code>, <code>meta</code> and <code>config</code> values.</p>
+
+        <h3>AJAX &amp; seamless navigation</h3>
+        <p class="component-note">Turn any container into an AJAX wrapper with the <code>|ajax</code> modifier. Links and forms inside it swap HTML without a full page reload, and new <code>&lt;style&gt;</code> tags are synced into the head during the swap.</p>
+        <div class="code-card">
+            <div class="code-header"><span>AJAX wrapper</span><span>VLO</span></div>
+            <pre><code>&lt;div id="products-list"&gt;
+    {{ "" | ajax:"" }} &lt;!-- Empty URL means listen-only --&gt;
+    &lt;a href="?page=2"&gt;Next Page&lt;/a&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+        <div class="info-grid">
+            <div><strong>Infinite scroll</strong><p>Add <code>data-load-more</code> to a pagination link and <code>data-append</code> to the table body. The client fetches and appends the next page automatically.</p></div>
+            <div><strong>State preservation</strong><p>AJAX navigation keeps browser history, updates the URL bar and handles <code>popstate</code> without extra JavaScript.</p></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="modifiers">
+        <div class="section-number">05</div>
+        <h2>Modifiers</h2>
+        <p class="section-lead">Transform and format data in the template with the pipe <code>|</code> syntax. Modifiers apply left to right and can be chained.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Modifier examples</span><span>VLO</span></div>
+            <pre><code>&lt;!-- Text formatting --&gt;
+&lt;p&gt;{{ product.title | upper | truncate:30 }}&lt;/p&gt;
+
+&lt;!-- Number formatting --&gt;
+&lt;p&gt;Price: {{ product.price | number:2 }}&lt;/p&gt;
+&lt;p&gt;Total: {{ total_revenue | currency:"$" }}&lt;/p&gt;
+
+&lt;!-- JSON &amp; arrays --&gt;
+&lt;p&gt;First image: {{ product.images | first }}&lt;/p&gt;
+&lt;p&gt;Total items: {{ product.images | count }}&lt;/p&gt;
+&lt;p&gt;Tags: {{ product.tags | join:", " }}&lt;/p&gt;</code></pre>
+        </div>
+        <div class="naming-table">
+            <div class="naming-row header"><span>Modifier</span><span>Description</span><span>Example</span></div>
+            <div class="naming-row"><span>upper / lower</span><span>Change text case</span><span>{{ text | upper }}</span></div>
+            <div class="naming-row"><span>number:n</span><span>Format with n decimals and thousands separators</span><span>{{ val | number:2 }}</span></div>
+            <div class="naming-row"><span>currency:sym</span><span>Format as currency with a custom symbol</span><span>{{ val | currency:"€" }}</span></div>
+            <div class="naming-row"><span>truncate:n</span><span>Truncate to n characters with an ellipsis</span><span>{{ text | truncate:50 }}</span></div>
+            <div class="naming-row"><span>default:val</span><span>Fallback if empty, null or "null"</span><span>{{ val | default:"N/A" }}</span></div>
+            <div class="naming-row"><span>nl2br</span><span>Convert newlines to &lt;br&gt; tags</span><span>{{ text | nl2br }}</span></div>
+            <div class="naming-row"><span>escape</span><span>HTML-encode special characters</span><span>{{ text | escape }}</span></div>
+            <div class="naming-row"><span>first / last</span><span>Extract the first or last array item</span><span>{{ images | first }}</span></div>
+            <div class="naming-row"><span>json_get:path</span><span>Extract a nested value</span><span>{{ data | json_get:0.url }}</span></div>
+            <div class="naming-row"><span>count</span><span>Length of an array or string</span><span>{{ items | count }}</span></div>
+            <div class="naming-row"><span>join:delim</span><span>Join an array into a string</span><span>{{ tags | join:", " }}</span></div>
+            <div class="naming-row"><span>split:delim</span><span>Split a string into an array</span><span>{{ csv | split:"," }}</span></div>
+            <div class="naming-row"><span>sync:channel</span><span>Live SSE value updates</span><span>{{ stock | sync:"products" }}</span></div>
+            <div class="naming-row"><span>ajax:url</span><span>Client-side fetch and DOM swap</span><span>{{ "" | ajax:"" }}</span></div>
+        </div>
+    </section>
+
+    <section class="doc-section" id="directives">
+        <div class="section-number">06</div>
+        <h2>Directives</h2>
+        <p class="section-lead">Declarative form submission and actions with zero inline JavaScript. Directives compile to <code>data-vlo-*</code> attributes and one delegated listener.</p>
+        <div class="naming-table">
+            <div class="naming-row header"><span>Directive</span><span>Usage</span><span>Compiles to</span></div>
+            <div class="naming-row"><span>v-post</span><span>&lt;form v-post="/api/products"&gt;</span><span>data-vlo-post="/api/products"</span></div>
+            <div class="naming-row"><span>v-put</span><span>&lt;form v-put="/api/products/5"&gt;</span><span>data-vlo-put="/api/products/5"</span></div>
+            <div class="naming-row"><span>v-delete</span><span>&lt;button v-delete="/api/products/5"&gt;</span><span>data-vlo-delete="/api/products/5"</span></div>
+            <div class="naming-row"><span>v-auto</span><span>&lt;form v-put="..." v-auto&gt;</span><span>data-vlo-auto (debounced save)</span></div>
+        </div>
+        <p class="component-note">Add <code>v-auto</code> to a <code>v-put</code> form to save automatically 350&nbsp;ms after any field changes, without reloading. Submissions are serialized: changes made while a save is in flight are sent once it finishes.</p>
+
+        <h3>Modal directives</h3>
+        <p class="component-note">Open and close modals declaratively. The handler supports ID lookup, class fallbacks, backdrop clicks and <Kbd>Esc</Kbd> dismissal.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Modal usage</span><span>VLO</span></div>
+            <pre><code>&lt;button data-modal-open="edit-modal"&gt;Edit&lt;/button&gt;
+
+&lt;div id="edit-modal" class="vlo-modal-overlay"&gt;
+    &lt;div class="vlo-modal-box"&gt;
+        &lt;button data-modal-close="edit-modal"&gt;Cancel&lt;/button&gt;
+    &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+
+        <h3>Pure HTML form handling</h3>
+        <p class="component-note">Multi-file uploads and deletions need no JavaScript. Combine a hidden baseline field with native checkboxes for existing files.</p>
+        <div class="code-card">
+            <div class="code-header"><span>Multi-file edit form</span><span>VLO</span></div>
+            <pre><code>&lt;form v-put="/api/products/{{product.id}}" enctype="multipart/form-data"&gt;
+    &lt;!-- New uploads (baseline empty hidden field) --&gt;
+    &lt;input type="hidden" name="images" value=""&gt;
+    &lt;FileInput name="images" multiple /&gt;
+
+    &lt;!-- Existing files (uncheck to delete from DB and disk) --&gt;
+    {for img in product.images}
+        &lt;label&gt;
+            &lt;input type="checkbox" name="images" value="{{img}}" checked&gt;
+            &lt;img src="{{img}}"&gt;
+        &lt;/label&gt;
+    {/for}
+&lt;/form&gt;</code></pre>
+        </div>
+    </section>
+
+    <section class="doc-section" id="slots">
+        <div class="section-number">07</div>
+        <h2>Slots</h2>
+        <p class="section-lead">Components receive children through a default slot and can expose additional named slots for richer layouts.</p>
+        <div class="code-card">
+            <div class="code-header"><span>components/SlotCard.vlo</span><span>VLO</span></div>
+            <pre><code>&lt;section class="slot-card"&gt;
+    &lt;header&gt;&lt;slot name="header"&gt;Default header&lt;/slot&gt;&lt;/header&gt;
+    &lt;div class="slot-body"&gt;&lt;slot&gt;&lt;/slot&gt;&lt;/div&gt;
+    &lt;footer&gt;&lt;slot name="footer"&gt;&lt;/slot&gt;&lt;/footer&gt;
+&lt;/section&gt;</code></pre>
+        </div>
+        <div class="code-card">
+            <div class="code-header"><span>Usage</span><span>VLO</span></div>
+            <pre><code>&lt;SlotCard&gt;
+    &lt;h2 slot="header"&gt;Quarterly report&lt;/h2&gt;
+    &lt;p&gt;This paragraph lands in the default slot.&lt;/p&gt;
+    &lt;a slot="footer" href="/reports"&gt;Open report&lt;/a&gt;
+&lt;/SlotCard&gt;</code></pre>
+        </div>
+        <Callout variant="warning" dismissible title="Slots are literal markup">
+            Slot content is rendered before insertion. If a slot must contain another component, keep the component tag inside the slot content rather than inside the component definition.
+        </Callout>
+    </section>
+</DocsLayout>
